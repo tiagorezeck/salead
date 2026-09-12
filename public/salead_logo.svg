@@ -1,0 +1,55 @@
+<svg viewBox="0 0 880 240" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <!-- Diagonal cut line from (320, 240) to (560, 0) with angle ~40deg -->
+    <!-- Lower-right side of cut -->
+    <clipPath id="cut-lower">
+      <path d="M 330 260 L 570 0 L 900 0 L 900 260 Z" />
+    </clipPath>
+    <!-- Upper-left side of cut -->
+    <clipPath id="cut-upper">
+      <path d="M -20 -20 L 570 -20 L 330 260 L -20 260 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- CHARCOAL LAYER (Upper / Left letters) -->
+  <g fill="#2B2E33">
+    <!-- S -->
+    <path d="M 135 68 L 105 68 C 105 52, 95 44, 75 44 C 55 44, 44 54, 44 68 C 44 82, 54 90, 80 98 L 96 104 C 128 116, 145 132, 145 162 C 145 198, 116 216, 75 216 C 32 216, 6 195, 5 156 L 35 156 C 36 176, 50 188, 75 188 C 98 188, 113 177, 113 162 C 113 145, 102 137, 78 128 L 62 122 C 28 108, 12 94, 12 68 C 12 34, 38 16, 75 16 C 112 16, 134 35, 135 68 Z" />
+
+    <!-- A (First A) -->
+    <path d="M 228 16 L 278 214 L 244 214 L 233 166 L 195 166 L 184 214 L 152 214 L 202 16 Z M 214 74 L 202 138 L 226 138 Z" />
+
+    <!-- L (Cut upper portion) -->
+    <g clip-path="url(#cut-upper)">
+      <path d="M 315 16 L 347 16 L 347 186 L 415 186 L 415 214 L 315 214 Z" />
+    </g>
+
+    <!-- E (Cut upper portion) -->
+    <g clip-path="url(#cut-upper)">
+      <path d="M 435 16 L 535 16 L 535 44 L 467 44 L 467 101 L 525 101 L 525 129 L 467 129 L 467 186 L 535 186 L 535 214 L 435 214 Z" />
+    </g>
+  </g>
+
+  <!-- ORANGE LAYER (Lower / Right letters) -->
+  <g fill="#EB4A00">
+    <!-- L (Cut lower portion) -->
+    <g clip-path="url(#cut-lower)">
+      <path d="M 315 16 L 347 16 L 347 186 L 415 186 L 415 214 L 315 214 Z" />
+    </g>
+
+    <!-- E (Cut lower portion) -->
+    <g clip-path="url(#cut-lower)">
+      <path d="M 435 16 L 535 16 L 535 44 L 467 44 L 467 101 L 525 101 L 525 129 L 467 129 L 467 186 L 535 186 L 535 214 L 435 214 Z" />
+    </g>
+
+    <!-- A (Second A) -->
+    <path d="M 628 16 L 678 214 L 644 214 L 633 166 L 595 166 L 584 214 L 552 214 L 602 16 Z M 614 74 L 602 138 L 626 138 Z" />
+
+    <!-- D -->
+    <path d="M 715 16 L 795 16 C 840 16, 875 48, 875 115 C 875 182, 840 214, 795 214 L 715 214 Z M 747 44 L 747 186 L 792 186 C 822 186, 842 164, 842 115 C 842 66, 822 44, 792 44 Z" />
+
+    <!-- Dynamic Slash Needle / Blade -->
+    <path d="M 332 238 L 565 0 L 560 6 L 340 240 Z" fill="#EB4A00" />
+    <path d="M 345 240 L 332 238 L 440 120 Z" fill="#2B2E33" opacity="0.3" />
+  </g>
+</svg>

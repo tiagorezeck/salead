@@ -1,0 +1,571 @@
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
+import { createFileRoute, useSearch, useNavigate } from "@tanstack/react-router";
+import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/LandingPageRenderer";
+import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
+import { getInitialAILandingPages } from "@/hooks/use-data";
+import { supabase } from "@/integrations/supabase/client";
+import { recordLocalLead, fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
+import { parseUtm } from "@/modules/landing-pages";
+import { getStoredTracking } from "@/components/marketing/lp-tracking-capture";
+import {
+  ExternalLink,
+  Copy,
+  Check,
+  Smartphone,
+  Tablet,
+  Monitor,
+  ArrowLeft,
+  Loader2,
+  Sparkles,
+  AlertCircle,
+  Eye,
+  RefreshCw,
+} from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+function isUUID(str?: string): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
+function normalizeSlug(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export const Route = createFileRoute("/preview")({
+  component: PreviewPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    pageId: (search.pageId as string) || "",
+    token: (search.token as string) || "",
+    id: (search.id as string) || "",
+    slug: (search.slug as string) || "",
+    v: (search.v as string | number) || "",
+    device: (search.device as "desktop" | "tablet" | "mobile") || "desktop",
+    toolbar: (search.toolbar as string) || "true",
+  }),
+});
+
+export function PreviewPage() {
+  const search = useSearch({ from: "/preview" });
+  const navigate = useNavigate();
+
+  const targetId = (search.pageId || search.token || search.id || search.slug || "").trim();
+
+  const [page, setPage] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">(search.device || "desktop");
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedPublic, setCopiedPublic] = useState(false);
+  const [showToolbar, setShowToolbar] = useState(search.toolbar !== "false");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function resolvePage() {
+      if (!targetId) {
+        // Se nenhum ID for passado, tenta pegar a página ativa ou primeira disponível
+        try {
+          const activeRaw = localStorage.getItem("active_preview_page");
+          if (activeRaw) {
+            const activeObj = JSON.parse(activeRaw);
+            if (activeObj && isMounted) {
+              setPage(activeObj);
+              setLoading(false);
+              return;
+            }
+          }
+
+          const localKeys = ["people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
+          for (const key of localKeys) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list) && list.length > 0) {
+                if (isMounted) {
+                  setPage(list[0]);
+                  setLoading(false);
+                }
+                return;
+              }
+            }
+          }
+        } catch {}
+
+        if (PRESET_TEMPLATES.length > 0 && isMounted) {
+          setPage(PRESET_TEMPLATES[0]);
+          setLoading(false);
+          return;
+        }
+
+        if (isMounted) {
+          setErrorMsg("Nenhuma Landing Page selecionada para visualização.");
+          setLoading(false);
+        }
+        return;
+      }
+
+      setLoading(true);
+      setErrorMsg(null);
+
+      // 1. Tenta buscar no endpoint de preview do servidor
+      try {
+        const serverPage = await fetchPageFromServerPreview(targetId);
+        if (serverPage && isMounted) {
+          setPage(serverPage);
+          setLoading(false);
+          return;
+        }
+      } catch {}
+
+      // 2. Tenta buscar no Supabase
+      try {
+        if (isUUID(targetId)) {
+          const { data, error } = await supabase.from("landing_pages").select("*").eq("id", targetId).maybeSingle();
+          if (data && !error && isMounted) {
+            const mapped = {
+              id: data.id,
+              name: data.name,
+              title: data.name,
+              template: data.template,
+              status: data.status,
+              ...(typeof data.config === "object" ? data.config : {}),
+            };
+            setPage(mapped);
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Busca por slug, client_id ou name
+        const { data: byQuery } = await supabase
+          .from("landing_pages")
+          .select("*")
+          .or(`config->>slug.eq.${targetId},config->>client_id.eq.${targetId},name.eq.${targetId}`)
+          .limit(1);
+
+        if (byQuery && byQuery.length > 0 && isMounted) {
+          const row = byQuery[0];
+          const mapped = {
+            id: row.id,
+            name: row.name,
+            title: row.name,
+            template: row.template,
+            status: row.status,
+            ...(typeof row.config === "object" ? row.config : {}),
+          };
+          setPage(mapped);
+          setLoading(false);
+          return;
+        }
+
+        // Busca geral em LPs recentes para match flexível
+        const { data: allLps } = await supabase.from("landing_pages").select("*").limit(50);
+        if (allLps && allLps.length > 0 && isMounted) {
+          const normTarget = normalizeSlug(targetId);
+          const found = allLps.find((p) => {
+            if (p.id === targetId) return true;
+            if (p.config?.slug === targetId) return true;
+            if (p.config?.client_id === targetId) return true;
+            if (p.name && normalizeSlug(p.name) === normTarget) return true;
+            return false;
+          });
+
+          if (found) {
+            const mapped = {
+              id: found.id,
+              name: found.name,
+              title: found.name,
+              template: found.template,
+              status: found.status,
+              ...(typeof found.config === "object" ? found.config : {}),
+            };
+            setPage(mapped);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Supabase preview search notice:", err);
+      }
+
+      // 3. Tenta buscar no localStorage local (múltiplas chaves)
+      try {
+        const localKeys = ["active_preview_page", "people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
+        const normTarget = normalizeSlug(targetId);
+
+        for (const key of localKeys) {
+          const rawLocal = localStorage.getItem(key);
+          if (!rawLocal) continue;
+          
+          let parsed = JSON.parse(rawLocal);
+          if (!parsed) continue;
+
+          // Se for objeto individual (ex: active_preview_page)
+          if (!Array.isArray(parsed)) {
+            parsed = [parsed];
+          }
+
+          if (Array.isArray(parsed)) {
+            const found = parsed.find((p: any) => {
+              if (!p) return false;
+              if (p.id === targetId || p.slug === targetId || p.previewToken === targetId) return true;
+              if (p.name && normalizeSlug(p.name) === normTarget) return true;
+              if (p.title && normalizeSlug(p.title) === normTarget) return true;
+              return false;
+            });
+
+            if (found && isMounted) {
+              setPage(found);
+              setLoading(false);
+              return;
+            }
+          }
+        }
+      } catch {}
+
+      // 4. Fallback em PRESET_TEMPLATES e AILandingPages
+      const normTarget = normalizeSlug(targetId);
+      const presetFound = PRESET_TEMPLATES.find((p) => {
+        if (p.id === targetId || p.slug === targetId) return true;
+        if (normalizeSlug(p.id) === normTarget || normalizeSlug(p.title) === normTarget) return true;
+        return false;
+      });
+
+      if (presetFound && isMounted) {
+        setPage(presetFound);
+        setLoading(false);
+        return;
+      }
+
+      const aiTemplates = getInitialAILandingPages();
+      const aiFound = aiTemplates.find((p) => {
+        if (p.id === targetId || p.slug === targetId) return true;
+        if (normalizeSlug(p.id) === normTarget || normalizeSlug(p.title || p.name) === normTarget) return true;
+        return false;
+      });
+
+      if (aiFound && isMounted) {
+        setPage(aiFound);
+        setLoading(false);
+        return;
+      }
+
+      if (isMounted) {
+        // Se ainda não encontrou, exibe o primeiro preset para nunca dar tela em branco
+        if (PRESET_TEMPLATES.length > 0) {
+          setPage(PRESET_TEMPLATES[0]);
+          setErrorMsg(`Página com ID "${targetId}" não foi encontrada. Exibindo modelo de referência.`);
+        } else {
+          setErrorMsg(`A Landing Page com ID ou Token "${targetId}" não foi encontrada.`);
+        }
+        setLoading(false);
+      }
+    }
+
+    resolvePage();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [targetId]);
+
+  const publicUrl = useMemo(() => {
+    if (!page) return "";
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const slugToUse = page.slug || page.id;
+    return `${origin}/lp/${slugToUse}`;
+  }, [page]);
+
+  const previewShareUrl = useMemo(() => {
+    if (typeof window !== "undefined") {
+      return window.location.href;
+    }
+    return "";
+  }, []);
+
+  const handleCopyPreview = () => {
+    if (!previewShareUrl) return;
+    navigator.clipboard.writeText(previewShareUrl);
+    setCopiedLink(true);
+    toast.success("Link de Teste copiado para a área de transferência!");
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleCopyPublic = () => {
+    if (!publicUrl) return;
+    navigator.clipboard.writeText(publicUrl);
+    setCopiedPublic(true);
+    toast.success("Link Público Oficial copiado com sucesso!");
+    setTimeout(() => setCopiedPublic(false), 2000);
+  };
+
+  const handleLeadSubmit = async (leadData: any) => {
+    const { source, utm } = parseUtm(typeof window !== "undefined" ? window.location.search : "");
+    const tracking = getStoredTracking();
+
+    const payload = {
+      pageId: page?.id || targetId,
+      pageTitle: page?.title || page?.name || "Página Preview",
+      name: leadData.name || "Lead Teste Preview",
+      whatsapp: leadData.whatsapp || "",
+      email: leadData.email || "",
+      quizAnswers: leadData.quizAnswers || {},
+      utms: { ...utm, utm_source: utm.utm_source || "preview-test" },
+      source: source || "preview-test",
+      webhookUrl: page?.settings?.webhookUrl || page?.webhookUrl,
+      metadata: {
+        isTestPreview: true,
+        device,
+        submittedAt: new Date().toISOString(),
+        tracking,
+      },
+    };
+
+    // 1. Salva localmente
+    try {
+      recordLocalLead({
+        id: `lead_${Date.now()}`,
+        pageId: payload.pageId,
+        pageTitle: payload.pageTitle,
+        name: payload.name,
+        whatsapp: payload.whatsapp,
+        email: payload.email,
+        quizAnswers: payload.quizAnswers,
+        utms: payload.utms as any,
+        submittedAt: new Date().toISOString(),
+        webhookStatus: "pending" as any,
+      });
+    } catch {}
+
+    // 2. Fila local para ingestão do CRM
+    try {
+      const queueRaw = localStorage.getItem("comet_inbound_leads_queue") || "[]";
+      const queue = JSON.parse(queueRaw);
+      queue.unshift({
+        ...payload,
+        id: `queue_${Date.now()}`,
+        capturedAt: new Date().toISOString(),
+      });
+      localStorage.setItem("comet_inbound_leads_queue", JSON.stringify(queue.slice(0, 50)));
+    } catch {}
+
+    // 3. Envia para o endpoint de lead capture (funciona na Vercel e no Express)
+    try {
+      await fetch("/api/submit-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      try {
+        await fetch("/api/webhook/submit-lead", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch {}
+    }
+
+    toast.success("✅ Lead de Teste registrado com sucesso no CRM!", {
+      description: "Os dados foram computados e integrados às métricas.",
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full bg-zinc-950 flex flex-col items-center justify-center text-white gap-4 p-6">
+        <div className="relative">
+          <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-purple-600 to-indigo-500 animate-pulse flex items-center justify-center shadow-2xl shadow-purple-500/20">
+            <Loader2 className="w-8 h-8 animate-spin text-white" />
+          </div>
+        </div>
+        <div className="text-center space-y-1">
+          <h2 className="text-base font-bold text-zinc-100">Carregando visualização oficial...</h2>
+          <p className="text-xs text-zinc-400">Sincronizando modelos, mídias e formulário de conversão.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!page) {
+    return (
+      <div className="min-h-screen w-full bg-zinc-950 flex flex-col items-center justify-center text-white p-6">
+        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center space-y-5 shadow-2xl">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/20">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-zinc-100">Landing Page Não Encontrada</h2>
+            <p className="text-xs text-zinc-400 mt-2">
+              {errorMsg || "Não conseguimos localizar essa página no banco de dados ou no cache local."}
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/app/landing-pages" })}
+              className="w-full py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <ArrowLeft className="w-4 h-4" /> Voltar ao Painel de LPs
+            </button>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="w-full py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <RefreshCw className="w-4 h-4" /> Tentar Novamente
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-zinc-950 text-white flex flex-col relative overflow-x-hidden">
+      {/* Top Preview Control Bar */}
+      {showToolbar && (
+        <header className="sticky top-0 z-50 w-full bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/app/landing-pages" })}
+              className="h-8 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Voltar ao Editor"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Editor</span>
+            </button>
+
+            <div className="h-4 w-px bg-zinc-700" />
+
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                Preview Oficial
+              </span>
+              <span className="text-xs font-bold text-zinc-200 truncate max-w-[180px] sm:max-w-xs">
+                {page.title || page.name || "Landing Page"}
+              </span>
+            </div>
+          </div>
+
+          {/* Device viewport switchers */}
+          <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setDevice("desktop")}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                device === "desktop" ? "bg-purple-600 text-white shadow-sm" : "text-zinc-400 hover:text-white"
+              )}
+              title="Visualização Desktop"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Desktop</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDevice("tablet")}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                device === "tablet" ? "bg-purple-600 text-white shadow-sm" : "text-zinc-400 hover:text-white"
+              )}
+              title="Visualização Tablet (768px)"
+            >
+              <Tablet className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Tablet</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDevice("mobile")}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                device === "mobile" ? "bg-purple-600 text-white shadow-sm" : "text-zinc-400 hover:text-white"
+              )}
+              title="Visualização Celular (390px)"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Mobile</span>
+            </button>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopyPreview}
+              className="h-8 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Copiar Link de Teste"
+            >
+              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-zinc-400" />}
+              <span className="hidden lg:inline">Copiar Teste</span>
+            </button>
+
+            {publicUrl && (
+              <a
+                href={publicUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="h-8 px-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-purple-500/20"
+                title="Abrir Link Público Oficial em nova aba"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Link Público</span>
+              </a>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowToolbar(false)}
+              className="h-8 px-2 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-[10px] transition-all cursor-pointer"
+              title="Ocultar barra de ferramentas"
+            >
+              Ocultar Barra
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* Floating button to restore toolbar if hidden */}
+      {!showToolbar && (
+        <button
+          type="button"
+          onClick={() => setShowToolbar(true)}
+          className="fixed top-3 right-3 z-50 px-3 py-1.5 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white text-xs font-bold flex items-center gap-1.5 shadow-2xl backdrop-blur-md cursor-pointer transition-all"
+        >
+          <Eye className="w-3.5 h-3.5 text-purple-400" />
+          <span>Mostrar Barra de Teste</span>
+        </button>
+      )}
+
+      {/* Main Container with Device Viewport Emulation */}
+      <main className="flex-1 w-full flex justify-center items-start bg-zinc-950 py-0 overflow-x-hidden">
+        <div
+          className={cn(
+            "transition-all duration-300 w-full min-h-screen",
+            device === "mobile" && "max-w-[420px] my-6 rounded-[2.5rem] border-8 border-zinc-800 shadow-2xl overflow-hidden bg-white",
+            device === "tablet" && "max-w-[820px] my-6 rounded-3xl border-8 border-zinc-800 shadow-2xl overflow-hidden bg-white",
+            device === "desktop" && "max-w-full"
+          )}
+        >
+          <LandingPageRenderer
+            page={page}
+            deviceView={device}
+            isEditorPreview={false}
+            onLeadSubmit={handleLeadSubmit}
+          />
+        </div>
+      </main>
+    </div>
+  );
+}

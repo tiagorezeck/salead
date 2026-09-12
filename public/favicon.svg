@@ -1,0 +1,32 @@
+<svg viewBox="210 20 580 960" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <!-- Outer bag silhouette clip -->
+    <clipPath id="bag-contour">
+      <path d="M 285 260 C 375 225, 625 225, 715 260 C 765 285, 775 375, 770 540 C 765 720, 750 830, 685 940 C 600 970, 400 970, 315 940 C 250 830, 235 720, 230 540 C 225 375, 235 285, 285 260 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- Handles on top (Vibrant Orange) -->
+  <path d="M 390 235 C 390 35, 610 35, 610 235" fill="none" stroke="#EB4A00" stroke-width="32" stroke-linecap="round" />
+  <path d="M 425 235 C 425 90, 575 90, 575 235" fill="none" stroke="#EB4A00" stroke-width="22" stroke-linecap="round" />
+
+  <!-- Bag Body clipped to silhouette -->
+  <g clip-path="url(#bag-contour)">
+    <!-- Base Orange Covering Top and Right Side -->
+    <rect x="200" y="200" width="600" height="800" fill="#EB4A00" />
+
+    <!-- Left Charcoal Wing -->
+    <path d="M 200 200 L 460 515 L 200 835 Z" fill="#33373D" />
+
+    <!-- Bottom Charcoal Wedge -->
+    <path d="M 315 960 L 545 620 L 780 870 L 700 980 Z" fill="#33373D" />
+
+    <!-- Crisp White Dynamic Arrow Cutout -->
+    <!-- Shaft from bottom-left entering at 45 deg, connecting into the arrowhead with horizontal top (y=390) and vertical right (x=635) -->
+    <path d="M 235 835 L 315 940 L 545 620 L 635 620 L 635 390 L 390 390 L 460 515 Z" fill="#FFFFFF" />
+
+    <!-- Left and Right Rivets below handles -->
+    <circle cx="390" cy="305" r="17" fill="#FFFFFF" />
+    <circle cx="610" cy="305" r="17" fill="#FFFFFF" />
+  </g>
+</svg>

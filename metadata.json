@@ -1,0 +1,6 @@
+{
+  "name": "SALEAD",
+  "description": "SALEAD. Plataforma de Gestão Comercial de alta performance com gestão de leads, automações, analytics e landing pages.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

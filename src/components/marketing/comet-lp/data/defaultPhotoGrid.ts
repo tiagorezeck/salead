@@ -1,0 +1,112 @@
+import { PhotoGridItem, PhotoGridSection } from "../types/landingPage";
+
+export const DEFAULT_PHOTO_GRID_ITEMS: PhotoGridItem[] = [
+  {
+    id: "photo-1",
+    imageUrl: "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=800&q=80",
+    title: "Interface de Plataforma Web & Dashboard",
+    caption: "Desenvolvimento de interface modular para software SaaS, otimizando usabilidade e tempo de execução das tarefas em 45%.",
+    tag: "UI/UX & Web",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-2",
+    imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80",
+    title: "Identidade Visual & Direção Criativa",
+    caption: "Rebranding completo com paleta cromática exclusiva, tipografia sob medida e manual de aplicação para expansão global.",
+    tag: "Branding",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-3",
+    imageUrl: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80",
+    title: "Ensaio Fotográfico & Direção de Arte",
+    caption: "Produção visual de alto impacto para catálogo de lançamento, com iluminação cinematográfica e pós-produção refinada.",
+    tag: "Fotografia",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-4",
+    imageUrl: "https://images.unsplash.com/photo-1522542550221-31fd19575a2d?auto=format&fit=crop&w=800&q=80",
+    title: "Aplicativo Mobile de Alta Conversão",
+    caption: "Design de aplicativo nativo com fluxos intuitivos de onboarding, microinterações fluidas e taxa de retenção de 92%.",
+    tag: "Mobile App",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-5",
+    imageUrl: "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=800&q=80",
+    title: "Arquitetura Frontend & Landing Page CRO",
+    caption: "Página de captura ultrarrápida desenvolvida com padrões de alta conversão, gerando +350 leads qualificados na primeira semana.",
+    tag: "Engenharia",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-6",
+    imageUrl: "https://images.unsplash.com/photo-1581291518857-4e27b48ff24e?auto=format&fit=crop&w=800&q=80",
+    title: "Consultoria de Design System & Escala",
+    caption: "Padronização de componentes reutilizáveis, documentação completa em Figma e alinhamento de design tokens com o time de engenharia.",
+    tag: "Design System",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-7",
+    imageUrl: "https://images.unsplash.com/photo-1542744094-3a31f272c490?auto=format&fit=crop&w=800&q=80",
+    title: "Campanha Estratégica Multicanal",
+    caption: "Estratégia visual e criativos de performance para anúncios em redes sociais com ROI comprovado de 4.8x.",
+    tag: "Marketing",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-8",
+    imageUrl: "https://images.unsplash.com/photo-1558655146-d09347e92766?auto=format&fit=crop&w=800&q=80",
+    title: "Ilustrações 3D & Animações Digitais",
+    caption: "Criação de modelos tridimensionais e animações interativas que aumentaram o tempo médio de permanência no site em +60%.",
+    tag: "3D & Motion",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-9",
+    imageUrl: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=800&q=80",
+    title: "Análise de Métricas & Testes A/B",
+    caption: "Mapeamento de mapas de calor, testes multivariáveis e reformulação da jornada de compra com crescimento de +28% na conversão.",
+    tag: "Analytics",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-10",
+    imageUrl: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&w=800&q=80",
+    title: "Workshop de Inovação & Design Sprint",
+    caption: "Facilitação de dinâmicas imersivas com lideranças para concepção, prototipagem e validação de novos produtos em 5 dias.",
+    tag: "Workshops",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-11",
+    imageUrl: "https://images.unsplash.com/photo-1531403009284-440f080d1e12?auto=format&fit=crop&w=800&q=80",
+    title: "Pesquisa com Usuários & Testes de Usabilidade",
+    caption: "Entrevistas em profundidade com clientes-chave e testes gravados para identificar gargalos críticos de navegação.",
+    tag: "UX Research",
+    linkText: "Ver Projeto",
+  },
+  {
+    id: "photo-12",
+    imageUrl: "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=800&q=80",
+    title: "Design de Embalagens & Merchandising",
+    caption: "Criação de embalagens premium com acabamentos especiais em verniz e hot stamping para linhas de produtos exclusivos.",
+    tag: "Packaging",
+    linkText: "Ver Projeto",
+  },
+];
+
+export const createDefaultPhotoGridSection = (count: 3 | 6 | 9 | 12 = 6): PhotoGridSection => {
+  return {
+    badge: "GALERIA VISUAL & PROJETOS",
+    title: "PORTFOLIO EXPLORATION",
+    subtitle: "Conheça alguns dos trabalhos, projetos e soluções desenvolvidas com excelência estética e foco em resultados.",
+    photoCount: count,
+    columns: count === 3 ? 3 : count === 12 ? 4 : 3,
+    layoutStyle: "cards",
+    items: DEFAULT_PHOTO_GRID_ITEMS.slice(0, count),
+  };
+};
