@@ -5,7 +5,7 @@ import {
   Trash2, Play, Pause, FlaskConical, Layout, CheckCircle2, ClipboardList, 
   Link as LinkIcon, Layers, Share2, Bot, Globe, ArrowRight, Zap, Target,
   Monitor, ChevronLeft, ChevronRight, ShieldCheck, MoreHorizontal,
-  AlertTriangle, X
+  AlertTriangle, X, Copy
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -98,6 +98,74 @@ function LPPage() {
       toast.error("Erro ao excluir Landing Page.");
     } finally {
       setLpToDelete(null);
+    }
+  };
+
+  // Duplicar Landing Page para testes A/B ou novas campanhas (100% autônoma, sem vinculo com a anterior)
+  const handleDuplicateLP = async (lpToDuplicate: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!lpToDuplicate) return;
+
+    try {
+      const baseName = lpToDuplicate.name || lpToDuplicate.title || "Landing Page";
+      const duplicateName = `${baseName} (Cópia)`;
+      
+      const newUuid = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0;
+            const v = c === "x" ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+          });
+          
+      const newSlug = `lp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+      // Deep clone do objeto original
+      const duplicatedObject: any = JSON.parse(JSON.stringify(lpToDuplicate));
+
+      // REMOVER completamente IDs herdados da página pai para garantir autonomia absoluta
+      delete duplicatedObject.originalId;
+      delete duplicatedObject._id;
+
+      // Atribuir novos identificadores autônomos
+      duplicatedObject.id = newUuid;
+      duplicatedObject.originalId = newUuid;
+      duplicatedObject.name = duplicateName;
+      duplicatedObject.title = duplicateName;
+      duplicatedObject.slug = newSlug;
+      duplicatedObject.status = "Ativa";
+      duplicatedObject.created_at = new Date().toISOString();
+      duplicatedObject.updated_at = new Date().toISOString();
+
+      if (duplicatedObject.config && typeof duplicatedObject.config === 'object') {
+        duplicatedObject.config = {
+          ...duplicatedObject.config,
+          client_id: newUuid,
+          slug: newSlug
+        };
+      }
+
+      // ZERAR ABSOLUTAMENTE TODAS AS MÉTRICAS DE VISITAS, LEADS E CONVERSÃO
+      duplicatedObject.visits = 0;
+      duplicatedObject.leads = 0;
+      duplicatedObject.conv = 0;
+      duplicatedObject.viewsCount = 0;
+      duplicatedObject.leadsCount = 0;
+      duplicatedObject.conversions = 0;
+      duplicatedObject.views_count = 0;
+      duplicatedObject.leads_count = 0;
+
+      const savedLP = await addLandingPage(duplicatedObject);
+      if (savedLP) {
+        setSelectedLPId(savedLP.id);
+      }
+
+      toast.success("Landing Page duplicada com sucesso!", {
+        description: `Nova página "${duplicateName}" criada de forma 100% autônoma. Excluir uma não afeta a outra.`
+      });
+    } catch (err) {
+      console.error("Erro ao duplicar Landing Page:", err);
+      toast.error("Erro ao duplicar Landing Page.");
     }
   };
 
@@ -573,7 +641,7 @@ function LPPage() {
                 </div>
 
                 {/* Hover Action Overlay */}
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center justify-center gap-2.5">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center justify-center gap-2.5 flex-wrap p-4">
                   {!heroDisplay.isExternal ? (
                     <>
                       <button
@@ -586,6 +654,15 @@ function LPPage() {
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         <span>Editar no COMET</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDuplicateLP(selectedLP, e)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg transition-transform hover:scale-105 cursor-pointer"
+                        title="Duplicar LP com contadores zerados para comparar resultados de campanhas"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Duplicar LP</span>
                       </button>
                       <Link
                         to="/lp/$id"
@@ -613,6 +690,15 @@ function LPPage() {
                           <span>Abrir Link Externo</span>
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => handleDuplicateLP(selectedLP, e)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg transition-transform hover:scale-105 cursor-pointer"
+                        title="Duplicar LP Externa com contadores zerados"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Duplicar LP</span>
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -868,6 +954,14 @@ function LPPage() {
                         </button>
                         <button 
                           type="button"
+                          onClick={(e) => handleDuplicateLP(lp, e)} 
+                          className="h-7 w-7 rounded-lg border border-border hover:bg-emerald-500/10 hover:text-emerald-600 hover:border-emerald-200 text-muted-foreground grid place-items-center transition-colors cursor-pointer"
+                          title="Duplicar Landing Page (Criar cópia com métricas zeradas)"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                        <button 
+                          type="button"
                           onClick={(e) => { 
                             e.stopPropagation();
                             setLpToDelete(lp);
@@ -1018,6 +1112,15 @@ function LPPage() {
                       title="Gerar Links de Rastreamento (UTMs para Instagram, WhatsApp, Ads, etc.)"
                     >
                       <Share2 className="h-3.5 w-3.5" />
+                    </button>
+
+                    <button 
+                      type="button"
+                      onClick={(e) => handleDuplicateLP(lp, e)}
+                      className="h-8 px-2.5 rounded-xl border border-border bg-background hover:bg-emerald-500/10 hover:text-emerald-600 hover:border-emerald-200 text-muted-foreground grid place-items-center transition-colors cursor-pointer shadow-sm"
+                      title="Duplicar Landing Page (Criar cópia com métricas de visitas e leads zeradas)"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
                     </button>
 
                     {!isExternal && (

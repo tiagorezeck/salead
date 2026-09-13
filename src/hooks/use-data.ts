@@ -1460,10 +1460,7 @@ export function useData() {
       const isDeleted = (lp: any) => {
         if (!lp) return true;
         if (lp.id && deletedIds.has(lp.id)) return true;
-        if (lp.originalId && deletedIds.has(lp.originalId)) return true;
         if (lp.slug && deletedIds.has(lp.slug)) return true;
-        if (lp.name && deletedIds.has(lp.name)) return true;
-        if (lp.title && deletedIds.has(lp.title)) return true;
         return false;
       };
 
@@ -1492,14 +1489,10 @@ export function useData() {
 
       const localLps = getLocalLandingPages().filter(lp => !isDeleted(lp));
 
-      // Mescla todas as fontes com deduplicação inteligente por slug, título/nome ou id
+      // Mescla todas as fontes mantendo autonomia total por id ou slug exclusivo
       const getLpKey = (lp: LandingPage) => {
-        const normSlug = lp.slug ? lp.slug.trim().toLowerCase() : "";
-        const normTitle = (lp.name || lp.title || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-        if (normSlug) return `slug:${normSlug}`;
-        if (normTitle) return `title:${normTitle}`;
-        if (lp.id && isUUID(lp.id)) return `id:${lp.id}`;
         if (lp.id) return `id:${lp.id}`;
+        if (lp.slug) return `slug:${lp.slug.trim().toLowerCase()}`;
         return `anon:${Math.random().toString(36).substring(2, 6)}`;
       };
 
@@ -2573,11 +2566,14 @@ export function useData() {
 
       // Ensure the generated UUID is set on the item
       item.id = generatedId;
+      item.originalId = generatedId;
+      if (item.config) {
+        item.config.client_id = generatedId;
+      }
 
       // Se o ID ou slug estava na lista de deletados, remove da lista
       if (item.id) removeDeletedLandingPageId(item.id);
       if (item.slug) removeDeletedLandingPageId(item.slug);
-      if ((item as any).originalId) removeDeletedLandingPageId((item as any).originalId);
 
       // 1. Salva imediatamente no localStorage para garantir que NUNCA seja perdida
       try {
@@ -2793,22 +2789,19 @@ export function useData() {
 
     deleteLandingPage: async (id: string) => { 
       const currentCache = queryClient.getQueryData<LandingPage[]>(['landing_pages']) || [];
-      const target = currentCache.find(p => p.id === id || (p as any).originalId === id || p.slug === id);
+      const target = currentCache.find(p => p.id === id || p.slug === id);
 
       const idsToMark = new Set<string>([id]);
       if (target) {
         if (target.id) idsToMark.add(target.id);
-        if ((target as any).originalId) idsToMark.add((target as any).originalId);
         if (target.slug) idsToMark.add(target.slug);
-        if (target.name) idsToMark.add(target.name);
-        if (target.title) idsToMark.add(target.title);
       }
 
       idsToMark.forEach(identifier => {
         if (identifier) addDeletedLandingPageId(identifier);
       });
 
-      const isTarget = (p: any) => idsToMark.has(p.id) || idsToMark.has((p as any).originalId || "") || idsToMark.has(p.slug || "") || idsToMark.has(p.name || "");
+      const isTarget = (p: any) => p && (idsToMark.has(p.id) || (p.slug && idsToMark.has(p.slug)));
 
       if (typeof window !== "undefined") {
         try {
@@ -2842,16 +2835,13 @@ export function useData() {
         }
       } catch {}
 
-      // 4. Remove do Supabase
+      // 4. Remove do Supabase por ID isolado
       try {
         if (isUUID(id)) {
           await supabase.from('landing_pages').delete().eq('id', id);
         }
         if (target && target.id && isUUID(target.id) && target.id !== id) {
           await supabase.from('landing_pages').delete().eq('id', target.id);
-        }
-        if (target?.name) {
-          await supabase.from('landing_pages').delete().eq('name', target.name);
         }
       } catch (err: any) {
         console.warn("Supabase delete notice:", err);
