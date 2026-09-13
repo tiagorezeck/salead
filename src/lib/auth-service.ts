@@ -179,8 +179,8 @@ export async function authenticateUser(identifier: string, password?: string): P
     throw new Error("Sua conta foi criada e está aguardando autorização do Administrador para liberação do acesso.");
   }
 
-  if (found.status === "Bloqueado") {
-    throw new Error("Seu acesso foi desativado pela administração.");
+  if (found.status === "Bloqueado" || found.status === "Inativo") {
+    throw new Error("Seu acesso foi desativado pela administração. Entre em contato com o Administrador para reativar seu cadastro.");
   }
 
   // Validação de senha:

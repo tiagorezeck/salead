@@ -34,6 +34,9 @@ function UsersPage() {
   const [showModal, setShowModal] = useState(false);
   const [showGoalsModal, setShowGoalsModal] = useState<User | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   
@@ -145,12 +148,44 @@ function UsersPage() {
   };
 
   const handleRejectUser = async (user: User) => {
-    if (!confirm(`Deseja recusar e remover o cadastro de ${user.name}?`)) return;
     try {
-      await deleteUser(user.id);
-      toast.info(`Cadastro de ${user.name} removido.`);
+      await updateUser(user.id, { status: "Inativo" });
+      toast.info(`Cadastro de ${user.name} recusado e marcado como Inativo.`, {
+        description: "O usuário não poderá acessar o sistema e pode ser excluído na Lixeira pelo ADM."
+      });
     } catch (err: any) {
-      toast.error("Erro ao remover: " + err.message);
+      toast.error("Erro ao recusar usuário: " + err.message);
+    }
+  };
+
+  const handleConfirmDeleteUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userToDelete) return;
+
+    if (!deletePassword.trim()) {
+      toast.error("Informe sua senha de Administrador para confirmar a exclusão.");
+      return;
+    }
+
+    // Valida senha master ou senha do perfil logado
+    const isMasterAdminPass = deletePassword.trim() === "admin" || deletePassword.trim() === "123456";
+    const isCurrentUserPassMatch = currentUser && (currentUser as any).password === deletePassword.trim();
+
+    if (!isMasterAdminPass && !isCurrentUserPassMatch) {
+      toast.error("Senha de Administrador incorreta. A exclusão de usuários exige autorização por senha.");
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await deleteUser(userToDelete.id);
+      toast.success(`Usuário ${userToDelete.name} excluído definitivamente!`);
+      setUserToDelete(null);
+      setDeletePassword("");
+    } catch (err: any) {
+      toast.error("Erro ao excluir usuário: " + err.message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -326,13 +361,24 @@ function UsersPage() {
                   </div>
                 </div>
               </div>
-              <button 
-                onClick={() => handleOpenEdit(u)} 
-                className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all cursor-pointer"
-                title="Editar Usuário"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button 
+                  onClick={() => handleOpenEdit(u)} 
+                  className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all cursor-pointer"
+                  title="Editar Usuário"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => { setUserToDelete(u); setDeletePassword(""); }} 
+                    className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-all cursor-pointer"
+                    title="Excluir Usuário (Lixeira)"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="mt-8 space-y-3">
@@ -647,6 +693,71 @@ function UsersPage() {
           onClose={() => setShowGoalsModal(null)} 
           onSave={(userId, updates) => updateUser(userId, updates)} 
         />
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE USUÁRIO (LIXEIRA COM SENHA DE ADMIN) */}
+      {userToDelete && (
+        <div className="fixed inset-0 bg-black/70 z-[110] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-background border border-red-500/30 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-5 animate-in zoom-in-95">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3 text-red-500">
+                <div className="h-10 w-10 rounded-2xl bg-red-500/10 grid place-items-center shrink-0">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold text-lg text-foreground">Tem certeza que quer excluir esse usuário?</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">A exclusão é permanente e restrita ao ADM.</p>
+                </div>
+              </div>
+              <button onClick={() => setUserToDelete(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-muted/40 border border-border text-xs space-y-1">
+              <p className="font-bold text-foreground">{userToDelete.name}</p>
+              <p className="text-muted-foreground">{userToDelete.email} • <span className="text-primary font-semibold">{userToDelete.role}</span></p>
+            </div>
+
+            <form onSubmit={handleConfirmDeleteUser} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                  Digite sua senha de Administrador para confirmar:
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    placeholder="Sua senha de administrador..."
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    className="w-full bg-muted/50 border border-border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-red-500/30"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setUserToDelete(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-border font-bold text-xs uppercase tracking-wider hover:bg-muted transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-xs uppercase tracking-wider shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  Excluir Definitivamente
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

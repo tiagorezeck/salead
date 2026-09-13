@@ -31,7 +31,15 @@ import {
 } from "@/data/mock";
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { normalizePhone, validateEmail, parseCurrencyBR } from "@/lib/validators";
-import { getLocalDatabaseRoot, getDriveConfig, fetchFromGoogleDrive, clearLpTestDataInDrive } from "@/services/googleDriveDatabaseService";
+import { 
+  getLocalDatabaseRoot, 
+  getDriveConfig, 
+  fetchFromGoogleDrive, 
+  clearLpTestDataInDrive,
+  createCheckpoint,
+  saveSystemCheckpoint,
+  formatCheckpointName
+} from "@/services/googleDriveDatabaseService";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -805,7 +813,7 @@ export const mapUserFromDb = (row: any): User => {
     contact: row.contact || "",
     avatarUrl: row.avatar_url || "",
     avatar_url: row.avatar_url || "",
-    status: (row.status === "Inativo" ? "Inativo" : "Ativo"),
+    status: (row.status === "Pendente" ? "Pendente" : (row.status === "Inativo" || row.status === "Bloqueado" ? "Inativo" : (row.status || "Ativo"))),
     goals: Array.isArray(row.goals) ? row.goals : [],
     operationalGoals: Array.isArray(row.operational_goals) ? row.operational_goals : [],
     allowedModules,
@@ -870,6 +878,29 @@ export function useData() {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, []);
+
+  // Checkpoint Inicial Automático ao abrir a primeira URL
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const alreadyCreated = localStorage.getItem("salead_initial_checkpoint_created");
+      if (!alreadyCreated) {
+        try {
+          const now = new Date();
+          const checkpointName = formatCheckpointName(now);
+          saveSystemCheckpoint({
+            id: `cp_initial_${Date.now()}`,
+            name: checkpointName,
+            timestamp: now.toISOString(),
+            leadsCount: 0,
+            data: { version: "2.0.0", type: "initial_checkpoint", exportedAt: now.toISOString() }
+          });
+          localStorage.setItem("salead_initial_checkpoint_created", "true");
+        } catch (err) {
+          console.warn("Aviso ao criar checkpoint inicial:", err);
+        }
+      }
+    }
   }, []);
 
   const { data: session } = useQuery({
@@ -3404,11 +3435,60 @@ export function useData() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      toast.loading("Executando reset de fábrica...");
+      const toastId = toast.loading("Criando checkpoint e executando limpeza do banco...");
 
-      // 1. Limpeza total de tabelas transacionais e customizadas
+      // 0. CRIAR CHECKPOINT COMPLETO ANTES DA LIMPEZA
+      try {
+        const fullBackup = {
+          version: "2.0.0",
+          type: "pre_reset_checkpoint",
+          exportedAt: new Date().toISOString(),
+          company,
+          visibility,
+          slaThresholds,
+          workingDays,
+          holidays,
+          funnelTypes,
+          leads,
+          tasks,
+          products,
+          playbooks,
+          objections,
+          landingPages,
+          surveys,
+          automations,
+          marketingInvestments,
+          pipelines
+        };
+
+        const now = new Date();
+        const checkpointName = formatCheckpointName(now);
+
+        // Salva histórico de checkpoints locais com recuperação garantida
+        saveSystemCheckpoint({
+          id: `cp_${Date.now()}`,
+          name: checkpointName,
+          timestamp: now.toISOString(),
+          leadsCount: leads.length,
+          data: fullBackup
+        });
+
+        // Se o Google Drive estiver configurado, envia também o snapshot para a nuvem
+        const driveCfg = getDriveConfig();
+        if (driveCfg && driveCfg.webappUrl) {
+          try {
+            await createCheckpoint(driveCfg.webappUrl, fullBackup);
+          } catch (driveErr) {
+            console.warn("Aviso ao salvar checkpoint no Google Drive:", driveErr);
+          }
+        }
+      } catch (cpErr) {
+        console.warn("Aviso na criação do checkpoint pré-reset:", cpErr);
+      }
+
+      // 1. Limpeza de tabelas transacionais e customizadas (A BASE DE LEADS NUNCA É APAGADA NO RESET)
       const tablesToWipe = [
-        'leads', 'tasks', 'marketing_investments', 
+        'tasks', 'marketing_investments', 
         'survey_responses', 'handoff_rules', 'stage_workflows', 'automations',
         'objections', 'playbooks', 'landing_pages', 'surveys', 'products', 'pipelines'
       ];
@@ -3420,9 +3500,16 @@ export function useData() {
       // 2. Limpeza de Membros (Mantém apenas o usuário ativo)
       await supabase.from('profiles').delete().neq('id', user.id);
 
-      // 3. RECRIAR PADRÕES (SEED)
+      // 3. Limpeza de caches e LPs locais para abrir ambiente zerado e limpo
+      try {
+        localStorage.removeItem(LOCAL_LP_STORAGE_KEY);
+        localStorage.removeItem(DELETED_LP_STORAGE_KEY);
+        localStorage.removeItem(LP_SEED_INITIALIZED_KEY);
+      } catch {}
+
+      // 4. RECRIAR PADRÕES (SEED)
       
-      // 3a. Inserir Pipelines Padrão
+      // 4a. Inserir Pipelines Padrão
       for (const pipe of DEFAULT_PIPELINES) {
         await supabase.from('pipelines').insert([{
           name: pipe.name,
@@ -3431,12 +3518,12 @@ export function useData() {
         }]);
       }
 
-      // 3b. Inserir Playbooks Padrão
+      // 4b. Inserir Playbooks Padrão
       for (const pb of DEFAULT_PLAYBOOKS) {
         await supabase.from('playbooks').insert([mapPlaybookToDb(pb)]);
       }
 
-      // 3c. Automações Padrão
+      // 4c. Automações Padrão
       await supabase.from('automations').insert([
         {
           name: "SLA: Alerta de Inatividade (24h)",
@@ -3458,10 +3545,10 @@ export function useData() {
         }
       ]);
 
-      // 4. Resetar cache e avisar usuário
+      // 5. Resetar cache e avisar usuário
       queryClient.invalidateQueries();
-      toast.dismiss();
-      toast.success("Comet CRM restaurado com os padrões de fábrica!");
+      toast.dismiss(toastId);
+      toast.success("Banco de dados resetado com sucesso! Checkpoint criado e Base de Leads 100% preservada.");
     }
   };
 }

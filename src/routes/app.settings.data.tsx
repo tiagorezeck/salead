@@ -224,7 +224,7 @@ function DataCenterPage() {
             <div className="flex items-center gap-2 text-destructive font-black text-[10px] uppercase tracking-widest">
               <AlertTriangle className="h-4 w-4" /> Zona de Perigo
             </div>
-            <p className="text-xs text-muted-foreground">O reset limpa todos os registros mas preserva suas configurações de empresa.</p>
+            <p className="text-xs text-muted-foreground">O reset cria um Checkpoint de segurança no banco de dados e abre um novo ambiente zerado. <strong className="text-foreground">A sua Base de Leads NUNCA é apagada</strong> (leads só somem se excluídos manualmente).</p>
             <button onClick={() => setShowResetConfirm(true)} className="w-full py-3 rounded-xl border border-destructive/30 text-destructive text-[10px] font-black uppercase tracking-widest hover:bg-destructive hover:text-white transition-all">LIMPAR BANCO DE DADOS</button>
           </div>
         </aside>
@@ -290,12 +290,17 @@ function DataCenterPage() {
       <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
         <AlertDialogContent className="rounded-[2rem]">
           <AlertDialogHeader className="items-center text-center">
-            <AlertDialogTitle className="font-display text-2xl font-black text-destructive">LIMPEZA TOTAL</AlertDialogTitle>
-            <AlertDialogDescription>Tem certeza? Isso apagará leads, tarefas e históricos permanentemente.</AlertDialogDescription>
+            <AlertDialogTitle className="font-display text-2xl font-black text-destructive">LIMPEZA DO BANCO DE DADOS</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-left">
+              <p>Antes da limpeza, o sistema irá gerar automaticamente um <strong>Checkpoint (ponto de restauração completo)</strong> e abrir um novo ambiente zerado.</p>
+              <p className="font-medium text-foreground bg-primary/10 border border-primary/20 rounded-xl p-3 text-xs">
+                🔒 <strong>Base de Leads 100% Protegida:</strong> Seus leads e contatos NUNCA serão apagados no reset. Um lead só é excluído se você apagá-lo manualmente na tela de Leads.
+              </p>
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { resetData(); setShowResetConfirm(false); toast.success("Sistema resetado com sucesso."); }} className="bg-destructive text-white font-bold">SIM, APAGAR TUDO</AlertDialogAction>
+            <AlertDialogAction onClick={() => { resetData(); setShowResetConfirm(false); }} className="bg-destructive text-white font-bold">CRIAR CHECKPOINT E LIMPAR BANCO</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

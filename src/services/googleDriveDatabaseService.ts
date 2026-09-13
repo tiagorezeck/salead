@@ -362,6 +362,58 @@ export const restoreCheckpoint = async <T>(url: string, fileName: string): Promi
   return res.content as T;
 };
 
+// CHECKPOINTS LOCAIS / NUVEM UNIFICADOS
+export const formatCheckpointName = (d: Date = new Date()): string => {
+  const pad = (n: number) => (n < 10 ? '0' + n : n);
+  const day = pad(d.getDate());
+  const month = pad(d.getMonth() + 1);
+  const year = d.getFullYear();
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `Checkpoint-${day}-${month}-${year}-${hours}:${minutes}`;
+};
+
+export interface SystemCheckpoint {
+  id: string;
+  name: string;
+  timestamp: string;
+  leadsCount: number;
+  data: any;
+  driveFileName?: string;
+}
+
+const LOCAL_CHECKPOINTS_STORAGE_KEY = 'salead_system_checkpoints_history';
+
+export const getStoredSystemCheckpoints = (): SystemCheckpoint[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_CHECKPOINTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveSystemCheckpoint = (checkpoint: SystemCheckpoint): void => {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getStoredSystemCheckpoints();
+    const next = [checkpoint, ...current.filter(c => c.id !== checkpoint.id)].slice(0, 30);
+    localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(next));
+  } catch (err) {
+    console.warn("Falha ao salvar histórico de checkpoints:", err);
+  }
+};
+
+export const deleteSystemCheckpoint = (id: string): void => {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getStoredSystemCheckpoints();
+    const next = current.filter(c => c.id !== id);
+    localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(next));
+  } catch {}
+};
+
 // UPLOAD DE MÍDIA / IMAGEM (BASE64)
 export const uploadMediaToDrive = async (
   url: string,

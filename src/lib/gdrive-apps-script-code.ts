@@ -319,7 +319,7 @@ function doPost(e) {
     if (action === "create_checkpoint") {
       var now = new Date();
       var timestamp = formatDate(now);
-      var checkpointName = "checkpoint_" + timestamp + ".json";
+      var checkpointName = "Checkpoint-" + timestamp + ".json";
       var content = JSON.stringify(payload.data || payload, null, 2);
       folder.createFile(checkpointName, content, MimeType.PLAIN_TEXT);
 
@@ -848,6 +848,6 @@ function jsonResponse(obj) {
 
 function formatDate(date) {
   var pad = function(n) { return n < 10 ? '0' + n : n; };
-  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + "_" + pad(date.getHours()) + "-" + pad(date.getMinutes());
+  return pad(date.getDate()) + "-" + pad(date.getMonth() + 1) + "-" + date.getFullYear() + "-" + pad(date.getHours()) + ":" + pad(date.getMinutes());
 }
 `;

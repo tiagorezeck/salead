@@ -5,11 +5,12 @@ import {
   LayoutDashboard, KanbanSquare, Users, Megaphone, Trophy, Zap, Settings, Bell, Search, Sparkles,
   GitBranch, Timer, BarChart3, CheckSquare, Gauge, X, AlertTriangle, Flame, Plus, BookOpen,
   Package, ChevronRight, ChevronLeft, Menu, UserCog, Target, ClipboardList, Cloud, CloudOff, RefreshCw, MonitorPlay, Activity,
-  Command, Wallet, Maximize2, Minimize2, Sliders, Sun, Moon, FileSpreadsheet, ExternalLink
+  Command, Wallet, Maximize2, Minimize2, Sliders, Sun, Moon, FileSpreadsheet, ExternalLink, UserCheck, UserX, Check
 } from "lucide-react";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useData } from "@/hooks/use-data";
+import { approveUserAccess } from "@/lib/auth-service";
 import { useTheme } from "@/hooks/use-theme";
 import { supabase } from "@/integrations/supabase/client";
 import { CommandPalette } from "./command-palette";
@@ -48,7 +49,10 @@ import {
 export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { leads, addLead, addTask, setDateFilter, currentUser, roleModulePermissions } = useData();
+  const { leads, addLead, addTask, setDateFilter, currentUser, roleModulePermissions, users, updateUser } = useData();
+  const pendingNotificationUsers = useMemo(() => {
+    return (users || []).filter(u => u.status === "Pendente" || (u as any).status === "pending");
+  }, [users]);
   const { syncStatus, isOnline, isConfigured, spreadsheetUrl, spreadsheetName } = useDriveSync();
   const { theme, toggleTheme } = useTheme();
   
@@ -513,14 +517,85 @@ export function AppShell({ children }: { children: ReactNode }) {
                 aria-label="Notificações"
               >
                 <Bell className="h-4 w-4" />
-                <div className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary border-2 border-background" />
+                {pendingNotificationUsers.length > 0 ? (
+                  <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-black grid place-items-center border-2 border-background animate-bounce">
+                    {pendingNotificationUsers.length}
+                  </div>
+                ) : (
+                  <div className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary border-2 border-background" />
+                )}
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72 sm:w-80 rounded-2xl p-3 shadow-xl">
+            <DropdownMenuContent align="end" className="w-80 sm:w-96 rounded-2xl p-3 shadow-xl max-h-[85vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-2 border-b border-border">
                 <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Notificações</span>
-                <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">Sistema Ativo</span>
+                {pendingNotificationUsers.length > 0 ? (
+                  <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <UserPlus className="h-3 w-3" />
+                    {pendingNotificationUsers.length} Pendente{pendingNotificationUsers.length > 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">Sistema Ativo</span>
+                )}
               </div>
+
+              {/* Solicitacoes de Acesso Pendentes (para Admins / Gestores) */}
+              {pendingNotificationUsers.length > 0 && (
+                <div className="py-2.5 border-b border-border space-y-2">
+                  <div className="text-[11px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-1.5">
+                    <UserCog className="h-3.5 w-3.5" />
+                    <span>Aprovações Pendentes de Acesso</span>
+                  </div>
+                  {pendingNotificationUsers.map(u => (
+                    <div key={u.id} className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-bold text-foreground">{u.name}</p>
+                          <p className="text-[11px] text-muted-foreground">{u.email} • <span className="font-semibold text-primary">{u.role}</span></p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await updateUser(u.id, { status: "Ativo" });
+                              try { approveUserAccess(u.id, currentUser?.name || "Admin"); } catch {}
+                              toast.success(`Acesso de ${u.name} aprovado com sucesso!`, {
+                                description: "O usuário agora pode acessar o sistema normalmente."
+                              });
+                            } catch (err: any) {
+                              toast.error("Erro ao aprovar: " + err.message);
+                            }
+                          }}
+                          className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center justify-center gap-1 transition-all shadow-sm cursor-pointer"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          <span>Aceitar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await updateUser(u.id, { status: "Inativo" });
+                              toast.info(`Usuário ${u.name} marcado como Inativo.`, {
+                                description: "O acesso foi bloqueado e pode ser excluído manualmente na aba Time."
+                              });
+                            } catch (err: any) {
+                              toast.error("Erro ao recusar: " + err.message);
+                            }
+                          }}
+                          className="flex-1 py-1.5 px-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-500 dark:text-red-400 border border-red-500/30 font-bold text-[11px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          <span>Recusar</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="py-2 space-y-2">
                 <div className="p-2 rounded-xl bg-muted/40 hover:bg-muted transition-colors text-xs flex gap-2.5 items-start">
                   <div className="h-2 w-2 rounded-full bg-primary mt-1 shrink-0" />
