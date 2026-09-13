@@ -891,6 +891,8 @@ export function useData() {
   // 1. LEADS
   const leads = asArray(useQuery({ 
     queryKey: ['leads'], 
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
     queryFn: async () => { 
       let dbLeads: Lead[] = [];
       try {

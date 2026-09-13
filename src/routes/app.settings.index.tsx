@@ -129,8 +129,20 @@ function SettingsIndexPage() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   useEffect(() => {
-    getDriveConfig().then(setDriveConfig).catch(() => {});
+    const loadDrive = async () => {
+      const cfg = await initializeSharedDriveConfig();
+      setDriveConfig(cfg);
+    };
+    loadDrive();
     setCalendarConn(getCalendarConnectionState());
+
+    const handleDriveUpdate = (e: any) => {
+      if (e.detail) {
+        setDriveConfig(e.detail);
+      }
+    };
+    window.addEventListener('salead_drive_config_updated', handleDriveUpdate);
+    return () => window.removeEventListener('salead_drive_config_updated', handleDriveUpdate);
   }, [activeModal]);
 
   const handleToggleCalendar = async () => {
@@ -389,11 +401,11 @@ function SettingsIndexPage() {
                       <h3 className="font-display text-lg font-bold text-foreground">Google Drive</h3>
                       <span className={cn(
                         "text-[10px] uppercase font-black px-2 py-0.5 rounded-full border",
-                        driveConfig?.connected 
+                        (driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0))
                           ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
                           : "bg-muted text-muted-foreground border-border"
                       )}>
-                        {driveConfig?.connected ? "Conectado" : "Desconectado"}
+                        {(driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0)) ? "Conectado" : "Desconectado"}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">Nuvem & Backup Automático de Dados</p>
@@ -413,7 +425,7 @@ function SettingsIndexPage() {
                 <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
                   <div className="text-[10px] uppercase font-bold text-muted-foreground">Status do Backup</div>
                   <div className="text-xs font-bold text-foreground truncate mt-0.5">
-                    {driveConfig?.connected ? "Sincronização Ativa" : "Aguardando Conexão"}
+                    {(driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0)) ? "Sincronização Ativa" : "Aguardando Conexão"}
                   </div>
                 </div>
                 <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">

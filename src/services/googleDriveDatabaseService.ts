@@ -6,6 +6,8 @@ export interface DriveConfig {
   webappUrl: string;
   autoSync: boolean;
   folderName: string;
+  connected?: boolean;
+  folderId?: string;
   lastSyncTimestamp?: number;
   syncStatus?: 'synced' | 'syncing' | 'error' | 'offline';
   spreadsheetUrl?: string;
@@ -36,7 +38,7 @@ const DB_LOCAL_STORAGE_KEY = 'salead_database_root';
 
 export const getDriveConfig = (): DriveConfig => {
   if (typeof window === "undefined") {
-    return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline' };
+    return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline', connected: false };
   }
   try {
     // Detecta parâmetro de sincronização direta na URL para emparelhamento instantâneo em celulares e outros PCs
@@ -50,7 +52,8 @@ export const getDriveConfig = (): DriveConfig => {
           autoSync: true,
           folderName: 'SALEAD/AppDatabase_Data',
           syncStatus: 'synced',
-          lastSyncTimestamp: Date.now()
+          lastSyncTimestamp: Date.now(),
+          connected: true
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(autoSyncedConfig));
         return autoSyncedConfig;
@@ -58,15 +61,25 @@ export const getDriveConfig = (): DriveConfig => {
     }
 
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline' };
+    if (!saved) {
+      return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline', connected: false };
+    }
+    const parsed = JSON.parse(saved);
+    const isConn = !!(parsed.webappUrl && parsed.webappUrl.trim().length > 0);
+    return {
+      ...parsed,
+      connected: isConn,
+      syncStatus: isConn ? (parsed.syncStatus === 'error' ? 'error' : 'synced') : 'offline'
+    };
   } catch {
-    return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline' };
+    return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline', connected: false };
   }
 };
 
 export const saveDriveConfig = (config: Partial<DriveConfig>): DriveConfig => {
   const current = getDriveConfig();
   const updated = { ...current, ...config };
+  updated.connected = !!(updated.webappUrl && updated.webappUrl.trim().length > 0);
   if (typeof window !== "undefined") {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent('salead_drive_config_updated', { detail: updated }));
@@ -90,7 +103,7 @@ export const initializeSharedDriveConfig = async (): Promise<DriveConfig> => {
       if (serverConfig && serverConfig.webappUrl) {
         const local = getDriveConfig();
         if (!local.webappUrl || (serverConfig.lastSyncTimestamp && serverConfig.lastSyncTimestamp > (local.lastSyncTimestamp || 0))) {
-          const merged = { ...local, ...serverConfig };
+          const merged = { ...local, ...serverConfig, connected: true };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
           window.dispatchEvent(new CustomEvent('salead_drive_config_updated', { detail: merged }));
           return merged;
@@ -437,7 +450,10 @@ export const submitLpLeadToDrive = async (leadData: {
   answers?: any;
   customFields?: any;
 }): Promise<any> => {
-  const config = getDriveConfig();
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
   if (!config.webappUrl) return null;
   const cleanUrl = cleanWebAppUrl(config.webappUrl);
   if (!cleanUrl) return null;
@@ -472,7 +488,10 @@ export const submitSurveyResponseToDrive = async (surveyData: {
   answers: Record<string, any>;
   questions?: Array<{ id: string; question: string }>;
 }): Promise<any> => {
-  const config = getDriveConfig();
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
   if (!config.webappUrl) return null;
   const cleanUrl = cleanWebAppUrl(config.webappUrl);
   if (!cleanUrl) return null;

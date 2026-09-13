@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import fs from "fs";
+import path from "path";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://zhyihwtgsctlpzspgsop.supabase.co";
 const SUPABASE_KEY =
@@ -12,6 +14,26 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 function isUUID(str?: string): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
+function getSystemDriveUrl(): string {
+  try {
+    const configPath = "/tmp/drive_config.json";
+    if (fs.existsSync(configPath)) {
+      const raw = fs.readFileSync(configPath, "utf-8");
+      const cfg = JSON.parse(raw);
+      if (cfg && cfg.webappUrl) return cfg.webappUrl;
+    }
+  } catch {}
+  try {
+    const rootConfigPath = path.join(process.cwd(), "drive_config.json");
+    if (fs.existsSync(rootConfigPath)) {
+      const raw = fs.readFileSync(rootConfigPath, "utf-8");
+      const cfg = JSON.parse(raw);
+      if (cfg && cfg.webappUrl) return cfg.webappUrl;
+    }
+  } catch {}
+  return process.env.GOOGLE_DRIVE_WEBAPP_URL || "";
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -97,7 +119,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.warn("Supabase direct insert notice:", e);
     }
 
-    // 2. Dispara webhook externo se configurado na LP
+    // 2. Tenta sincronizar automaticamente com a planilha do Google Drive do sistema
+    const driveUrl = getSystemDriveUrl();
+    let driveSynced = false;
+    if (driveUrl && driveUrl.startsWith("http")) {
+      try {
+        await fetch(driveUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "SUBMIT_LP_LEAD",
+            lead: {
+              id: leadId,
+              name: cleanName,
+              email: cleanEmail,
+              whatsapp: cleanWhatsapp,
+              pageId,
+              pageTitle,
+              quizAnswers: quizAnswers || {},
+              utms: utms || {},
+              source: effectiveSource,
+              submittedAt: new Date().toISOString()
+            }
+          }),
+          redirect: "follow"
+        });
+        driveSynced = true;
+      } catch (dErr) {
+        console.warn("Auto Drive sync notice:", dErr);
+      }
+    }
+
+    // 3. Dispara webhook externo se configurado na LP
     const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
     let webhookStatus = "skipped";
     if (targetWebhook && targetWebhook.trim().length > 0) {

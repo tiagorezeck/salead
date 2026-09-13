@@ -20,6 +20,26 @@ function isUUID(str?: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
 }
 
+function getSystemDriveUrl(): string {
+  try {
+    const configPath = "/tmp/drive_config.json";
+    if (fs.existsSync(configPath)) {
+      const raw = fs.readFileSync(configPath, "utf-8");
+      const cfg = JSON.parse(raw);
+      if (cfg && cfg.webappUrl) return cfg.webappUrl;
+    }
+  } catch {}
+  try {
+    const rootConfigPath = path.join(process.cwd(), "drive_config.json");
+    if (fs.existsSync(rootConfigPath)) {
+      const raw = fs.readFileSync(rootConfigPath, "utf-8");
+      const cfg = JSON.parse(raw);
+      if (cfg && cfg.webappUrl) return cfg.webappUrl;
+    }
+  } catch {}
+  return process.env.GOOGLE_DRIVE_WEBAPP_URL || "";
+}
+
 const LP_DATA_FILE = path.join(process.cwd(), "data", "landing_pages.json");
 const SURVEYS_DATA_FILE = path.join(process.cwd(), "data", "surveys.json");
 const RESPONSES_DATA_FILE = path.join(process.cwd(), "data", "survey_responses.json");
@@ -1904,6 +1924,32 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
       }]);
     } catch (sbErr) {
       console.info("Supabase survey response sync notice:", sbErr);
+    }
+
+    // 3b. Sincroniza resposta da pesquisa diretamente com o Google Drive / Sheets
+    const driveUrl = getSystemDriveUrl();
+    if (driveUrl && driveUrl.startsWith("http")) {
+      try {
+        await fetch(driveUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "SUBMIT_SURVEY_RESPONSE",
+            surveyResponse: {
+              surveyId,
+              surveyName: extraPayload?.pageTitle || "Pesquisa de Qualificação",
+              leadName: leadForm?.name || extraPayload?.leadName || "Participante",
+              leadWhatsapp: leadForm?.whatsapp || extraPayload?.leadWhatsapp || "",
+              leadEmail: leadForm?.email || extraPayload?.leadEmail || "",
+              answers: answers || {},
+              timestamp: new Date().toISOString()
+            }
+          }),
+          redirect: "follow"
+        });
+      } catch (dErr) {
+        console.warn("Survey response Drive sync notice:", dErr);
+      }
     }
 
     // 4. Se havia uma Landing Page vinculada, incrementa suas conversões
