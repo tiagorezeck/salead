@@ -31,6 +31,7 @@ import {
 import {
   getDriveConfig,
   saveDriveConfig,
+  cleanWebAppUrl,
   testDriveConnection,
   createCheckpoint,
   listCheckpoints,
