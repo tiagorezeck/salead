@@ -239,16 +239,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <div className={cn(
           "px-4 py-3 flex items-center border-b border-sidebar-border min-h-[4rem] transition-all flex-shrink-0",
-          isExpanded ? "justify-between" : "justify-center"
+          isExpanded ? "justify-start" : "justify-center"
         )}>
           <div className="flex items-center min-w-max">
             <BrandLogo size="md" showText={isExpanded} allowCustomize={true} />
           </div>
-          {isExpanded && (
-            <button onClick={() => setIsPinned(!isPinned)} className="p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground transition-colors">
-              {isPinned ? <ChevronLeft className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-            </button>
-          )}
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto sidebar-scrollbar">
@@ -317,14 +312,30 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 border-b border-border bg-card/40 backdrop-blur sticky top-0 z-30 flex items-center px-3 sm:px-4 md:px-6 gap-2 sm:gap-3">
-          {/* Menu Mobile Hamburger (gaveta lateral no mobile/tablet) */}
+          {/* Menu Lateral Toggle (3 traços quando fechado, < quando aberto) - Fixo ao lado do Expandir Tela */}
           <button 
-            onClick={() => setIsMobileMenuOpen(true)} 
-            className="md:hidden h-9 w-9 rounded-xl bg-muted grid place-items-center border border-border shrink-0 hover:bg-muted/80"
-            title="Abrir menu lateral"
-            aria-label="Menu Lateral"
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined" && window.innerWidth < 768) {
+                setIsMobileMenuOpen(prev => !prev);
+              } else {
+                setIsPinned(prev => !prev);
+              }
+            }}
+            className={cn(
+              "h-9 w-9 flex items-center justify-center rounded-xl border transition-all group shrink-0 cursor-pointer",
+              (isPinned || isMobileMenuOpen)
+                ? "bg-primary/15 border-primary/40 text-primary hover:bg-primary/25 shadow-sm"
+                : "bg-muted border-border text-muted-foreground hover:bg-primary/10 hover:text-primary hover:border-primary/30"
+            )}
+            title={(isPinned || isMobileMenuOpen) ? "Recolher menu lateral" : "Expandir menu lateral"}
+            aria-label={(isPinned || isMobileMenuOpen) ? "Recolher menu lateral" : "Expandir menu lateral"}
           >
-            <Menu className="h-5 w-5" />
+            {(isPinned || isMobileMenuOpen) ? (
+              <ChevronLeft className="h-5 w-5 group-hover:-translate-x-0.5 transition-transform" />
+            ) : (
+              <Menu className="h-5 w-5 group-hover:scale-110 transition-transform" />
+            )}
           </button>
           
           {/* 1. Expandir tela */}
