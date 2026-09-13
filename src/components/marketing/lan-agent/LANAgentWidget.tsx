@@ -62,11 +62,13 @@ export function LANAgentWidget({
     {
       id: "intro-lan",
       role: "lan",
-      content: `Olá! Sou o **LAN**, seu Agente Autônomo de Criação de Landing Pages. 
+      content: `Olá! Sou o **LANAI**, seu Agente Autônomo e Inteligência Artificial Ilimitada do Sistema. 
 
-Não fico preso a regras ou travas: posso criar do zero, reestruturar todo o design, remover fotos ("retire a imagem e deixe só a de fundo"), trocar para VSL, mudar temas e paletas de cores ou recriar a página baseando-me em **imagens de referência** ou **URLs**.
+Estou aqui para criar e editar suas Landing Pages sem nenhuma barreira! Posso mudar qualquer texto, gerar novas imagens com IA ou buscar referências na internet, reordenar seções, mudar cores, temas e posicionamentos de elementos.
 
-Como posso transformar sua página agora?`,
+Além disso, posso guiar você em qualquer outra área do sistema (como Leads, CRM e Automações) ou atuar como seu **Copiloto de Vendas** — sugerindo respostas persuasivas para leads, ajudando a quebrar objeções e definindo os próximos passos do funil.
+
+Como posso impulsionar seu negócio hoje?`,
       timestamp: new Date(),
     }
   ]);
@@ -101,7 +103,7 @@ Como posso transformar sua página agora?`,
       if (typeof reader.result === "string") {
         setReferenceImage(reader.result);
         toast.success("Imagem de referência anexada!", {
-          description: "O LAN usará esta referência visual para desenhar sua Landing Page."
+          description: "A LANAI usará esta referência visual para desenhar sua Landing Page."
         });
       }
     };
@@ -161,13 +163,13 @@ Como posso transformar sua página agora?`,
         {
           id: `lan_${Date.now()}`,
           role: "lan",
-          content: data.message || "Ajustes aplicados com sucesso na sua Landing Page!",
+          content: data.message || "Ajustes aplicados com sucesso pela LANAI!",
           timestamp: new Date(),
-          actionTaken: "Estrutura e visual atualizados ao vivo"
+          actionTaken: "Modificado com precisão ao vivo"
         }
       ]);
 
-      toast.success("LAN atualizou sua Landing Page!", {
+      toast.success("LANAI atualizou sua Landing Page!", {
         description: "As modificações foram aplicadas ao vivo no canvas.",
         icon: <Bot className="h-4 w-4 text-[#FF6A00]" />
       });
@@ -209,7 +211,7 @@ Como posso transformar sua página agora?`,
           type="button"
           onClick={onToggle}
           className="fixed bottom-6 right-6 z-[200] group flex items-center gap-3 p-2 bg-[#121418] hover:bg-[#181B22] border-2 border-[#FF6A00] rounded-full shadow-[0_0_30px_rgba(255,106,0,0.35)] transition-all hover:scale-105 active:scale-95 cursor-pointer"
-          title="Abrir o LAN - Agente Autônomo de Landing Page"
+          title="Abrir a LANAI - Inteligência Artificial Autônoma"
         >
           <div className="relative w-12 h-12 rounded-full bg-gradient-to-tr from-[#FF6A00] to-[#FF9040] flex items-center justify-center shadow-inner">
             <Bot className="w-6 h-6 text-white animate-pulse" />
@@ -219,10 +221,10 @@ Como posso transformar sua página agora?`,
 
           <div className="pr-4 text-left hidden sm:block">
             <div className="flex items-center gap-1.5">
-              <span className="font-black text-xs uppercase tracking-wider text-white">LAN</span>
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#FF6A00]/20 text-[#FF6A00] border border-[#FF6A00]/30">IA AUTÔNOMA</span>
+              <span className="font-black text-xs uppercase tracking-wider text-white">LANAI</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#FF6A00]/20 text-[#FF6A00] border border-[#FF6A00]/30">CO-PILOTO & CRO</span>
             </div>
-            <div className="text-[10px] text-white/60">Clique para criar ou editar</div>
+            <div className="text-[10px] text-white/60">Fale com a IA do sistema</div>
           </div>
         </button>
       )}
@@ -246,14 +248,14 @@ Como posso transformar sua página agora?`,
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <span className="font-black text-sm text-white">LAN</span>
+                  <span className="font-black text-sm text-white">LANAI</span>
                   <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-[#FF6A00]/25 text-[#FF6A00] border border-[#FF6A00]/40">
-                    Autônomo
+                    SISTEMA & CRO
                   </span>
                 </div>
                 <div className="text-[10px] text-emerald-400 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Pronto para editar
+                  IA Copiloto Online
                 </div>
               </div>
             </div>
@@ -264,7 +266,7 @@ Como posso transformar sua página agora?`,
                 type="button"
                 onClick={() => setShowSettingsModal(true)}
                 className="p-1.5 rounded-xl hover:bg-white/10 text-white/60 hover:text-[#059669] transition-all cursor-pointer"
-                title="Configurações de IA, Provedores e Modelos do LAN"
+                title="Configurações de IA, Provedores e Modelos da LANAI"
               >
                 <Settings className="w-4 h-4" />
               </button>
@@ -283,7 +285,7 @@ Como posso transformar sua página agora?`,
                 type="button"
                 onClick={onClose}
                 className="p-1.5 rounded-xl bg-white/5 hover:bg-red-500/20 text-white/60 hover:text-red-400 transition-all cursor-pointer"
-                title="Fechar chat com o LAN (X)"
+                title="Fechar chat com a LANAI (X)"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -342,7 +344,7 @@ Como posso transformar sua página agora?`,
                 {isLoading && (
                   <div className="flex items-center gap-2 text-xs text-white/70 p-3 bg-[#181B22] border border-white/10 rounded-2xl rounded-bl-none w-fit animate-pulse">
                     <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#FF6A00]" />
-                    <span>LAN está desenhando e aplicando alterações...</span>
+                    <span>LANAI está analisando e aplicando alterações...</span>
                   </div>
                 )}
 
@@ -458,7 +460,7 @@ Como posso transformar sua página agora?`,
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Diga ao LAN o que criar ou mudar..."
+                  placeholder="Peça edições, novas imagens, ou conselhos de vendas à LANAI..."
                   disabled={isLoading}
                   className="flex-1 bg-[#181B22] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-white/40 focus:outline-none focus:border-[#FF6A00] transition-colors"
                 />

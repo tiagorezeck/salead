@@ -2591,6 +2591,8 @@ export function useData() {
       item.originalId = generatedId;
       if (item.config) {
         item.config.client_id = generatedId;
+        item.config.id = generatedId;
+        item.config.originalId = generatedId;
       }
 
       // Se o ID ou slug estava na lista de deletados, remove da lista

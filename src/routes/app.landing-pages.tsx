@@ -126,6 +126,7 @@ function LPPage() {
       // REMOVER completamente IDs herdados da página pai para garantir autonomia absoluta
       delete duplicatedObject.originalId;
       delete duplicatedObject._id;
+      delete duplicatedObject.id;
 
       // Atribuir novos identificadores autônomos
       duplicatedObject.id = newUuid;
@@ -140,9 +141,12 @@ function LPPage() {
       if (duplicatedObject.config && typeof duplicatedObject.config === 'object') {
         duplicatedObject.config = {
           ...duplicatedObject.config,
+          id: newUuid,
           client_id: newUuid,
+          originalId: newUuid,
           slug: newSlug
         };
+        delete duplicatedObject.config._id;
       }
 
       // ZERAR ABSOLUTAMENTE TODAS AS MÉTRICAS DE VISITAS, LEADS E CONVERSÃO

@@ -561,75 +561,110 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
   return res.status(404).json({ error: "Landing page not found" });
 });
 
+// Função auxiliar robusta para incrementar visitas em memória, disco e Supabase de forma sincronizada
+async function incrementLPVisits(id: string, body: any): Promise<{ success: boolean; visits: number }> {
+  let updatedVisits = 1;
+  const bodyLpId = body?.lpId || body?.id || body?.slug;
+
+  // 1. Resolve a página de todas as formas (id, uuid no body, ou slug)
+  let page = await findLandingPageAnywhere(id);
+  if (!page && bodyLpId) {
+    page = await findLandingPageAnywhere(bodyLpId);
+  }
+  if (!page && body?.slug) {
+    page = await findLandingPageAnywhere(body.slug);
+  }
+
+  if (page) {
+    const currentVisits = Number(page.visits || page.viewsCount || page.views_count) || 0;
+    updatedVisits = currentVisits + 1;
+    page.visits = updatedVisits;
+    page.viewsCount = updatedVisits;
+    page.views_count = updatedVisits;
+    const leads = Number(page.leads || page.leads_count) || 0;
+    page.conv = Math.round((leads / updatedVisits) * 100);
+    
+    previewPagesStore.set(page.id, page);
+    if (page.slug) previewPagesStore.set(page.slug, page);
+  }
+
+  // 2. Atualiza no arquivo de disco do servidor
+  try {
+    const diskList = readStoredLandingPages();
+    const matchIndex = diskList.findIndex(p => p.id === id || p.slug === id || (page && (p.id === page.id || p.slug === page.slug)));
+    if (matchIndex !== -1) {
+      const target = diskList[matchIndex];
+      const v = (Number(target.visits || target.viewsCount || target.views_count) || 0) + 1;
+      updatedVisits = v;
+      const leads = Number(target.leads || target.leads_count) || 0;
+      diskList[matchIndex] = {
+        ...target,
+        visits: v,
+        viewsCount: v,
+        views_count: v,
+        conv: Math.round((leads / v) * 100),
+        updated_at: new Date().toISOString()
+      };
+      writeStoredLandingPages(diskList);
+    } else if (page) {
+      writeStoredLandingPages([page, ...diskList]);
+    }
+  } catch (diskErr) {
+    console.warn("Express disk visit increment notice:", diskErr);
+  }
+
+  // 3. Sincroniza e atualiza no Supabase de forma segura e garantida usando service_role
+  try {
+    const resolvedUuid = page?.id || (isUUID(id) ? id : (isUUID(bodyLpId) ? bodyLpId : null));
+    if (resolvedUuid) {
+      const { data: dbData } = await supabase.from("landing_pages").select("visits, config").eq("id", resolvedUuid).maybeSingle();
+      const currentV = dbData ? (Number(dbData.visits) || 0) : 0;
+      const finalV = Math.max(currentV + 1, updatedVisits);
+      
+      const updatePayload: Record<string, any> = { visits: finalV };
+      if (dbData?.config && typeof dbData.config === "object") {
+        updatePayload.config = {
+          ...dbData.config,
+          visits: finalV,
+          viewsCount: finalV,
+          views_count: finalV
+        };
+      }
+      await supabase.from("landing_pages").update(updatePayload).eq("id", resolvedUuid);
+    } else {
+      const searchName = page?.name || page?.title || id;
+      if (searchName) {
+        const { data: dbData } = await supabase.from("landing_pages").select("id, visits, config").eq("name", searchName).maybeSingle();
+        if (dbData?.id) {
+          const currentV = Number(dbData.visits) || 0;
+          const finalV = Math.max(currentV + 1, updatedVisits);
+          const updatePayload: Record<string, any> = { visits: finalV };
+          if (dbData.config && typeof dbData.config === "object") {
+            updatePayload.config = {
+              ...dbData.config,
+              visits: finalV,
+              viewsCount: finalV,
+              views_count: finalV
+            };
+          }
+          await supabase.from("landing_pages").update(updatePayload).eq("id", dbData.id);
+        }
+      }
+    }
+  } catch (sbErr) {
+    console.warn("Supabase visit increment notice:", sbErr);
+  }
+
+  return { success: true, visits: updatedVisits };
+}
+
 // Endpoint oficial para contabilizar visualizações/visitas de Landing Pages
 cometLpRouter.post("/api/landing-pages/:id/visit", async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ error: "ID ausente" });
-
-    let updatedVisits = 1;
-
-    // 1. Atualiza na memória do servidor
-    const page = await findLandingPageAnywhere(id);
-    if (page) {
-      const currentVisits = Number(page.visits || page.viewsCount || page.views_count) || 0;
-      updatedVisits = currentVisits + 1;
-      page.visits = updatedVisits;
-      page.viewsCount = updatedVisits;
-      page.views_count = updatedVisits;
-      const leads = Number(page.leads || page.leads_count) || 0;
-      page.conv = Math.round((leads / updatedVisits) * 100);
-      
-      previewPagesStore.set(id, page);
-      if (page.id) previewPagesStore.set(page.id, page);
-      if (page.slug) previewPagesStore.set(page.slug, page);
-    }
-
-    // 2. Atualiza no arquivo de disco do servidor
-    try {
-      const diskList = readStoredLandingPages();
-      const matchIndex = diskList.findIndex(p => p.id === id || p.slug === id || (page && (p.id === page.id || p.slug === page.slug)));
-      if (matchIndex !== -1) {
-        const target = diskList[matchIndex];
-        const v = (Number(target.visits || target.viewsCount || target.views_count) || 0) + 1;
-        updatedVisits = v;
-        const leads = Number(target.leads || target.leads_count) || 0;
-        diskList[matchIndex] = {
-          ...target,
-          visits: v,
-          viewsCount: v,
-          views_count: v,
-          conv: Math.round((leads / v) * 100),
-          updated_at: new Date().toISOString()
-        };
-        writeStoredLandingPages(diskList);
-      } else if (page) {
-        writeStoredLandingPages([page, ...diskList]);
-      }
-    } catch (diskErr) {
-      console.warn("Express disk visit increment notice:", diskErr);
-    }
-
-    // 3. Atualiza no Supabase
-    try {
-      const targetId = page?.id || id;
-      if (isUUID(targetId)) {
-        const { data: dbData } = await supabase.from("landing_pages").select("visits").eq("id", targetId).maybeSingle();
-        const curV = dbData ? (Number(dbData.visits) || 0) : 0;
-        await supabase.from("landing_pages").update({ visits: curV + 1 }).eq("id", targetId);
-      } else if (page?.name || id) {
-        const searchName = page?.name || id;
-        const { data: dbData } = await supabase.from("landing_pages").select("id, visits").eq("name", searchName).maybeSingle();
-        if (dbData?.id) {
-          const curV = Number(dbData.visits) || 0;
-          await supabase.from("landing_pages").update({ visits: curV + 1 }).eq("id", dbData.id);
-        }
-      }
-    } catch (sbErr) {
-      console.warn("Supabase visit increment notice:", sbErr);
-    }
-
-    return res.json({ success: true, visits: updatedVisits });
+    const result = await incrementLPVisits(id, req.body);
+    return res.json(result);
   } catch (err: any) {
     console.error("Error incrementing visits:", err);
     return res.status(500).json({ error: err?.message || "Internal error" });
@@ -638,12 +673,15 @@ cometLpRouter.post("/api/landing-pages/:id/visit", async (req, res) => {
 
 // Alias para POST /api/landing-pages/visit com lpId no body
 cometLpRouter.post("/api/landing-pages/visit", async (req, res) => {
-  const targetId = req.body?.lpId || req.body?.id || req.body?.slug;
-  if (targetId) {
-    req.params.id = targetId;
-    return (cometLpRouter as any).handle(req, res);
+  try {
+    const targetId = req.body?.lpId || req.body?.id || req.body?.slug;
+    if (!targetId) return res.status(400).json({ error: "lpId ou id ausente no body" });
+    const result = await incrementLPVisits(targetId, req.body);
+    return res.json(result);
+  } catch (err: any) {
+    console.error("Error incrementing visits alias:", err);
+    return res.status(500).json({ error: err?.message || "Internal error" });
   }
-  return res.status(400).json({ error: "lpId ou id ausente no body" });
 });
 
 // Delete preview page from memory

@@ -120,7 +120,7 @@ export function LANStudioHub({
     {
       id: "intro",
       role: "lan",
-      text: `Olá! Sou o **LAN**, seu Engenheiro de UI/UX e CRO de Elite.
+      text: `Olá! Sou o **LANAI**, seu Engenheiro de UI/UX e CRO de Elite.
 Eu crio Landing Pages de altíssimo padrão visual (Padrão People, V0, Dark/Hybrid) com arquitetura de 7 seções de alta conversão: Hero com VSL, Prova Social, Quiz de Qualificação, Bento Grid do Método, Depoimentos, Garantia e Captura com Webhook.
 Informe os dados da sua campanha abaixo ou descreva seu objetivo livremente!`,
       timestamp: new Date()
@@ -145,7 +145,7 @@ Informe os dados da sua campanha abaixo ou descreva seu objetivo livremente!`,
       const base64 = reader.result as string;
       setReferenceImage(base64);
       toast.success("Referência Visual Anexada", {
-        description: "O LAN usará esta imagem para se inspirar no layout e cores!"
+        description: "A LANAI usará esta imagem para se inspirar no layout e cores!"
       });
     };
     reader.readAsDataURL(file);
@@ -336,7 +336,7 @@ ${referenceUrl ? `URL de Referência: ${referenceUrl}` : ""}`,
             type="button"
             onClick={() => setShowSettings(true)}
             className="px-4 py-2.5 rounded-xl bg-card border border-border hover:border-primary/40 text-foreground font-bold text-xs inline-flex items-center gap-2 transition-all shadow-sm cursor-pointer"
-            title="Configurar LLMs, Modelos e Chaves do LAN"
+            title="Configurar LLMs, Modelos e Chaves da LANAI"
           >
             <Settings className="w-4 h-4 text-[#FF6A00]" />
             <span>Modelos & Chaves</span>
@@ -360,7 +360,7 @@ ${referenceUrl ? `URL de Referência: ${referenceUrl}` : ""}`,
                 </div>
                 <div>
                   <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-1.5">
-                    LAN — Engenheiro CRO & UI/UX
+                    LANAI — Engenheiro CRO & UI/UX
                     <span className="h-2 w-2 rounded-full bg-[#FF6A00] animate-pulse" />
                   </h3>
                   <p className="text-[11px] text-muted-foreground">Especialista em Tráfego Direto, VSL e Padrão People</p>
