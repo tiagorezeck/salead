@@ -102,22 +102,29 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
   };
 
   const handleTestConnection = async () => {
-    if (!webappUrlInput.trim()) {
+    const cleanUrl = cleanWebAppUrl(webappUrlInput.trim());
+    if (!cleanUrl) {
       toast.error("Insira a URL do Web App do Google Apps Script.");
       return;
     }
+    setWebappUrlInput(cleanUrl);
 
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await testDriveConnection(webappUrlInput);
-      setTestResult({ success: res.success, message: res.message });
+      const res = await testDriveConnection(cleanUrl);
+      setTestResult({ 
+        success: res.success, 
+        message: res.message,
+        spreadsheetUrl: res.spreadsheetUrl,
+        spreadsheetName: res.spreadsheetName 
+      });
       if (res.success) {
         toast.success("Conexão estabelecida com sucesso!", {
           description: `Planilha pronta: ${res.spreadsheetName || 'SALEAD CRM DATABASE'}`
         });
         setConfig(getDriveConfig());
-        loadCheckpoints(webappUrlInput);
+        loadCheckpoints(cleanUrl);
       } else {
         toast.error("Falha ao conectar:", { description: res.message });
       }
@@ -130,13 +137,15 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
   };
 
   const handleConectarESincronizar = async () => {
-    if (!webappUrlInput.trim()) {
+    const cleanUrl = cleanWebAppUrl(webappUrlInput.trim());
+    if (!cleanUrl) {
       toast.error("Insira a URL do Web App do Google Apps Script.");
       return;
     }
+    setWebappUrlInput(cleanUrl);
 
     const updated = saveDriveConfig({
-      webappUrl: webappUrlInput.trim(),
+      webappUrl: cleanUrl,
       autoSync: autoSyncInput
     });
     setConfig(updated);
@@ -144,14 +153,40 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await testDriveConnection(webappUrlInput.trim());
-      setTestResult({ success: res.success, message: res.message });
+      const res = await testDriveConnection(cleanUrl);
+      setTestResult({ 
+        success: res.success, 
+        message: res.message,
+        spreadsheetUrl: res.spreadsheetUrl,
+        spreadsheetName: res.spreadsheetName 
+      });
       if (res.success) {
-        toast.success("Conectado e sincronizado com o Google Drive!", {
+        toast.success("Conectado com o Google Drive!", {
           description: `Planilha pronta: ${res.spreadsheetName || 'SALEAD CRM DATABASE'}`
         });
         setConfig(getDriveConfig());
-        loadCheckpoints(webappUrlInput.trim());
+        loadCheckpoints(cleanUrl);
+
+        // Envia o banco local inicial para criar as abas no Sheets e a pasta no Drive
+        try {
+          const currentDb = {
+            leads: data.leads,
+            users: data.users,
+            landingPages: data.landingPages,
+            products: data.products,
+            surveys: data.surveys,
+            tasks: data.tasks,
+            pipelines: data.pipelines,
+            playbooks: data.playbooks,
+            company: data.company,
+            exportedAt: new Date().toISOString()
+          };
+          await pushToGoogleDrive(cleanUrl, currentDb);
+          toast.success("Dados locais sincronizados no Google Sheets e Drive com sucesso!");
+          setConfig(getDriveConfig());
+        } catch (syncErr: any) {
+          console.warn("Aviso na sincronização inicial:", syncErr.message);
+        }
       } else {
         toast.error("Falha na validação do link:", { description: res.message });
       }
@@ -580,13 +615,43 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
 
                 {testResult && (
                   <div className={cn(
-                    "p-3.5 rounded-xl text-xs border flex items-center gap-2.5 shadow-sm",
+                    "p-4 rounded-xl text-xs border space-y-2 shadow-sm transition-all",
                     testResult.success
-                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                      : "bg-destructive/10 border-destructive/20 text-destructive"
+                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                      : "bg-destructive/10 border-destructive/20 text-destructive dark:text-red-400"
                   )}>
-                    {testResult.success ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}
-                    <span>{testResult.message}</span>
+                    <div className="flex items-start gap-2.5">
+                      {testResult.success ? (
+                        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="h-5 w-5 shrink-0 text-destructive dark:text-red-400 mt-0.5" />
+                      )}
+                      <div className="flex-1 space-y-1">
+                        <p className="font-semibold leading-relaxed">{testResult.message}</p>
+                        {testResult.success && testResult.spreadsheetUrl && (
+                          <div className="pt-2">
+                            <a 
+                              href={testResult.spreadsheetUrl} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[11px] shadow-sm transition-colors"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" /> Abrir Planilha do Sheets Criada
+                            </a>
+                          </div>
+                        )}
+                        {!testResult.success && (
+                          <div className="pt-2 mt-2 border-t border-destructive/20 text-[11px] space-y-1 text-muted-foreground dark:text-red-300/80">
+                            <p className="font-bold text-foreground">💡 Dica de Auditoria e Resolução:</p>
+                            <ul className="list-disc pl-4 space-y-0.5">
+                              <li>No <strong>Google Apps Script</strong>, clique em <strong>Implantar</strong> &gt; <strong>Gerenciar implantações</strong> &gt; Editar (ícone de lápis ✏️).</li>
+                              <li>Certifique-se de definir <strong>Executar como: Eu</strong> e <strong>Quem pode acessar: Qualquer pessoa (Anyone)</strong>.</li>
+                              <li>Clique em <strong>Implantar</strong> e certifique-se de que a URL termina em <code>/exec</code>.</li>
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

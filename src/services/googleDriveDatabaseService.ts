@@ -104,7 +104,21 @@ export const initializeSharedDriveConfig = async (): Promise<DriveConfig> => {
 export const cleanWebAppUrl = (rawUrl: string): string => {
   if (!rawUrl) return '';
   let url = rawUrl.trim().replace(/^["']|["']$/g, '');
-  if (url.endsWith('/dev')) url = url.replace(/\/dev$/, '/exec');
+
+  // Se o usuário colou apenas o ID de implantação do Apps Script (ex: AKfycb...)
+  if (url.startsWith('AKfy')) {
+    url = `https://script.google.com/macros/s/${url}/exec`;
+  }
+
+  // Se o link for do Google Apps Script
+  if (url.includes('script.google.com/macros/s/')) {
+    if (url.endsWith('/dev')) {
+      url = url.replace(/\/dev$/, '/exec');
+    } else if (!url.endsWith('/exec')) {
+      url = url.replace(/\/+$/, '') + '/exec';
+    }
+  }
+
   return url;
 };
 
@@ -142,49 +156,33 @@ const executeDriveRequest = async (payload: {
   const cleanUrl = cleanWebAppUrl(payload.targetUrl);
   if (!cleanUrl) throw new Error("URL do Google Apps Script não configurada.");
 
-  // Tenta primeiro via /api/drive-proxy do backend (Node.js segue redirecionamentos 302 do Google sem bloqueio de CORS)
-  try {
-    const proxyRes = await fetch('/api/drive-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, targetUrl: cleanUrl })
-    });
-
-    if (proxyRes.ok) {
-      const data = await proxyRes.json();
-      return data;
-    } else {
-      const errData = await proxyRes.json().catch(() => null);
-      if (errData && errData.message) {
-        throw new Error(errData.message);
-      }
-    }
-  } catch (proxyErr: any) {
-    // Se o erro for do proxy explicando login ou permissão, propaga diretamente
-    if (proxyErr.message && (proxyErr.message.includes("login") || proxyErr.message.includes("Qualquer pessoa") || proxyErr.message.includes("HTML"))) {
-      throw proxyErr;
-    }
-    console.warn("Proxy backend indisponível, tentando fetch direto:", proxyErr.message);
+  // Se o usuário colou a URL de edição do Google Apps Script em vez do Web App
+  if (cleanUrl.includes('script.google.com/d/') || cleanUrl.includes('/edit')) {
+    throw new Error("Você inseriu a URL de edição do projeto (script.google.com/d/...). Clique no botão azul 'Implantar' > 'Nova implantação' > tipo 'App da Web' e copie a URL gerada (terminada em /exec).");
   }
 
-  // Fallback: Tentativa direta pelo navegador caso backend não esteja respondendo
-  if (payload.action === 'ping' || payload.action === 'get' || payload.action === 'list_files') {
-    const directRes = await fetch(`${cleanUrl}?action=${payload.action}&t=${Date.now()}`, {
-      method: 'GET',
-      redirect: 'follow'
-    });
-    if (!directRes.ok) throw new Error(`HTTP ${directRes.status}`);
-    return await directRes.json();
-  } else {
-    const directRes = await fetch(cleanUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      redirect: 'follow'
-    });
-    if (!directRes.ok) throw new Error(`HTTP ${directRes.status}`);
-    return await directRes.json();
+  const proxyRes = await fetch('/api/drive-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...payload, targetUrl: cleanUrl })
+  });
+
+  const data = await proxyRes.json().catch(() => null);
+
+  if (!proxyRes.ok) {
+    const errorMsg = data?.message || `Erro de conexão com o proxy (HTTP ${proxyRes.status})`;
+    throw new Error(errorMsg);
   }
+
+  if (!data) {
+    throw new Error("Resposta vazia recebida do servidor.");
+  }
+
+  if (data.status === 'error') {
+    throw new Error(data.message || "Erro desconhecido retornado pelo Google Apps Script.");
+  }
+
+  return data;
 };
 
 // PING / TESTE DE CONEXÃO

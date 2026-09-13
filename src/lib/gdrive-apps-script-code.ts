@@ -609,8 +609,14 @@ function getOrCreateSpreadsheet(folder) {
   }
   var newSs = SpreadsheetApp.create(SPREADSHEET_BASE_NAME);
   var ssFile = DriveApp.getFileById(newSs.getId());
-  folder.addFile(ssFile);
-  DriveApp.getRootFolder().removeFile(ssFile);
+  try {
+    ssFile.moveTo(folder);
+  } catch (eMove) {
+    try {
+      folder.addFile(ssFile);
+      DriveApp.getRootFolder().removeFile(ssFile);
+    } catch (eFallback) {}
+  }
   return newSs;
 }
 

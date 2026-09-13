@@ -63,22 +63,57 @@ app.post("/api/system/drive-config", (req, res) => {
 // ============================================================================
 // PROXY DE CONEXÃO E SINCRONIZAÇÃO COM GOOGLE APPS SCRIPT / GOOGLE DRIVE
 // ============================================================================
+function normalizeGoogleScriptUrl(rawUrl: string): { url: string; error?: string } {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return { url: "", error: "URL do Google Apps Script ausente." };
+  }
+
+  let clean = rawUrl.trim().replace(/^["']|["']$/g, "");
+
+  // Se o usuário colou apenas o ID de implantação (ex: AKfycb...)
+  if (clean.startsWith("AKfy")) {
+    clean = `https://script.google.com/macros/s/${clean}/exec`;
+  }
+
+  // Se colou a URL de edição do script (script.google.com/d/...)
+  if (clean.includes("/edit") || clean.includes("script.google.com/d/")) {
+    return {
+      url: clean,
+      error: "Você colou o link de edição do projeto (script.google.com/d/...). É necessário clicar em 'Implantar' > 'Nova Implantação' > tipo 'App da Web' e copiar a URL gerada (terminada em /exec)."
+    };
+  }
+
+  // Se for URL de Web App mas terminar com /dev ou faltar /exec
+  if (clean.includes("script.google.com/macros/s/")) {
+    if (clean.endsWith("/dev")) {
+      clean = clean.replace(/\/dev$/, "/exec");
+    } else if (!clean.endsWith("/exec")) {
+      // Remove barra extra e adiciona /exec
+      clean = clean.replace(/\/+$/, "") + "/exec";
+    }
+  }
+
+  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    return { url: "", error: "URL inválida. Deve começar com https://script.google.com/macros/s/..." };
+  }
+
+  return { url: clean };
+}
+
 app.post("/api/drive-proxy", async (req, res) => {
   try {
     const { targetUrl, action, data, fileName, base64Data, folderCategory, mimeType } = req.body || {};
 
-    if (!targetUrl || typeof targetUrl !== "string" || !targetUrl.startsWith("http")) {
+    const { url: cleanUrl, error: urlError } = normalizeGoogleScriptUrl(targetUrl);
+    if (urlError) {
       return res.status(400).json({
         status: "error",
-        message: "URL do Google Apps Script inválida ou ausente.",
+        message: urlError,
       });
     }
 
-    let cleanUrl = targetUrl.trim().replace(/^["']|["']$/g, "");
-    if (cleanUrl.endsWith("/dev")) cleanUrl = cleanUrl.replace(/\/dev$/, "/exec");
-
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
+    const timeout = setTimeout(() => controller.abort(), 35000); // 35s timeout
 
     let fetchUrl = cleanUrl;
     let fetchOptions: RequestInit = {
@@ -86,30 +121,33 @@ app.post("/api/drive-proxy", async (req, res) => {
       signal: controller.signal,
     };
 
-    if (action === "ping" || action === "get" || action === "list_files") {
+    if (action === "ping" || action === "get" || action === "list_files" || action === "get_file") {
       const urlObj = new URL(cleanUrl);
       urlObj.searchParams.set("action", action);
+      if (fileName) urlObj.searchParams.set("fileName", fileName);
       urlObj.searchParams.set("t", Date.now().toString());
       fetchUrl = urlObj.toString();
       fetchOptions.method = "GET";
       fetchOptions.headers = {
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Comet-Drive-Connector/2.0",
+        "User-Agent": "SALEAD-Connector/2.0",
       };
     } else {
-      // POST payload (save, create_checkpoint, set_as_root, UPLOAD_MEDIA)
+      // POST payload (save, create_checkpoint, set_as_root, SUBMIT_LP_LEAD, SUBMIT_SURVEY_RESPONSE, UPLOAD_MEDIA)
       fetchOptions.method = "POST";
       fetchOptions.headers = {
         "Content-Type": "text/plain;charset=utf-8",
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Comet-Drive-Connector/2.0",
+        "User-Agent": "SALEAD-Connector/2.0",
       };
-      const payload: any = { action };
+      const payload: any = { action: action || "save" };
       if (data !== undefined) payload.data = data;
       if (fileName !== undefined) payload.fileName = fileName;
       if (base64Data !== undefined) payload.base64Data = base64Data;
       if (folderCategory !== undefined) payload.folderCategory = folderCategory;
       if (mimeType !== undefined) payload.mimeType = mimeType;
+      if (req.body.lead !== undefined) payload.lead = req.body.lead;
+      if (req.body.surveyResponse !== undefined) payload.surveyResponse = req.body.surveyResponse;
 
       fetchOptions.body = JSON.stringify(payload);
     }
@@ -124,22 +162,29 @@ app.post("/api/drive-proxy", async (req, res) => {
       clearTimeout(timeout);
       return res.status(502).json({
         status: "error",
-        message: `Falha ao alcançar o servidor do Google Apps Script: ${fetchErr.message}`,
+        message: `Falha ao alcançar o servidor do Google Apps Script: ${fetchErr.message || "Tempo limite excedido"}`,
       });
     }
 
     // Verificar se retornou HTML de login ou página de erro do Google
-    const isHtml = rawText.trim().startsWith("<!DOCTYPE") || rawText.trim().startsWith("<html") || rawText.includes("accounts.google.com");
+    const trimmed = rawText.trim();
+    const isHtml = trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.includes("accounts.google.com");
     if (isHtml) {
-      if (rawText.includes("accounts.google.com") || rawText.includes("ServiceLogin") || rawText.includes("Sign in")) {
+      if (trimmed.includes("accounts.google.com") || trimmed.includes("ServiceLogin") || trimmed.includes("Sign in")) {
         return res.status(401).json({
           status: "error",
-          message: "O Google solicitou login. A implantação precisa estar configurada como 'Quem pode acessar: Qualquer pessoa' (Anyone) para conectar sem autenticação de tela.",
+          message: "O Google solicitou login. A implantação precisa estar configurada como 'Quem pode acessar: Qualquer pessoa' (Anyone) para conectar sem autenticação de tela. Acesse script.google.com > Implantar > Gerenciar implantações > Editar > Quem pode acessar: Qualquer pessoa.",
+        });
+      }
+      if (trimmed.includes("Authorization is required") || trimmed.includes("Script function not found")) {
+        return res.status(403).json({
+          status: "error",
+          message: "Autorização pendente no Google: Abra seu projeto no script.google.com, selecione a função 'doGet' no topo e clique em 'Executar' uma vez para conceder permissão ao Google Drive e Sheets.",
         });
       }
       return res.status(502).json({
         status: "error",
-        message: "O Google Apps Script retornou uma página HTML em vez de JSON. Certifique-se de que a implantação é do tipo 'App da Web' e a URL termina em '/exec'.",
+        message: "O Google Apps Script retornou uma página HTML em vez de JSON. Certifique-se de que a implantação é do tipo 'App da Web' com acesso para 'Qualquer pessoa' e a URL termina em '/exec'.",
       });
     }
 
@@ -149,7 +194,7 @@ app.post("/api/drive-proxy", async (req, res) => {
     } catch {
       return res.json({
         status: "success",
-        message: rawText || "Operação executada no Google Drive.",
+        message: rawText || "Operação executada no Google Drive com sucesso.",
       });
     }
   } catch (err: any) {
