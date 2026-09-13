@@ -517,7 +517,7 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
                       Criar Script
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Clique no botão <strong>COPIAR CÓDIGO</strong> abaixo e abra <strong>script.new</strong> para colar o código no editor.
+                      Acesse a aba <strong>Código Apps Script</strong> para copiar o código, ou abra <strong>script.new</strong> para colar no editor.
                     </p>
                   </div>
 
@@ -589,86 +589,6 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
                     <span>{testResult.message}</span>
                   </div>
                 )}
-              </div>
-
-              {/* Botões de Ação: Baixar Banco Raiz e Subir Banco Raiz */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={handleBaixarBancoRaiz}
-                  disabled={isSyncingDown}
-                  className="py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {isSyncingDown ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  BAIXAR BANCO RAIZ DO DRIVE
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleSubirBancoRaiz}
-                  disabled={isSyncingUp}
-                  className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {isSyncingUp ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  SUBIR BANCO RAIZ PARA O DRIVE
-                </button>
-              </div>
-
-              {/* Card do Código com Acesso Rápido a script.new e script.google.com */}
-              <div className="rounded-2xl border border-border bg-[#0a0e17] text-white p-5 space-y-4 shadow-xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-800">
-                  <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-zinc-100">
-                    <Code className="h-4 w-4 text-orange-400" />
-                    &lt;/&gt; CÓDIGO ATUALIZADO DO APPS SCRIPT
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <a
-                      href="https://script.google.com"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" /> ABRIR GOOGLE SCRIPT
-                    </a>
-                    <button
-                      type="button"
-                      onClick={handleCopyScript}
-                      className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                    >
-                      {copiedCode ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                      {copiedCode ? "COPIADO!" : "COPIAR CÓDIGO"}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Acesso rápido buttons */}
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-zinc-400 font-bold mr-1">Acesso rápido:</span>
-                  <a
-                    href="https://script.new"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 hover:text-white flex items-center gap-1.5 transition-colors font-medium text-[11px]"
-                  >
-                    <ExternalLink className="h-3 w-3 text-orange-400" /> script.new (Criar Novo Projeto)
-                  </a>
-                  <a
-                    href="https://script.google.com/home"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 hover:text-white flex items-center gap-1.5 transition-colors font-medium text-[11px]"
-                  >
-                    <ExternalLink className="h-3 w-3 text-blue-400" /> script.google.com (Painel de Projetos)
-                  </a>
-                </div>
-
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Abra <a href="https://script.new" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline font-bold">script.new ↗</a>, cole este código e implante como <strong>App da Web</strong> com acesso para <strong>Qualquer pessoa</strong>. Em seguida, cole a URL gerada acima para sincronizar seu banco instantaneamente.
-                </p>
-
-                <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-[#06090f] p-4 text-[11px] font-mono text-emerald-400 max-h-72 overflow-y-auto shadow-inner">
-                  <pre className="whitespace-pre">{SALEAD_GOOGLE_APPS_SCRIPT_CODE}</pre>
-                </div>
               </div>
             </div>
           )}
