@@ -169,6 +169,10 @@ const executeDriveRequest = async (payload: {
 
   const data = await proxyRes.json().catch(() => null);
 
+  if (data && data.status === 'error') {
+    throw new Error(data.message || "Erro retornado pelo Google Apps Script.");
+  }
+
   if (!proxyRes.ok) {
     const errorMsg = data?.message || `Erro de conexão com o proxy (HTTP ${proxyRes.status})`;
     throw new Error(errorMsg);

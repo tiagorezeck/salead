@@ -160,29 +160,35 @@ app.post("/api/drive-proxy", async (req, res) => {
       rawText = await response.text();
     } catch (fetchErr: any) {
       clearTimeout(timeout);
-      return res.status(502).json({
+      return res.json({
         status: "error",
         message: `Falha ao alcançar o servidor do Google Apps Script: ${fetchErr.message || "Tempo limite excedido"}`,
       });
     }
 
-    // Verificar se retornou HTML de login ou página de erro do Google
+    // Verificar se retornou HTML de login, 404 ou página de erro do Google
     const trimmed = rawText.trim();
     const isHtml = trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.includes("accounts.google.com");
-    if (isHtml) {
+    if (isHtml || response.status === 404) {
       if (trimmed.includes("accounts.google.com") || trimmed.includes("ServiceLogin") || trimmed.includes("Sign in")) {
-        return res.status(401).json({
+        return res.json({
           status: "error",
           message: "O Google solicitou login. A implantação precisa estar configurada como 'Quem pode acessar: Qualquer pessoa' (Anyone) para conectar sem autenticação de tela. Acesse script.google.com > Implantar > Gerenciar implantações > Editar > Quem pode acessar: Qualquer pessoa.",
         });
       }
       if (trimmed.includes("Authorization is required") || trimmed.includes("Script function not found")) {
-        return res.status(403).json({
+        return res.json({
           status: "error",
           message: "Autorização pendente no Google: Abra seu projeto no script.google.com, selecione a função 'doGet' no topo e clique em 'Executar' uma vez para conceder permissão ao Google Drive e Sheets.",
         });
       }
-      return res.status(502).json({
+      if (response.status === 404 || trimmed.includes("404") || trimmed.includes("Not Found")) {
+        return res.json({
+          status: "error",
+          message: "URL do Google Apps Script não encontrada (HTTP 404). Certifique-se de que a implantação existe no script.google.com, o tipo é 'App da Web', o acesso é 'Qualquer pessoa' e a URL termina em '/exec'.",
+        });
+      }
+      return res.json({
         status: "error",
         message: "O Google Apps Script retornou uma página HTML em vez de JSON. Certifique-se de que a implantação é do tipo 'App da Web' com acesso para 'Qualquer pessoa' e a URL termina em '/exec'.",
       });
