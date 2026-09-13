@@ -39,6 +39,24 @@ export const getDriveConfig = (): DriveConfig => {
     return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline' };
   }
   try {
+    // Detecta parâmetro de sincronização direta na URL para emparelhamento instantâneo em celulares e outros PCs
+    const urlParams = new URLSearchParams(window.location.search);
+    const driveParam = urlParams.get('drive_url') || urlParams.get('sync_drive');
+    if (driveParam) {
+      const cleanParam = cleanWebAppUrl(decodeURIComponent(driveParam));
+      if (cleanParam) {
+        const autoSyncedConfig: DriveConfig = {
+          webappUrl: cleanParam,
+          autoSync: true,
+          folderName: 'SALEAD/AppDatabase_Data',
+          syncStatus: 'synced',
+          lastSyncTimestamp: Date.now()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(autoSyncedConfig));
+        return autoSyncedConfig;
+      }
+    }
+
     const saved = localStorage.getItem(STORAGE_KEY);
     return saved ? JSON.parse(saved) : { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline' };
   } catch {

@@ -6,6 +6,8 @@ import {
   createCheckpoint, 
   restoreCheckpoint, 
   testDriveConnection,
+  pushToGoogleDrive,
+  fetchFromGoogleDrive,
   DriveFileInfo 
 } from './googleDriveDatabaseService';
 import { 
@@ -24,9 +26,14 @@ import {
   X, 
   Plus, 
   ShieldCheck,
-  Download
+  Download,
+  Upload,
+  Share2,
+  Folder,
+  Zap
 } from 'lucide-react';
 import { SALEAD_GOOGLE_APPS_SCRIPT_CODE } from '@/lib/gdrive-apps-script-code';
+import { toast } from 'sonner';
 
 export interface DriveSyncManagerModalProps {
   isOpen: boolean;
@@ -49,7 +56,10 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [activeTab, setActiveTab] = useState<'manager' | 'guide' | 'structure'>('manager');
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
   const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | undefined>(undefined);
+  const [syncingUp, setSyncingUp] = useState(false);
+  const [syncingDown, setSyncingDown] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -124,6 +134,58 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubirBancoRaiz = async () => {
+    if (!webappUrl.trim()) {
+      setStatusMessage({ text: 'Informe a URL do Web App primeiro.', type: 'error' });
+      return;
+    }
+    try {
+      setSyncingUp(true);
+      await pushToGoogleDrive(webappUrl.trim(), currentData);
+      setStatusMessage({ text: 'Banco de dados enviado para o Google Drive e Sheets com sucesso!', type: 'success' });
+      toast.success('Banco raiz enviado para o Drive e Sheets!');
+    } catch (err: any) {
+      setStatusMessage({ text: 'Erro ao subir banco: ' + err.message, type: 'error' });
+    } finally {
+      setSyncingUp(false);
+    }
+  };
+
+  const handleBaixarBancoRaiz = async () => {
+    if (!webappUrl.trim()) {
+      setStatusMessage({ text: 'Informe a URL do Web App primeiro.', type: 'error' });
+      return;
+    }
+    if (!window.confirm('Deseja baixar os dados mais recentes do Google Drive?')) return;
+    try {
+      setSyncingDown(true);
+      const remoteData = await fetchFromGoogleDrive<any>(webappUrl.trim());
+      if (remoteData) {
+        onDataRestored(remoteData);
+        setStatusMessage({ text: 'Banco raiz baixado com sucesso do Google Drive!', type: 'success' });
+        toast.success('Banco raiz baixado do Google Drive!');
+      } else {
+        setStatusMessage({ text: 'Nenhum dado encontrado no banco remoto.', type: 'info' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ text: 'Erro ao baixar dados: ' + err.message, type: 'error' });
+    } finally {
+      setSyncingDown(false);
+    }
+  };
+
+  const handleCopyShareLink = () => {
+    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+    let shareUrl = `${currentOrigin}/app/dashboard`;
+    if (webappUrl.trim()) {
+      shareUrl += `?drive_url=${encodeURIComponent(webappUrl.trim())}`;
+    }
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedShareLink(true);
+    toast.success('Link de sincronização para celular e outros computadores copiado!');
+    setTimeout(() => setCopiedShareLink(false), 2500);
   };
 
   const handleRestaurar = async (fileName: string) => {
@@ -260,8 +322,68 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
                 </label>
               </div>
 
-              {/* Botões de Ação */}
-              <div className="flex flex-wrap gap-2.5">
+              {/* Links de Acesso Rápido e Outros Aparelhos */}
+              <div className="p-3.5 rounded-2xl bg-muted/40 border border-border space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-orange-500" />
+                    <span className="text-xs font-bold text-foreground uppercase tracking-wider">Acesso Rápido & Outros Aparelhos</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 dark:bg-zinc-800 hover:bg-black text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                  >
+                    {copiedShareLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Share2 className="h-3.5 w-3.5" />}
+                    {copiedShareLink ? 'Link Direto Copiado!' : 'Copiar Link Celular / PC'}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <a
+                    href="https://script.new"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-xl bg-card border border-border hover:bg-muted text-foreground text-xs font-medium flex items-center gap-1.5 transition-colors shadow-xs"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 text-orange-500" /> script.new (Criar Novo Projeto)
+                  </a>
+                  <a
+                    href="https://script.google.com/home"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-xl bg-card border border-border hover:bg-muted text-foreground text-xs font-medium flex items-center gap-1.5 transition-colors shadow-xs"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 text-blue-500" /> script.google.com (Painel de Projetos)
+                  </a>
+                </div>
+              </div>
+
+              {/* Botões de Ação Principais */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleBaixarBancoRaiz}
+                  disabled={syncingDown || !webappUrl.trim()}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {syncingDown ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  Baixar Banco Raiz do Drive
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSubirBancoRaiz}
+                  disabled={syncingUp || !webappUrl.trim()}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {syncingUp ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Subir Banco Raiz para o Drive
+                </button>
+              </div>
+
+              {/* Botões Secundários */}
+              <div className="flex flex-wrap gap-2.5 pt-1">
                 <button
                   type="button"
                   onClick={handleSalvarConfig}
@@ -273,9 +395,9 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
                   type="button"
                   onClick={handleCriarCheckpoint}
                   disabled={loading || !webappUrl.trim()}
-                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer shadow-sm"
+                  className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer shadow-sm"
                 >
-                  <Plus className="h-3.5 w-3.5" /> Criar Checkpoint Agora
+                  <Plus className="h-3.5 w-3.5" /> Criar Checkpoint
                 </button>
                 {spreadsheetUrl && (
                   <a
