@@ -800,6 +800,38 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       console.error("Error in automatic Supabase background save:", saveErr);
     }
 
+    // Auto Drive sync if configured
+    const driveUrl = getSystemDriveUrl();
+    if (driveUrl && driveUrl.startsWith("http")) {
+      try {
+        await fetch(driveUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "SUBMIT_LP_LEAD",
+            lead: {
+              id: lead.id,
+              name: lead.name,
+              company: `${lead.name} (LP: ${lead.pageTitle || lead.pageId || "Landing Page"})`,
+              email: lead.email,
+              whatsapp: lead.whatsapp,
+              pageId: lead.pageId,
+              pageTitle: lead.pageTitle,
+              landingPageId: lead.pageId,
+              landingPageTitle: lead.pageTitle,
+              quizAnswers: lead.quizAnswers || {},
+              utms: lead.utms || {},
+              source: source || lead.utms?.utm_source || "Landing Page",
+              submittedAt: lead.submittedAt
+            }
+          }),
+          redirect: "follow"
+        });
+      } catch (dErr) {
+        console.warn("Drive sync error in Express submit-lead:", dErr);
+      }
+    }
+
     leadSubmissions.unshift(lead);
     if (leadSubmissions.length > 200) {
       leadSubmissions.pop();

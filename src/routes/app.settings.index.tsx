@@ -33,7 +33,7 @@ import { GDriveSettingsModal } from "@/components/crm/gdrive-settings-modal";
 import { AISettingsModal } from "@/components/automation/ai-settings-modal";
 import { useAIConfig } from "@/hooks/useAIConfig";
 import { useBrandStore } from "@/lib/brand-store";
-import { getDriveConfig, type DriveConfig } from "@/lib/gdrive";
+import { getDriveConfig, initializeSharedDriveConfig, type DriveConfig } from "@/services/googleDriveDatabaseService";
 import { 
   getCalendarConnectionState, 
   connectGoogleCalendar, 

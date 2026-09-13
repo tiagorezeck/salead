@@ -31,6 +31,7 @@ import {
 } from "@/data/mock";
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { normalizePhone, validateEmail, parseCurrencyBR } from "@/lib/validators";
+import { getLocalDatabaseRoot, getDriveConfig, fetchFromGoogleDrive } from "@/services/googleDriveDatabaseService";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -1014,8 +1015,75 @@ export function useData() {
         } catch {}
       }
 
+      // 1e. Google Drive / Sheets Sync (capturados na planilha do Google Drive)
+      let driveLeads: Lead[] = [];
+      if (typeof window !== "undefined") {
+        try {
+          const driveConfig = getDriveConfig();
+          const driveRoot: any = getLocalDatabaseRoot();
+          if (driveRoot) {
+            const rawDriveLeads = Array.isArray(driveRoot.leads) 
+              ? driveRoot.leads 
+              : (Array.isArray(driveRoot.data?.leads) ? driveRoot.data.leads : []);
+            const rawDriveLpLeads = Array.isArray(driveRoot.leads_landing_pages) 
+              ? driveRoot.leads_landing_pages 
+              : (Array.isArray(driveRoot.data?.leads_landing_pages) ? driveRoot.data.leads_landing_pages : []);
+
+            const mappedDriveLeads = [...rawDriveLeads, ...rawDriveLpLeads].map((item: any) => {
+              const name = item.name || item.Nome || item["Nome"] || "Lead Capturado";
+              const email = item.email || item.Email || item["Email"] || "";
+              const whatsapp = item.whatsapp || item.WhatsApp || item["WhatsApp"] || "";
+              const pageTitle = item.landingPageTitle || item["Landing Page (Título)"] || item.landingPage || item.landing_page || item.pageTitle || "Landing Page";
+              const pageId = item.landingPageId || item["ID Landing Page"] || item.pageId || item.landing_page_id || "";
+              const source = item.source || item.Origem || `LP: ${pageTitle}`;
+
+              return {
+                id: item.id || item["ID Lead"] || item["ID"] || `drive_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                name,
+                company: item.company || item.Empresa || `${name} (LP: ${pageTitle})`,
+                email,
+                whatsapp,
+                value: Number(item.value || item.Valor) || 0,
+                stage: item.stage || item["Fase / Etapa"] || "Leads",
+                owner: item.owner || item.Responsável || "Inbound LP",
+                source,
+                classification: item.classification || "Lead",
+                temperature: item.temperature || item.Temperatura || "Quente",
+                type: "Inbound",
+                strategy: "CRO Auto",
+                decisionRole: "Decisor",
+                minScore: "Aprovado",
+                landingPage: pageTitle,
+                landingPageId: pageId,
+                tags: Array.isArray(item.tags) ? item.tags : (typeof item.Tags === "string" ? item.Tags.split(",") : ["inbound", "gdrive"]),
+                score: Number(item.score || item.Score) || 85,
+                sla: "ok",
+                lastInteraction: item.lastInteraction || item["Última Interação"] || "Sincronizado via Google Sheets",
+                createdAt: item.createdAt || item.created_at || item["Data Cadastro"] || item["Data / Hora"] || new Date().toISOString(),
+                activities: [],
+                completedCheckpoints: [],
+                status: "Ativo",
+                personType: "PJ",
+                role: "",
+                revenue: "",
+                capag: "",
+                metadata: item
+              };
+            });
+            driveLeads = mappedDriveLeads as any;
+          }
+
+          // Se tiver URL configurada do WebApp, busca atualizações no Drive em background se desconectado
+          if (driveConfig.webappUrl && driveConfig.webappUrl.startsWith("http")) {
+            fetchFromGoogleDrive(driveConfig.webappUrl).catch(() => {});
+          }
+        } catch (err) {
+          console.warn("Aviso ao processar leads do Google Drive/Sheets:", err);
+        }
+      }
+
       // Consolidação e desduplicação por Union-Find (e-mail, WhatsApp, nome/empresa e ID)
-      const allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads];
+      const allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads, ...driveLeads];
 
       function mergeSourcesStr(...sources: (string | undefined)[]): string {
         const set = new Set<string>();
@@ -1376,16 +1444,33 @@ export function useData() {
         let crmLeadsCount = 0;
         try {
           const rawL = localStorage.getItem("comet_local_leads") || "[]";
-          const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-          const allLeads = [...JSON.parse(rawL), ...JSON.parse(rawQ)];
+          const rawQ1 = localStorage.getItem("comet_inbound_leads_queue") || "[]";
+          const rawQ2 = localStorage.getItem("people_cro_leads_v1") || "[]";
+          const driveRoot: any = getLocalDatabaseRoot();
+          const driveLeadsList = Array.isArray(driveRoot?.leads) ? driveRoot.leads : (Array.isArray(driveRoot?.data?.leads) ? driveRoot.data.leads : []);
+          const driveLpLeadsList = Array.isArray(driveRoot?.leads_landing_pages) ? driveRoot.leads_landing_pages : (Array.isArray(driveRoot?.data?.leads_landing_pages) ? driveRoot.data.leads_landing_pages : []);
+
+          const allLeads = [
+            ...JSON.parse(rawL),
+            ...JSON.parse(rawQ1),
+            ...JSON.parse(rawQ2),
+            ...driveLeadsList,
+            ...driveLpLeadsList
+          ];
+
           const normLpName = (lp.name || lp.title || "").trim().toLowerCase();
           const normLpSlug = (lp.slug || "").trim().toLowerCase();
           const normLpId = (lp.id || "").trim().toLowerCase();
 
           crmLeadsCount = allLeads.filter((lead: any) => {
-            if (!lead.landing_page && !lead.landingPage) return false;
-            const leadLp = String(lead.landing_page || lead.landingPage).trim().toLowerCase();
-            if (leadLp === normLpId || leadLp === normLpName || (normLpSlug && leadLp === normLpSlug)) return true;
+            const leadLp = String(lead.landing_page || lead.landingPage || lead["Landing Page (Título)"] || lead.landingPageTitle || lead.pageTitle || lead.metadata?.pageTitle || "").trim().toLowerCase();
+            const leadIdStr = String(lead.landingPageId || lead["ID Landing Page"] || lead.pageId || lead.metadata?.pageId || "").trim().toLowerCase();
+            const leadCompany = String(lead.company || lead.Empresa || "").trim().toLowerCase();
+            const leadSource = String(lead.source || lead.Origem || "").trim().toLowerCase();
+
+            if (normLpId && (leadIdStr === normLpId || leadLp === normLpId)) return true;
+            if (normLpName && (leadLp === normLpName || leadCompany.includes(normLpName) || leadSource.includes(normLpName))) return true;
+            if (normLpSlug && (leadLp === normLpSlug || leadSource.includes(normLpSlug))) return true;
             return false;
           }).length;
         } catch {}

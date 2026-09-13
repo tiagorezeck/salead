@@ -182,7 +182,43 @@ function doPost(e) {
       ]);
 
       // 3. Atualiza o contador de conversões na aba Landing_Pages e no JSON Raiz
-      updateLandingPageLeadCount(spreadsheet, folder, lead.landingPageId, lead.landingPageTitle);
+      updateLandingPageLeadCount(spreadsheet, folder, lead.landingPageId || lead.pageId, lead.landingPageTitle || lead.pageTitle);
+
+      // 4. Atualiza também o JSON raiz no Drive para sync imediato via API/PULL
+      try {
+        var rootFiles = folder.getFilesByName(ROOT_FILE_NAME);
+        var dbObj = {};
+        if (rootFiles.hasNext()) {
+          var rf = rootFiles.next();
+          try { dbObj = JSON.parse(rf.getBlob().getDataAsString("UTF-8")) || {}; } catch(eP) { dbObj = {}; }
+        }
+        if (!Array.isArray(dbObj.leads)) dbObj.leads = [];
+        var lpTitle = lead.landingPageTitle || lead.pageTitle || "Landing Page";
+        var lpId = lead.landingPageId || lead.pageId || "";
+        dbObj.leads.unshift({
+          id: leadId,
+          name: lead.name || "Lead Capturado",
+          company: lead.company || (lead.name ? (lead.name + " (LP: " + lpTitle + ")") : "Empresa"),
+          email: lead.email || "",
+          whatsapp: lead.whatsapp || "",
+          value: 0,
+          stage: "Leads",
+          owner: "Inbound LP",
+          source: lead.source || ("LP: " + lpTitle),
+          classification: "Lead",
+          temperature: "Quente",
+          landingPage: lpTitle,
+          landingPageId: lpId,
+          tags: ["inbound", "landing-page"],
+          score: 85,
+          createdAt: dateFormatted,
+          submittedAt: dateFormatted
+        });
+        
+        var toDel = folder.getFilesByName(ROOT_FILE_NAME);
+        while (toDel.hasNext()) { toDel.next().setTrashed(true); }
+        folder.createFile(ROOT_FILE_NAME, JSON.stringify(dbObj, null, 2), MimeType.PLAIN_TEXT);
+      } catch(eDb) {}
 
       return jsonResponse({
         status: "success",
