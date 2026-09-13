@@ -140,7 +140,13 @@ function LPPage() {
 
     return {
       isExternal: false,
-      badge: hero?.badgeText || (selectedLP.status === "Ativa" ? "PÁGINA ATIVA NO AR" : "RASCUNHO COMET"),
+      badge: hero?.badgeText || (
+        selectedLP.status === "Ativa" 
+          ? "PÁGINA ATIVA NO AR" 
+          : selectedLP.status === "Teste" 
+          ? "AMBIENTE DE TESTE" 
+          : "PÁGINA PAUSADA"
+      ),
       headline: hero?.headline || selectedLP.name || selectedLP.title || "Landing Page de Alta Conversão",
       subheadline: hero?.subheadline || "Apresente sua oferta com direção de arte profissional e gatilhos de conversão.",
       ctaText: hero?.ctaText || "GARANTIR MEU ACESSO AGORA",
@@ -822,12 +828,19 @@ function LPPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            // Ciclo de status: Ativa -> Teste -> Pausada -> Ativa
-                            const nextStatus = lp.status === "Ativa" 
-                              ? "Teste" 
-                              : lp.status === "Teste" 
-                              ? "Pausada" 
-                              : "Ativa";
+                            // Se a LP já rodou (possui histórico de visitas ou leads), não entra mais em Teste: alterna somente entre Ativa e Pausada
+                            const hasHistory = (Number(lp.visits) || 0) > 0 || (Number(lp.leads) || 0) > 0;
+                            
+                            let nextStatus: "Ativa" | "Teste" | "Pausada" = "Ativa";
+                            if (lp.status === "Ativa") {
+                              nextStatus = hasHistory ? "Pausada" : "Teste";
+                            } else if (lp.status === "Teste") {
+                              nextStatus = "Pausada";
+                            } else {
+                              // Pausada -> Ativa
+                              nextStatus = "Ativa";
+                            }
+
                             updateLandingPage(lp.id, { status: nextStatus });
                           }} 
                           className={cn(
@@ -836,9 +849,13 @@ function LPPage() {
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" 
                               : lp.status === "Teste"
                               ? "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800"
-                              : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                              : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
                           )}
-                          title={`Status atual: ${lp.status}. Clique para alternar (Ativa → Teste → Pausada). Ao sair de Teste para Ativa ou Pausada, zera os contadores e limpa os dados de teste.`}
+                          title={
+                            ((Number(lp.visits) || 0) > 0 || (Number(lp.leads) || 0) > 0) && lp.status !== "Teste"
+                              ? `Status atual: ${lp.status}. Esta página já possui histórico real e alterna entre Ativa e Pausada.`
+                              : `Status atual: ${lp.status}. Clique para alternar (Ativa → Teste → Pausada). Ao sair de Teste para Ativa ou Pausada, zera os contadores e limpa os dados de teste.`
+                          }
                         >
                           {lp.status === "Ativa" ? (
                             <Play className="h-2.5 w-2.5" />
@@ -1035,13 +1052,18 @@ function LPPage() {
               navigate({ to: "/app/landing-pages" });
             }} 
             onSave={(updatedPage) => {
+              const currentStatus = editingLP.status || "Ativa";
+              const newStatus = updatedPage.status === "draft" 
+                ? "Pausada" 
+                : (currentStatus === "Teste" || currentStatus === "Pausada" ? currentStatus : "Ativa");
+
               const payload = {
                 ...updatedPage,
                 name: updatedPage.title,
                 template: "COMET",
-                status: updatedPage.status === "draft" ? "Pausada" : "Ativa",
-                visits: updatedPage.viewsCount || 0,
-                leads: updatedPage.leadsCount || 0,
+                status: newStatus,
+                visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
+                leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
                 surveyId: updatedPage.surveyId || editingLP.surveyId || null,
               };
               updateLandingPage(editingLP.id, payload);
