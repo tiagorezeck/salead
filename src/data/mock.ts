@@ -319,6 +319,12 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     "Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado",
     "Acompanhamento", "Renovação", "Upsell / Cross-sell", "Churn / Cancelamento"
   ],
+  "Gestor": [
+    "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Descartado",
+    "Qualificação", "Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido",
+    "Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado",
+    "Acompanhamento", "Renovação", "Upsell / Cross-sell", "Churn / Cancelamento"
+  ],
   "Head of Sales": [
     "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Descartado",
     "Qualificação", "Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido",
@@ -365,6 +371,7 @@ export const SYSTEM_MODULES: SystemModule[] = [
 
 export const DEFAULT_ROLE_MODULES: Record<string, string[]> = {
   "Admin Geral": SYSTEM_MODULES.map(m => m.id),
+  "Gestor": SYSTEM_MODULES.map(m => m.id),
   "Head of Sales": SYSTEM_MODULES.filter(m => m.id !== "settings").map(m => m.id),
   "Team Leader": ["dashboard", "daily_sales", "performance", "crm", "tasks", "leads", "products", "playbooks"],
   "Full Stack Seller": ["dashboard", "daily_sales", "performance", "crm", "tasks", "leads", "products", "playbooks", "landing_pages", "surveys"],

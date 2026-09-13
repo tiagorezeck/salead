@@ -14,6 +14,7 @@ export const Route = createFileRoute("/app/users")({
 
 const ROLES = [
   "Admin Geral", 
+  "Gestor",
   "Head of Sales", 
   "Team Leader", 
   "Marketing", 
@@ -162,6 +163,18 @@ function UsersPage() {
     e.preventDefault();
     if (!userToDelete) return;
 
+    const isSelfToDelete = currentUser && (
+      userToDelete.id === currentUser.id ||
+      (userToDelete.email && currentUser.email && userToDelete.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+      userToDelete.role === "Admin Geral"
+    );
+
+    if (isSelfToDelete) {
+      toast.error("Você não pode excluir a sua própria conta de Administrador Geral!");
+      setUserToDelete(null);
+      return;
+    }
+
     if (!deletePassword.trim()) {
       toast.error("Informe sua senha de Administrador para confirmar a exclusão.");
       return;
@@ -192,11 +205,23 @@ function UsersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+
+    let finalRole = form.role;
+    const isEditingMainAdmin = editingUser && (
+      editingUser.email?.toLowerCase() === (currentUser?.email || "sistemascomet@gmail.com").toLowerCase() ||
+      editingUser.role === "Admin Geral"
+    );
+
+    if (finalRole === "Admin Geral" && !isEditingMainAdmin) {
+      finalRole = "Gestor";
+      toast.info("O sistema permite apenas 1 Administrador Geral. O cargo foi ajustado para Gestor.");
+    }
+
     try {
       if (editingUser) {
         await updateUser(editingUser.id, {
           name: form.name,
-          role: form.role,
+          role: finalRole,
           contact: form.contact,
           avatarUrl: form.avatarUrl,
           avatar_url: form.avatarUrl,
@@ -210,7 +235,7 @@ function UsersPage() {
         await addUser({
           name: form.name,
           email: form.email,
-          role: form.role,
+          role: finalRole,
           contact: form.contact,
           avatarUrl: form.avatarUrl,
           avatar_url: form.avatarUrl,
@@ -369,15 +394,29 @@ function UsersPage() {
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
-                {isAdmin && (
-                  <button 
-                    onClick={() => { setUserToDelete(u); setDeletePassword(""); }} 
-                    className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-all cursor-pointer"
-                    title="Excluir Usuário (Lixeira)"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
+                {(() => {
+                  const isSelf = currentUser && (
+                    u.id === currentUser.id ||
+                    (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                    u.role === "Admin Geral"
+                  );
+                  if (isSelf) {
+                    return (
+                      <span className="px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider flex items-center gap-1" title="Seu Perfil de ADMIN (Protegido contra exclusão)">
+                        <Lock className="h-3 w-3" /> Admin Main
+                      </span>
+                    );
+                  }
+                  return isAdmin ? (
+                    <button 
+                      onClick={() => { setUserToDelete(u); setDeletePassword(""); }} 
+                      className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-all cursor-pointer"
+                      title="Excluir Usuário (Lixeira)"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  ) : null;
+                })()}
               </div>
             </div>
 
@@ -510,7 +549,18 @@ function UsersPage() {
                       }} 
                       className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm outline-none font-bold"
                     >
-                      {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                      {ROLES.map(r => {
+                        const isEditingMainAdmin = editingUser && (
+                          editingUser.email?.toLowerCase() === (currentUser?.email || "sistemascomet@gmail.com").toLowerCase() || 
+                          editingUser.role === "Admin Geral"
+                        );
+                        const isOptionAdminDisabled = r === "Admin Geral" && !isEditingMainAdmin;
+                        return (
+                          <option key={r} value={r} disabled={isOptionAdminDisabled}>
+                            {r} {isOptionAdminDisabled ? " (Apenas 1 Admin por sistema)" : ""}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   <div className="space-y-1.5">

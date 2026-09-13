@@ -40,6 +40,7 @@ import {
   saveSystemCheckpoint,
   formatCheckpointName
 } from "@/services/googleDriveDatabaseService";
+import { getCurrentUser, getRegisteredUsers, removeRegisteredUser } from "@/lib/auth-service";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -1342,15 +1343,75 @@ export function useData() {
   const usersRaw = asArray(useQuery({ 
     queryKey: ['users'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('profiles').select('*').order('name'); 
-      if (error) {
-        console.error("Erro ao carregar perfis:", error);
-        return [];
+      let sbUsers: any[] = [];
+      try {
+        const { data, error } = await supabase.from('profiles').select('*').order('name'); 
+        if (!error && data) sbUsers = data;
+      } catch {}
+
+      const localAuthUsers = getRegisteredUsers();
+      if (sbUsers.length === 0 && localAuthUsers.length > 0) {
+        sbUsers = localAuthUsers.map(u => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          contact: u.contact || "",
+          avatar_url: u.avatarUrl || "",
+          status: u.status
+        }));
+      } else if (localAuthUsers.length > 0) {
+        const sbEmailSet = new Set(sbUsers.map(u => u.email ? u.email.toLowerCase() : ""));
+        const missingLocal = localAuthUsers.filter(u => u.email && !sbEmailSet.has(u.email.toLowerCase()));
+        if (missingLocal.length > 0) {
+          sbUsers = [...sbUsers, ...missingLocal.map(u => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            contact: u.contact || "",
+            avatar_url: u.avatarUrl || "",
+            status: u.status
+          }))];
+        }
       }
-      return data || []; 
+
+      return sbUsers; 
     } 
   }).data);
-  const users = usersRaw.map(mapUserFromDb);
+  
+  const mappedUsers = usersRaw.map(mapUserFromDb);
+
+  // Garantia Rígida: APENAS 1 ADMIN NO SISTEMA (o admin principal do ambiente)
+  const sessionUser = getCurrentUser();
+  const mainAdminEmail = (sessionUser?.email || "sistemascomet@gmail.com").toLowerCase();
+
+  let mainAdminAssigned = false;
+  const users = mappedUsers.map(u => {
+    const isMainAdmin = u.email?.toLowerCase() === mainAdminEmail;
+    if (isMainAdmin) {
+      mainAdminAssigned = true;
+      return u.role === "Admin Geral" ? u : { ...u, role: "Admin Geral" };
+    }
+    // Qualquer outro usuário que estivesse como Admin Geral passa para Gestor
+    if (u.role === "Admin Geral" || u.role === "Admin") {
+      return { ...u, role: "Gestor" };
+    }
+    return u;
+  });
+
+  if (!mainAdminAssigned && users.length > 0) {
+    let firstAdminSeen = false;
+    for (let i = 0; i < users.length; i++) {
+      if (users[i].role === "Admin Geral") {
+        if (!firstAdminSeen) {
+          firstAdminSeen = true;
+        } else {
+          users[i] = { ...users[i], role: "Gestor" };
+        }
+      }
+    }
+  }
 
   // 4. PRODUCTS
   const products = asArray(useQuery({ 
@@ -2354,12 +2415,28 @@ export function useData() {
     },
 
     deleteUser: async (id: string) => { 
-      const { error } = await supabase.from('profiles').delete().eq('id', id);
-      if (error) {
-        console.error("Erro ao remover usuário:", error);
-        toast.error(`Falha ao remover membro: ${error.message}`);
-        throw error;
+      const sessionUser = getCurrentUser();
+      const targetUser = users.find(u => u.id === id);
+      const activeAdminEmail = (sessionUser?.email || "sistemascomet@gmail.com").toLowerCase();
+
+      if (targetUser && (targetUser.email?.toLowerCase() === activeAdminEmail || (targetUser.role === "Admin Geral" && (targetUser.id === currentUser?.id || targetUser.email?.toLowerCase() === currentUser?.email?.toLowerCase())))) {
+        toast.error("Você não pode excluir a sua própria conta de Administrador Geral!");
+        throw new Error("Você não pode excluir a sua própria conta de Administrador Geral!");
       }
+
+      try {
+        await supabase.from('profiles').delete().eq('id', id);
+      } catch (err: any) {
+        console.warn("Aviso ao deletar profile no Supabase:", err);
+      }
+
+      try {
+        removeRegisteredUser(id);
+        if (targetUser?.email) {
+          removeRegisteredUser(targetUser.email);
+        }
+      } catch {}
+
       invalidate('users');
     },
 
@@ -3432,6 +3509,13 @@ export function useData() {
     },
 
     resetData: async () => {
+      const activeSessionUser = getCurrentUser();
+      const userRole = currentUser?.role || activeSessionUser?.role;
+      if (userRole !== "Admin Geral") {
+        toast.error("Acesso Negado: Apenas o Administrador Geral pode resetar o banco de dados!");
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 

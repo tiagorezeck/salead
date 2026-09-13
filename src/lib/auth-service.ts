@@ -35,42 +35,92 @@ export async function hashPassword(password: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Normaliza lista de usuários para garantir que APENAS 1 usuário é Admin Geral
+export function normalizeSingleAdmin(users: AuthUser[], primaryAdminEmail: string = "sistemascomet@gmail.com"): AuthUser[] {
+  if (!Array.isArray(users) || users.length === 0) return [];
+  const targetEmail = primaryAdminEmail.trim().toLowerCase();
+  
+  let mainAdminFound = false;
+  let changed = false;
+
+  const updated = users.map(u => {
+    const isMain = u.email.trim().toLowerCase() === targetEmail;
+    if (isMain) {
+      mainAdminFound = true;
+      if (u.role !== "Admin Geral") {
+        changed = true;
+        return { ...u, role: "Admin Geral" };
+      }
+      return u;
+    }
+
+    // Se não for o Admin principal e tiver cargo 'Admin Geral', converte para 'Gestor'
+    if (u.role === "Admin Geral" || u.role === "Admin") {
+      changed = true;
+      return { ...u, role: "Gestor" };
+    }
+    return u;
+  });
+
+  // Se o e-mail principal não bateu com ninguém na lista, garante que apenas o primeiro 'Admin Geral' permanece
+  if (!mainAdminFound) {
+    let adminSeen = false;
+    for (let i = 0; i < updated.length; i++) {
+      if (updated[i].role === "Admin Geral") {
+        if (!adminSeen) {
+          adminSeen = true;
+        } else {
+          updated[i] = { ...updated[i], role: "Gestor" };
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    saveRegisteredUsers(updated);
+  }
+  return updated;
+}
+
 // Lista de usuários registrados localmente
 export function getRegisteredUsers(): AuthUser[] {
   if (typeof window === "undefined") return [];
+  let users: AuthUser[] = [];
   try {
     const raw = localStorage.getItem(USERS_DB_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) users = JSON.parse(raw);
   } catch {}
 
-  // Usuários padrão iniciais
-  const defaultUsers: AuthUser[] = [
-    {
-      id: "admin-tiago",
-      name: "Tiago Rezeck",
-      email: "tiagorezeck@hotmail.com",
-      role: "Admin Geral",
-      contact: "(11) 98888-7777",
-      status: "Ativo",
-      passwordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // admin
-      createdAt: new Date().toISOString(),
-      approvedAt: new Date().toISOString()
-    },
-    {
-      id: "admin-sistemas",
-      name: "Administrador Comet",
-      email: "sistemascomet@gmail.com",
-      role: "Admin Geral",
-      contact: "(11) 99999-0000",
-      status: "Ativo",
-      passwordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // admin
-      createdAt: new Date().toISOString(),
-      approvedAt: new Date().toISOString()
-    }
-  ];
+  if (!users || users.length === 0) {
+    // Usuários padrão iniciais (1 ADMIN Principal + 1 Gestor)
+    users = [
+      {
+        id: "admin-sistemas",
+        name: "Administrador Comet",
+        email: "sistemascomet@gmail.com",
+        role: "Admin Geral",
+        contact: "(11) 99999-0000",
+        status: "Ativo",
+        passwordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // admin
+        createdAt: new Date().toISOString(),
+        approvedAt: new Date().toISOString()
+      },
+      {
+        id: "gestor-tiago",
+        name: "Tiago Rezeck",
+        email: "tiagorezeck@hotmail.com",
+        role: "Gestor",
+        contact: "(11) 98888-7777",
+        status: "Ativo",
+        passwordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // admin
+        createdAt: new Date().toISOString(),
+        approvedAt: new Date().toISOString()
+      }
+    ];
+  }
 
-  saveRegisteredUsers(defaultUsers);
-  return defaultUsers;
+  return normalizeSingleAdmin(users);
 }
 
 export function saveRegisteredUsers(users: AuthUser[]): void {
@@ -79,6 +129,20 @@ export function saveRegisteredUsers(users: AuthUser[]): void {
     localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
   } catch (err) {
     console.warn("Aviso ao salvar salead_registered_users:", err);
+  }
+}
+
+export function removeRegisteredUser(userIdOrEmail: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const users = getRegisteredUsers();
+    const filtered = users.filter(u => 
+      u.id !== userIdOrEmail && 
+      u.email.toLowerCase() !== userIdOrEmail.toLowerCase()
+    );
+    saveRegisteredUsers(filtered);
+  } catch (err) {
+    console.warn("Aviso ao remover salead_registered_user:", err);
   }
 }
 

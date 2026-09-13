@@ -225,7 +225,13 @@ function DataCenterPage() {
               <AlertTriangle className="h-4 w-4" /> Zona de Perigo
             </div>
             <p className="text-xs text-muted-foreground">O reset cria um Checkpoint de segurança no banco de dados e abre um novo ambiente zerado. <strong className="text-foreground">A sua Base de Leads NUNCA é apagada</strong> (leads só somem se excluídos manualmente).</p>
-            <button onClick={() => setShowResetConfirm(true)} className="w-full py-3 rounded-xl border border-destructive/30 text-destructive text-[10px] font-black uppercase tracking-widest hover:bg-destructive hover:text-white transition-all">LIMPAR BANCO DE DADOS</button>
+            {data.currentUser?.role === "Admin Geral" ? (
+              <button onClick={() => setShowResetConfirm(true)} className="w-full py-3 rounded-xl border border-destructive/30 text-destructive text-[10px] font-black uppercase tracking-widest hover:bg-destructive hover:text-white transition-all cursor-pointer">LIMPAR BANCO DE DADOS</button>
+            ) : (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 text-xs font-semibold text-center">
+                Acesso Restrito: Apenas o Administrador Geral possui permissão para resetar o sistema.
+              </div>
+            )}
           </div>
         </aside>
       </div>
