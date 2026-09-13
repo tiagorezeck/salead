@@ -138,6 +138,120 @@ function PublicLPPage() {
 
       const normId = normalizeSlug(id);
 
+      const recordVisitForLP = async (targetLp: any) => {
+        if (visitTracked.current || !targetLp) return;
+        visitTracked.current = true;
+
+        const targetId = targetLp.id || targetLp.slug || id;
+        const currentVisits = Number(targetLp.visits || targetLp.viewsCount || targetLp.views_count) || 0;
+        const newVisits = currentVisits + 1;
+
+        // 1. Atualiza estado local da página no React
+        if (isMounted) {
+          setLp((prev: any) => {
+            const base = prev || targetLp;
+            const leads = Number(base.leads || base.leads_count) || 0;
+            return {
+              ...base,
+              visits: newVisits,
+              viewsCount: newVisits,
+              views_count: newVisits,
+              conv: Math.round((leads / newVisits) * 100)
+            };
+          });
+        }
+
+        // 2. Atualiza LocalStorage em todas as chaves de Landing Page do sistema
+        if (typeof window !== "undefined") {
+          try {
+            const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
+            for (const key of localKeys) {
+              const raw = localStorage.getItem(key);
+              if (raw) {
+                const list = JSON.parse(raw);
+                if (Array.isArray(list)) {
+                  const updatedList = list.map((p: any) => {
+                    if (p && (p.id === targetLp.id || p.id === id || p.slug === targetLp.slug || p.slug === id)) {
+                      const leads = Number(p.leads || p.leads_count) || 0;
+                      return {
+                        ...p,
+                        visits: newVisits,
+                        viewsCount: newVisits,
+                        views_count: newVisits,
+                        conv: Math.round((leads / newVisits) * 100),
+                        updated_at: new Date().toISOString()
+                      };
+                    }
+                    return p;
+                  });
+                  localStorage.setItem(key, JSON.stringify(updatedList));
+                }
+              }
+            }
+
+            const activePrev = localStorage.getItem("active_preview_page");
+            if (activePrev) {
+              const parsed = JSON.parse(activePrev);
+              if (parsed && (parsed.id === targetLp.id || parsed.id === id || parsed.slug === targetLp.slug || parsed.slug === id)) {
+                const leads = Number(parsed.leads || parsed.leads_count) || 0;
+                localStorage.setItem("active_preview_page", JSON.stringify({
+                  ...parsed,
+                  visits: newVisits,
+                  viewsCount: newVisits,
+                  views_count: newVisits,
+                  conv: Math.round((leads / newVisits) * 100)
+                }));
+              }
+            }
+
+            window.dispatchEvent(new Event("storage"));
+            window.dispatchEvent(new CustomEvent("lp_visit_incremented", { detail: { id: targetId, visits: newVisits } }));
+          } catch (lsErr) {
+            console.warn("Aviso ao atualizar visitas no LocalStorage:", lsErr);
+          }
+        }
+
+        // 3. Notifica o Servidor Express (API do Backend)
+        try {
+          fetch(`/api/landing-pages/${encodeURIComponent(targetId)}/visit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lpId: targetLp.id, id, slug: targetLp.slug })
+          }).catch(() => {});
+        } catch {}
+
+        // 4. Atualiza no Supabase (Banco de dados remoto)
+        try {
+          if (isUUID(targetLp.id)) {
+            await supabase.from("landing_pages").update({ visits: newVisits }).eq("id", targetLp.id);
+          } else if (targetLp.name || targetLp.title) {
+            const pageName = targetLp.name || targetLp.title;
+            const { data: sbRow } = await supabase.from("landing_pages").select("id, visits").eq("name", pageName).maybeSingle();
+            if (sbRow?.id) {
+              const curV = Number(sbRow.visits) || 0;
+              await supabase.from("landing_pages").update({ visits: curV + 1 }).eq("id", sbRow.id);
+            }
+          }
+        } catch (vErr) {
+          console.warn("Aviso ao incrementar visitas no Supabase:", vErr);
+        }
+
+        // 5. Registra evento de Analytics
+        try {
+          if (typeof window !== "undefined") {
+            const { source, utm } = parseUtm(window.location.search);
+            getLPModule().analytics.track({
+              lpId: targetLp.id || id,
+              slug: targetLp.slug || targetLp.id || id,
+              type: "visit",
+              source,
+              utm,
+              referrer: document.referrer || undefined,
+            });
+          }
+        } catch {}
+      };
+
       try {
         // =====================================================================
         // PASSO 1: BUSCA NO SERVIDOR EXPRESS / API (PERSISTENTE E EM MEMÓRIA)
@@ -147,24 +261,7 @@ function PublicLPPage() {
           if (serverPage && !deletedIds.has(serverPage.id) && isMounted) {
             setLp(serverPage);
             setLoading(false);
-
-            // Rastreamento de visita
-            if (!visitTracked.current && typeof window !== "undefined") {
-              const { source, utm } = parseUtm(window.location.search);
-              getLPModule().analytics.track({
-                lpId: serverPage.id,
-                slug: serverPage.slug || serverPage.id,
-                type: "visit",
-                source,
-                utm,
-                referrer: document.referrer || undefined,
-              });
-              if (isUUID(serverPage.id)) {
-                (supabase.rpc("increment_lp_visits", { lp_id: serverPage.id }) as any);
-              }
-              fetch(`/api/landing-pages/${encodeURIComponent(serverPage.id)}/visit`, { method: "POST" }).catch(() => {});
-              visitTracked.current = true;
-            }
+            await recordVisitForLP(serverPage);
             return;
           }
         } catch (srvErr) {
@@ -234,6 +331,8 @@ function PublicLPPage() {
             title: foundData.name,
             template: foundData.template,
             status: foundData.status,
+            visits: Number(foundData.visits) || 0,
+            leads: Number(foundData.leads || foundData.leads_count) || 0,
             ...(typeof foundData.config === "object" ? foundData.config : {}),
             surveyId: foundData.config?.surveyId || foundData.survey_id || undefined,
             externalUrl: foundData.config?.externalUrl || foundData.external_url || undefined,
@@ -244,34 +343,7 @@ function PublicLPPage() {
             setLoading(false);
           }
 
-          // Rastreia visita oficial da LP no Supabase
-          if (!visitTracked.current) {
-            try {
-              const currentVisits = Number(foundData.visits) || 0;
-              if (isUUID(foundData.id)) {
-                await supabase.from("landing_pages").update({ visits: currentVisits + 1 }).eq("id", foundData.id);
-              } else if (foundData.name) {
-                await supabase.from("landing_pages").update({ visits: currentVisits + 1 }).eq("name", foundData.name);
-              }
-            } catch (vErr) {
-              console.warn("Aviso ao incrementar visitas no Supabase:", vErr);
-            }
-
-            fetch(`/api/landing-pages/${encodeURIComponent(foundData.id)}/visit`, { method: "POST" }).catch(() => {});
-
-            if (typeof window !== "undefined") {
-              const { source, utm } = parseUtm(window.location.search);
-              getLPModule().analytics.track({
-                lpId: foundData.id,
-                slug: mappedLP.slug || foundData.id,
-                type: "visit",
-                source,
-                utm,
-                referrer: document.referrer || undefined,
-              });
-            }
-            visitTracked.current = true;
-          }
+          await recordVisitForLP(mappedLP);
           return;
         }
 
@@ -304,6 +376,7 @@ function PublicLPPage() {
               if (localMatch && isMounted) {
                 setLp(localMatch);
                 setLoading(false);
+                await recordVisitForLP(localMatch);
                 return;
               }
             }
@@ -322,6 +395,7 @@ function PublicLPPage() {
         if (presetMatch && isMounted) {
           setLp(presetMatch);
           setLoading(false);
+          await recordVisitForLP(presetMatch);
 
           // Sincroniza em segundo plano no Supabase se ainda não existir
           try {
@@ -346,6 +420,7 @@ function PublicLPPage() {
         if (aiMatch && isMounted) {
           setLp(aiMatch);
           setLoading(false);
+          await recordVisitForLP(aiMatch);
           return;
         }
 

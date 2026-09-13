@@ -561,6 +561,91 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
   return res.status(404).json({ error: "Landing page not found" });
 });
 
+// Endpoint oficial para contabilizar visualizações/visitas de Landing Pages
+cometLpRouter.post("/api/landing-pages/:id/visit", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "ID ausente" });
+
+    let updatedVisits = 1;
+
+    // 1. Atualiza na memória do servidor
+    const page = await findLandingPageAnywhere(id);
+    if (page) {
+      const currentVisits = Number(page.visits || page.viewsCount || page.views_count) || 0;
+      updatedVisits = currentVisits + 1;
+      page.visits = updatedVisits;
+      page.viewsCount = updatedVisits;
+      page.views_count = updatedVisits;
+      const leads = Number(page.leads || page.leads_count) || 0;
+      page.conv = Math.round((leads / updatedVisits) * 100);
+      
+      previewPagesStore.set(id, page);
+      if (page.id) previewPagesStore.set(page.id, page);
+      if (page.slug) previewPagesStore.set(page.slug, page);
+    }
+
+    // 2. Atualiza no arquivo de disco do servidor
+    try {
+      const diskList = readStoredLandingPages();
+      const matchIndex = diskList.findIndex(p => p.id === id || p.slug === id || (page && (p.id === page.id || p.slug === page.slug)));
+      if (matchIndex !== -1) {
+        const target = diskList[matchIndex];
+        const v = (Number(target.visits || target.viewsCount || target.views_count) || 0) + 1;
+        updatedVisits = v;
+        const leads = Number(target.leads || target.leads_count) || 0;
+        diskList[matchIndex] = {
+          ...target,
+          visits: v,
+          viewsCount: v,
+          views_count: v,
+          conv: Math.round((leads / v) * 100),
+          updated_at: new Date().toISOString()
+        };
+        writeStoredLandingPages(diskList);
+      } else if (page) {
+        writeStoredLandingPages([page, ...diskList]);
+      }
+    } catch (diskErr) {
+      console.warn("Express disk visit increment notice:", diskErr);
+    }
+
+    // 3. Atualiza no Supabase
+    try {
+      const targetId = page?.id || id;
+      if (isUUID(targetId)) {
+        const { data: dbData } = await supabase.from("landing_pages").select("visits").eq("id", targetId).maybeSingle();
+        const curV = dbData ? (Number(dbData.visits) || 0) : 0;
+        await supabase.from("landing_pages").update({ visits: curV + 1 }).eq("id", targetId);
+      } else if (page?.name || id) {
+        const searchName = page?.name || id;
+        const { data: dbData } = await supabase.from("landing_pages").select("id, visits").eq("name", searchName).maybeSingle();
+        if (dbData?.id) {
+          const curV = Number(dbData.visits) || 0;
+          await supabase.from("landing_pages").update({ visits: curV + 1 }).eq("id", dbData.id);
+        }
+      }
+    } catch (sbErr) {
+      console.warn("Supabase visit increment notice:", sbErr);
+    }
+
+    return res.json({ success: true, visits: updatedVisits });
+  } catch (err: any) {
+    console.error("Error incrementing visits:", err);
+    return res.status(500).json({ error: err?.message || "Internal error" });
+  }
+});
+
+// Alias para POST /api/landing-pages/visit com lpId no body
+cometLpRouter.post("/api/landing-pages/visit", async (req, res) => {
+  const targetId = req.body?.lpId || req.body?.id || req.body?.slug;
+  if (targetId) {
+    req.params.id = targetId;
+    return (cometLpRouter as any).handle(req, res);
+  }
+  return res.status(400).json({ error: "lpId ou id ausente no body" });
+});
+
 // Delete preview page from memory
 cometLpRouter.delete("/api/pages/preview/:tokenOrId", (req, res) => {
   const { tokenOrId } = req.params;

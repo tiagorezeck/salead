@@ -904,6 +904,28 @@ export function useData() {
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleVisitIncremented = () => {
+      invalidate('landing_pages');
+    };
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.key || e.key.includes("landing") || e.key.includes("preview") || e.key.includes("cro")) {
+        invalidate('landing_pages');
+      }
+    };
+
+    window.addEventListener("lp_visit_incremented", handleVisitIncremented);
+    window.addEventListener("storage", handleStorageChange);
+
+    return () => {
+      window.removeEventListener("lp_visit_incremented", handleVisitIncremented);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
   const { data: session } = useQuery({
     queryKey: ['session'],
     queryFn: async () => {
