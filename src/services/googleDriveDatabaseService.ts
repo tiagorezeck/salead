@@ -161,20 +161,55 @@ const executeDriveRequest = async (payload: {
     throw new Error("Você inseriu a URL de edição do projeto (script.google.com/d/...). Clique no botão azul 'Implantar' > 'Nova implantação' > tipo 'App da Web' e copie a URL gerada (terminada em /exec).");
   }
 
-  const proxyRes = await fetch('/api/drive-proxy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload, targetUrl: cleanUrl })
-  });
+  let proxyRes: Response | null = null;
+  let data: any = null;
 
-  const data = await proxyRes.json().catch(() => null);
+  try {
+    proxyRes = await fetch('/api/drive-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, targetUrl: cleanUrl })
+    });
+    data = await proxyRes.json().catch(() => null);
+  } catch (err) {
+    console.warn("Falha ao chamar /api/drive-proxy, tentando conexão direta...", err);
+  }
+
+  // Se o servidor proxy não existe no ambiente (HTTP 404 no Vercel ou hospedagem estática), faz tentativa direta no Google Apps Script
+  if ((!proxyRes || proxyRes.status === 404) && typeof window !== "undefined") {
+    try {
+      if (payload.action === "ping" || payload.action === "get" || payload.action === "list_files" || payload.action === "get_file") {
+        const directUrl = new URL(cleanUrl);
+        directUrl.searchParams.set("action", payload.action);
+        if (payload.fileName) directUrl.searchParams.set("fileName", payload.fileName);
+        directUrl.searchParams.set("t", Date.now().toString());
+
+        const directRes = await fetch(directUrl.toString(), {
+          method: "GET",
+          headers: { "Accept": "application/json, text/plain, */*" }
+        });
+        const directData = await directRes.json();
+        return directData;
+      } else {
+        const directRes = await fetch(cleanUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload)
+        });
+        const directData = await directRes.json();
+        return directData;
+      }
+    } catch (directErr: any) {
+      throw new Error(`Servidor proxy indisponível (HTTP 404) e falha no acesso direto ao Google Apps Script. Verifique se publicou no Vercel com as rotas /api habilitadas. Erro: ${directErr.message}`);
+    }
+  }
 
   if (data && data.status === 'error') {
     throw new Error(data.message || "Erro retornado pelo Google Apps Script.");
   }
 
-  if (!proxyRes.ok) {
-    const errorMsg = data?.message || `Erro de conexão com o proxy (HTTP ${proxyRes.status})`;
+  if (!proxyRes || !proxyRes.ok) {
+    const errorMsg = data?.message || `Erro de conexão com o proxy (HTTP ${proxyRes ? proxyRes.status : 'Offline'})`;
     throw new Error(errorMsg);
   }
 
