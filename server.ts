@@ -106,7 +106,7 @@ app.post("/api/drive-proxy", async (req, res) => {
 
     const { url: cleanUrl, error: urlError } = normalizeGoogleScriptUrl(targetUrl);
     if (urlError) {
-      return res.status(400).json({
+      return res.json({
         status: "error",
         message: urlError,
       });
@@ -205,7 +205,7 @@ app.post("/api/drive-proxy", async (req, res) => {
     }
   } catch (err: any) {
     console.error("Error in /api/drive-proxy:", err);
-    return res.status(500).json({
+    return res.json({
       status: "error",
       message: `Erro interno no proxy do Google Drive: ${err.message}`,
     });
