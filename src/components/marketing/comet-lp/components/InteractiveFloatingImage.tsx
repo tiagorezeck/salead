@@ -99,7 +99,6 @@ export const InteractiveFloatingImage: React.FC<InteractiveFloatingImageProps> =
   onOpenImagePicker,
 }) => {
   const activeImage = image || element;
-  if (!activeImage) return null;
 
   const handleUpdate = (updated: FloatingImageElement) => {
     if (onUpdateImage) {
@@ -110,6 +109,7 @@ export const InteractiveFloatingImage: React.FC<InteractiveFloatingImageProps> =
   };
 
   const handleDelete = () => {
+    if (!activeImage) return;
     if (onDeleteImage) {
       onDeleteImage(activeImage.id);
     } else if (onDelete) {
@@ -575,6 +575,8 @@ export const InteractiveFloatingImage: React.FC<InteractiveFloatingImageProps> =
       window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isPanning]);
+
+  if (!activeImage) return null;
 
   // Quick Crop Presets (Bust / Half-body, Square, Landscape, Stories, Free)
   const applyCropPreset = (preset: "bust" | "square" | "portrait" | "landscape" | "classic" | "free" | "reset") => {

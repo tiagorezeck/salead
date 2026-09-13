@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/salead_icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && (
+          event.reason.message === 'WebSocket closed without opened.' ||
+          (typeof event.reason === 'string' && event.reason.includes('WebSocket')) ||
+          (event.reason.stack && event.reason.stack.includes('vite'))
+        )) {
+          event.preventDefault();
+        }
+      });
+    </script>
     <title>SALEAD</title>
     <meta name="description" content="SALEAD. Plataforma de Gestão Comercial de alta performance com gestão de leads, automações, analytics e landing pages." />
     <meta property="og:title" content="SALEAD" />

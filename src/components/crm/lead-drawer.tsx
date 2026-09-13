@@ -37,6 +37,7 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
   const [isEditing, setIsEditing] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showSurveyModal, setShowSurveyModal] = useState(false);
+  const [note, setNote] = useState("");
   
   const [editForm, setEditForm] = useState({
     name: "",
@@ -239,7 +240,6 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
     }
   };
 
-  const [note, setNote] = useState("");
   const handleAddNote = () => {
     if (!note.trim()) return;
     const newActivity = { 
