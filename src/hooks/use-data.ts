@@ -31,7 +31,7 @@ import {
 } from "@/data/mock";
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { normalizePhone, validateEmail, parseCurrencyBR } from "@/lib/validators";
-import { getLocalDatabaseRoot, getDriveConfig, fetchFromGoogleDrive } from "@/services/googleDriveDatabaseService";
+import { getLocalDatabaseRoot, getDriveConfig, fetchFromGoogleDrive, clearLpTestDataInDrive } from "@/services/googleDriveDatabaseService";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -2536,12 +2536,98 @@ export function useData() {
                        getInitialAILandingPages().find(p => p.id === id || p.slug === id);
       const targetId = existing?.id || id;
       
-      const updatedItem: LandingPage = {
+      const prevStatus = existing?.status;
+      const nextStatus = lp.status;
+      const isExitingTestMode = prevStatus === "Teste" && (nextStatus === "Ativa" || nextStatus === "Pausada");
+
+      let updatedItem: LandingPage = {
         ...(existing || {}),
         ...lp,
         id: targetId,
         updated_at: new Date().toISOString()
       };
+
+      // Se saiu do status "Teste" para "Ativa" ou "Pausada", zera contadores e apaga leads fake de teste
+      if (isExitingTestMode) {
+        updatedItem = {
+          ...updatedItem,
+          visits: 0,
+          leads: 0,
+          conv: 0,
+          leads_count: 0,
+          viewsCount: 0,
+        };
+
+        const targetTitle = existing?.name || existing?.title || updatedItem.name || updatedItem.title || "";
+        const targetSlug = existing?.slug || updatedItem.slug || "";
+
+        const isLeadFromThisLP = (l: any) => {
+          if (!l) return false;
+          if (l.landingPageId && (l.landingPageId === targetId || l.landingPageId === id)) return true;
+          if (l.landing_page_id && (l.landing_page_id === targetId || l.landing_page_id === id)) return true;
+          if (l.pageId && (l.pageId === targetId || l.pageId === id)) return true;
+          if (targetTitle) {
+            const lowerTitle = targetTitle.toLowerCase();
+            if (l.landingPage && String(l.landingPage).toLowerCase() === lowerTitle) return true;
+            if (l.landing_page && String(l.landing_page).toLowerCase() === lowerTitle) return true;
+            if (l.pageTitle && String(l.pageTitle).toLowerCase() === lowerTitle) return true;
+            if (l.source && String(l.source).toLowerCase().includes(lowerTitle)) return true;
+            if (l.company && String(l.company).toLowerCase().includes(lowerTitle)) return true;
+            if (l.metadata?.pageTitle && String(l.metadata.pageTitle).toLowerCase() === lowerTitle) return true;
+          }
+          if (targetSlug) {
+            const lowerSlug = targetSlug.toLowerCase();
+            if (l.landingPage && String(l.landingPage).toLowerCase().includes(lowerSlug)) return true;
+            if (l.source && String(l.source).toLowerCase().includes(lowerSlug)) return true;
+          }
+          return false;
+        };
+
+        // 1. Limpa leads do cache local do React Query
+        queryClient.setQueryData(['leads'], (old: Lead[] | undefined) => {
+          if (!Array.isArray(old)) return [];
+          return old.filter(l => !isLeadFromThisLP(l));
+        });
+
+        // 2. Limpa leads do localStorage
+        if (typeof window !== "undefined") {
+          try {
+            const cleanLeadStorage = (key: string) => {
+              const raw = localStorage.getItem(key);
+              if (raw) {
+                const list = JSON.parse(raw);
+                if (Array.isArray(list)) {
+                  localStorage.setItem(key, JSON.stringify(list.filter(l => !isLeadFromThisLP(l))));
+                }
+              }
+            };
+            cleanLeadStorage("comet_local_leads");
+            cleanLeadStorage("comet_inbound_leads_queue");
+            cleanLeadStorage("people_cro_leads_v1");
+          } catch (cleanLsErr) {
+            console.warn("Aviso ao limpar leads de teste do localStorage:", cleanLsErr);
+          }
+        }
+
+        // 3. Remove leads do Supabase associados a esta LP
+        try {
+          if (targetTitle) {
+            await supabase.from('leads').delete().or(`landing_page.eq.${targetTitle},source.ilike.%${targetTitle}%`);
+          }
+        } catch (supErr) {
+          console.warn("Aviso ao deletar leads de teste do Supabase:", supErr);
+        }
+
+        // 4. Limpa e zera contadores nas Planilhas e JSON do Google Drive
+        try {
+          clearLpTestDataInDrive(targetId, targetTitle);
+        } catch (gasErr) {
+          console.warn("Aviso ao limpar dados de teste no Google Drive:", gasErr);
+        }
+
+        toast.info(`Fim do modo Teste: contadores zerados e dados fake da Landing Page excluídos com sucesso!`);
+        invalidate('leads');
+      }
 
       // 1. Atualiza no localStorage
       try {

@@ -353,6 +353,96 @@ function doPost(e) {
     }
 
     // =========================================================================
+    // LIMPAR DADOS FAKE E ZERAR CONTADORES DE TESTE DE UMA LANDING PAGE
+    // =========================================================================
+    if (action === "CLEAR_LP_TEST_DATA") {
+      var targetLpId = String(payload.landingPageId || payload.pageId || "");
+      var targetLpTitle = String(payload.landingPageTitle || payload.pageTitle || "");
+
+      // 1. Zera contadores na aba Landing_Pages do Google Sheets
+      var lpSheet = spreadsheet.getSheetByName("Landing_Pages");
+      if (lpSheet) {
+        var lpData = lpSheet.getDataRange().getValues();
+        for (var i = 1; i < lpData.length; i++) {
+          var rowId = String(lpData[i][0]);
+          var rowTitle = String(lpData[i][1]);
+          if ((targetLpId && rowId === targetLpId) || (targetLpTitle && rowTitle.toLowerCase() === targetLpTitle.toLowerCase())) {
+            lpSheet.getRange(i + 1, 5).setValue(0);     // Visitas
+            lpSheet.getRange(i + 1, 6).setValue(0);     // Leads
+            lpSheet.getRange(i + 1, 7).setValue("0%");  // Conversão
+            break;
+          }
+        }
+      }
+
+      // 2. Remove leads vinculados da aba Leads_LandingPages
+      var leadsLpSheet = spreadsheet.getSheetByName("Leads_LandingPages");
+      if (leadsLpSheet) {
+        var lData = leadsLpSheet.getDataRange().getValues();
+        // Percorre de baixo para cima para deleção segura
+        for (var li = lData.length - 1; li >= 1; li--) {
+          var rLpTitle = String(lData[li][2]);
+          var rLpId = String(lData[li][3]);
+          if ((targetLpId && rLpId === targetLpId) || (targetLpTitle && rLpTitle.toLowerCase() === targetLpTitle.toLowerCase())) {
+            leadsLpSheet.deleteRow(li + 1);
+          }
+        }
+      }
+
+      // 3. Remove leads de teste da aba principal Leads
+      var mainLeadsSheet = spreadsheet.getSheetByName("Leads");
+      if (mainLeadsSheet) {
+        var mData = mainLeadsSheet.getDataRange().getValues();
+        for (var mi = mData.length - 1; mi >= 1; mi--) {
+          var rOrigem = String(mData[mi][9]);
+          var rTags = String(mData[mi][11]);
+          var matchLp = (targetLpTitle && (rOrigem.indexOf(targetLpTitle) !== -1 || rTags.indexOf(targetLpTitle) !== -1));
+          if (matchLp) {
+            mainLeadsSheet.deleteRow(mi + 1);
+          }
+        }
+      }
+
+      // 4. Limpa no JSON Raiz
+      try {
+        var rootFiles = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rootFiles.hasNext()) {
+          var rf = rootFiles.next();
+          var db = JSON.parse(rf.getBlob().getDataAsString("UTF-8")) || {};
+          
+          if (Array.isArray(db.landingPages)) {
+            db.landingPages.forEach(function(p) {
+              if ((targetLpId && String(p.id) === targetLpId) || (targetLpTitle && String(p.name || p.title).toLowerCase() === targetLpTitle.toLowerCase())) {
+                p.visits = 0;
+                p.leads = 0;
+                p.leads_count = 0;
+                p.viewsCount = 0;
+                p.conv = 0;
+              }
+            });
+          }
+
+          if (Array.isArray(db.leads)) {
+            db.leads = db.leads.filter(function(l) {
+              var lId = String(l.landingPageId || "");
+              var lTitle = String(l.landingPage || l.source || "");
+              if (targetLpId && lId === targetLpId) return false;
+              if (targetLpTitle && lTitle.indexOf(targetLpTitle) !== -1) return false;
+              return true;
+            });
+          }
+
+          rf.setContent(JSON.stringify(db, null, 2));
+        }
+      } catch(eDbClean) {}
+
+      return jsonResponse({
+        status: "success",
+        message: "Dados de teste da Landing Page limpos e contadores zerados com sucesso nas planilhas e no banco!"
+      });
+    }
+
+    // =========================================================================
     // UPLOAD DE MÍDIA / IMAGEM (BASE64)
     // =========================================================================
     if (action === "UPLOAD_MEDIA") {

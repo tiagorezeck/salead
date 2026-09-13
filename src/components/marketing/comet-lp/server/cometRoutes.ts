@@ -43,11 +43,35 @@ function getSystemDriveUrl(): string {
 const LP_DATA_FILE = path.join(process.cwd(), "data", "landing_pages.json");
 const SURVEYS_DATA_FILE = path.join(process.cwd(), "data", "surveys.json");
 const RESPONSES_DATA_FILE = path.join(process.cwd(), "data", "survey_responses.json");
+const LEADS_DATA_FILE = path.join(process.cwd(), "data", "leads_submissions.json");
 
 function ensureDataDir() {
   const dir = path.dirname(LP_DATA_FILE);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function readStoredLeads(): any[] {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(LEADS_DATA_FILE)) {
+      const raw = fs.readFileSync(LEADS_DATA_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error("Failed to read stored leads submissions:", e);
+  }
+  return [];
+}
+
+function writeStoredLeads(leads: any[]) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(LEADS_DATA_FILE, JSON.stringify(leads, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Failed to write stored leads submissions:", e);
   }
 }
 
@@ -389,7 +413,7 @@ interface LeadSubmission {
   webhookResponse?: string;
 }
 
-const leadSubmissions: LeadSubmission[] = [];
+const leadSubmissions: LeadSubmission[] = readStoredLeads();
 
 // Gemini Client initialization
 function getGeminiClient(): GoogleGenAI | null {
@@ -549,13 +573,100 @@ cometLpRouter.delete("/api/pages/preview/:tokenOrId", (req, res) => {
   return res.json({ success: true });
 });
 
-// Get leads submissions
-cometLpRouter.get("/api/leads", (req, res) => {
-  const pageId = req.query.pageId as string;
-  if (pageId) {
-    return res.json({ leads: leadSubmissions.filter((l) => l.pageId === pageId) });
+// Get leads submissions (disco local persistente + cache + Google Drive sincronizado)
+cometLpRouter.get("/api/leads", async (req, res) => {
+  try {
+    const pageId = req.query.pageId as string;
+    let list = readStoredLeads();
+
+    // Se estiver vazio no arquivo, mas tiver em memória
+    if (list.length === 0 && leadSubmissions.length > 0) {
+      list = [...leadSubmissions];
+      writeStoredLeads(list);
+    }
+
+    // Busca leads do Google Drive se configurado
+    const driveUrl = getSystemDriveUrl();
+    if (driveUrl && driveUrl.startsWith("http")) {
+      try {
+        const driveRes = await fetch(driveUrl + (driveUrl.includes("?") ? "&" : "?") + "action=get", {
+          redirect: "follow",
+          headers: { "Content-Type": "application/json" }
+        });
+        if (driveRes.ok) {
+          const driveData = await driveRes.json();
+          const rawDLeads = Array.isArray(driveData.leads) 
+            ? driveData.leads 
+            : (Array.isArray(driveData.data?.leads) ? driveData.data.leads : []);
+          const rawDLpLeads = Array.isArray(driveData.leads_landing_pages) 
+            ? driveData.leads_landing_pages 
+            : (Array.isArray(driveData.data?.leads_landing_pages) ? driveData.data.leads_landing_pages : []);
+          
+          const driveMapped = [...rawDLeads, ...rawDLpLeads].map((dl: any) => {
+            const name = dl.name || dl.Nome || dl["Nome"] || "Lead Capturado";
+            const email = dl.email || dl.Email || dl["Email"] || "";
+            const whatsapp = dl.whatsapp || dl.WhatsApp || dl["WhatsApp"] || "";
+            const pageTitle = dl.landingPageTitle || dl["Landing Page (Título)"] || dl.landingPage || dl.pageTitle || "Campanha: venda...";
+            const pageId = dl.landingPageId || dl["ID Landing Page"] || dl.pageId || "b8995c0f-7f94-4767-b683-93a2116c71f3";
+            const source = dl.source || dl.Origem || "instagram";
+
+            return {
+              id: dl.id || dl["ID Lead"] || dl["ID"] || `drive_${Math.random().toString(36).substring(2, 7)}`,
+              pageId,
+              pageTitle,
+              name,
+              company: dl.company || dl.Empresa || dl["Empresa"] || `${name} (LP: ${pageTitle})`,
+              email,
+              whatsapp,
+              source,
+              stage: dl.stage || dl["Fase / Etapa"] || "Leads",
+              temperature: dl.temperature || dl.Temperatura || "Quente",
+              score: Number(dl.score || dl.Score) || 85,
+              tags: Array.isArray(dl.tags) ? dl.tags : (typeof dl.Tags === "string" ? dl.Tags.split(",").map((t: string) => t.trim()) : ["LP", "Campanha", "instagram"]),
+              submittedAt: dl.createdAt || dl.created_at || dl["Data Cadastro"] || dl["Data / Hora"] || new Date().toISOString(),
+              webhookStatus: "skipped" as const,
+              quizAnswers: dl.quizAnswers || {},
+              utms: dl.utms || { utm_source: source }
+            };
+          });
+
+          // Mescla sem duplicar
+          const seen = new Set<string>();
+          list.forEach(l => {
+            if (l.id) seen.add(String(l.id));
+            if (l.email) seen.add(l.email.toLowerCase().trim());
+            if (l.whatsapp) seen.add(l.whatsapp.replace(/\D/g, ""));
+          });
+
+          let addedNew = false;
+          for (const dLead of driveMapped) {
+            const cleanE = dLead.email ? dLead.email.toLowerCase().trim() : "";
+            const cleanW = dLead.whatsapp ? dLead.whatsapp.replace(/\D/g, "") : "";
+            if (!seen.has(String(dLead.id)) && (!cleanE || !seen.has(cleanE)) && (!cleanW || !seen.has(cleanW))) {
+              list.push(dLead as any);
+              addedNew = true;
+              if (dLead.id) seen.add(String(dLead.id));
+              if (cleanE) seen.add(cleanE);
+              if (cleanW) seen.add(cleanW);
+            }
+          }
+
+          if (addedNew) {
+            writeStoredLeads(list);
+          }
+        }
+      } catch (dErr) {
+        // Silently continue with disk data
+      }
+    }
+
+    if (pageId) {
+      return res.json({ leads: list.filter((l) => l.pageId === pageId) });
+    }
+    return res.json({ leads: list });
+  } catch (err: any) {
+    return res.json({ leads: leadSubmissions });
   }
-  res.json({ leads: leadSubmissions });
 });
 
 // Update lead submission (e.g. stage change, notes, owner)
@@ -570,6 +681,7 @@ cometLpRouter.patch("/api/leads/:id", async (req, res) => {
         ...updates,
         stage: updates.stage !== undefined ? updates.stage : (leadSubmissions[index] as any).stage,
       };
+      writeStoredLeads(leadSubmissions);
     }
     // Also try to update in Supabase if valid id
     if (isUUID(id)) {
@@ -592,6 +704,7 @@ cometLpRouter.put("/api/leads/:id", async (req, res) => {
     const index = leadSubmissions.findIndex((l) => l.id === id);
     if (index !== -1) {
       leadSubmissions[index] = { ...leadSubmissions[index], ...updates };
+      writeStoredLeads(leadSubmissions);
     }
     if (isUUID(id)) {
       try {
@@ -613,6 +726,7 @@ cometLpRouter.delete("/api/leads/:id", async (req, res) => {
     const index = leadSubmissions.findIndex((l) => l.id === id);
     if (index !== -1) {
       leadSubmissions.splice(index, 1);
+      writeStoredLeads(leadSubmissions);
     }
     if (isUUID(id)) {
       try {
@@ -708,6 +822,7 @@ cometLpRouter.post("/api/webhook/submit-lead", async (req, res) => {
     if (leadSubmissions.length > 200) {
       leadSubmissions.pop();
     }
+    writeStoredLeads(leadSubmissions);
 
     return res.json({
       success: true,
@@ -836,6 +951,7 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
     if (leadSubmissions.length > 200) {
       leadSubmissions.pop();
     }
+    writeStoredLeads(leadSubmissions);
 
     return res.json({
       success: true,

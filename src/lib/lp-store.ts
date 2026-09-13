@@ -161,7 +161,7 @@ export interface LP {
   slug: string;
   type: string;
   template?: string;
-  status: "Ativa" | "Rascunho" | "Pausada";
+  status: "Ativa" | "Rascunho" | "Pausada" | "Teste";
   visits: number;
   leads: number;
   conv: number;

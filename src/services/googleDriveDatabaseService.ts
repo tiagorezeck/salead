@@ -513,3 +513,32 @@ export const submitSurveyResponseToDrive = async (surveyData: {
     return null;
   }
 };
+
+export const clearLpTestDataInDrive = async (lpId: string, lpTitle?: string): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  if (!config.webappUrl) return null;
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await fetch(cleanUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'CLEAR_LP_TEST_DATA',
+        landingPageId: lpId,
+        landingPageTitle: lpTitle || '',
+        timestamp: new Date().toISOString()
+      }),
+      redirect: 'follow'
+    }).then(r => r.json());
+    return res;
+  } catch (err) {
+    console.warn("Aviso ao limpar dados de teste da LP nas planilhas do Google Drive:", err);
+    return null;
+  }
+};
+

@@ -1,0 +1,12 @@
+{
+  "webappUrl": "https://script.google.com/macros/s/AKfycbxi8epC2DRMuU9h9zYg-3tbeFsXf6peapsWVNBizmP4DAXzbk6dip8tkFgtF7J9kI1r/exec",
+  "autoSync": true,
+  "folderName": "SALEAD/AppDatabase_Data",
+  "syncStatus": "synced",
+  "lastSyncTimestamp": 1789321660477,
+  "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1BsOiK5dC7acweEnFEauh8aDXgKI9vIt4C9OVSw7jMu4/edit",
+  "spreadsheetName": "APP_DATABASE_SHEETS",
+  "spreadsheetId": "1BsOiK5dC7acweEnFEauh8aDXgKI9vIt4C9OVSw7jMu4",
+  "lastSyncMessage": "Sincronizado e tabelado com sucesso no Google Sheets!",
+  "connected": true
+}

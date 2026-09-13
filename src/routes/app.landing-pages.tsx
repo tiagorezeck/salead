@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useData } from "@/hooks/use-data";
 import { 
   Sparkles, ExternalLink, Eye, Users, TrendingUp, Plus, Pencil, 
-  Trash2, Play, Pause, Layout, CheckCircle2, ClipboardList, 
+  Trash2, Play, Pause, FlaskConical, Layout, CheckCircle2, ClipboardList, 
   Link as LinkIcon, Layers, Share2, Bot, Globe, ArrowRight, Zap, Target,
   Monitor, ChevronLeft, ChevronRight, ShieldCheck, MoreHorizontal,
   AlertTriangle, X
@@ -428,11 +428,14 @@ function LPPage() {
                 </span>
                 {selectedLP && (
                   <span className={cn(
-                    "text-[9px] px-2 py-0.5 rounded-full font-bold uppercase shrink-0 border",
+                    "text-[9px] px-2 py-0.5 rounded-full font-bold uppercase shrink-0 border flex items-center gap-1",
                     selectedLP.status === "Ativa" 
                       ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                      : selectedLP.status === "Teste"
+                      ? "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800"
                       : "bg-amber-50 text-amber-700 border-amber-200"
                   )}>
+                    {selectedLP.status === "Teste" && <FlaskConical className="h-2.5 w-2.5 text-purple-600 dark:text-purple-400 animate-pulse" />}
                     {selectedLP.status}
                   </span>
                 )}
@@ -819,17 +822,31 @@ function LPPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            updateLandingPage(lp.id, { status: lp.status === "Ativa" ? "Pausada" : "Ativa" });
+                            // Ciclo de status: Ativa -> Teste -> Pausada -> Ativa
+                            const nextStatus = lp.status === "Ativa" 
+                              ? "Teste" 
+                              : lp.status === "Teste" 
+                              ? "Pausada" 
+                              : "Ativa";
+                            updateLandingPage(lp.id, { status: nextStatus });
                           }} 
                           className={cn(
                             "text-[9px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 transition-colors cursor-pointer border",
                             lp.status === "Ativa" 
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" 
+                              : lp.status === "Teste"
+                              ? "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800"
                               : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
                           )}
-                          title="Alternar Status"
+                          title={`Status atual: ${lp.status}. Clique para alternar (Ativa → Teste → Pausada). Ao sair de Teste para Ativa ou Pausada, zera os contadores e limpa os dados de teste.`}
                         >
-                          {lp.status === "Ativa" ? <Play className="h-2.5 w-2.5" /> : <Pause className="h-2.5 w-2.5" />}
+                          {lp.status === "Ativa" ? (
+                            <Play className="h-2.5 w-2.5" />
+                          ) : lp.status === "Teste" ? (
+                            <FlaskConical className="h-2.5 w-2.5 text-purple-600 dark:text-purple-400 animate-pulse" />
+                          ) : (
+                            <Pause className="h-2.5 w-2.5" />
+                          )}
                           {lp.status}
                         </button>
                         <button 

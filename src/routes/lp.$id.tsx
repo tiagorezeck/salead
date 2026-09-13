@@ -162,6 +162,7 @@ function PublicLPPage() {
               if (isUUID(serverPage.id)) {
                 (supabase.rpc("increment_lp_visits", { lp_id: serverPage.id }) as any);
               }
+              fetch(`/api/landing-pages/${encodeURIComponent(serverPage.id)}/visit`, { method: "POST" }).catch(() => {});
               visitTracked.current = true;
             }
             return;
@@ -255,6 +256,8 @@ function PublicLPPage() {
             } catch (vErr) {
               console.warn("Aviso ao incrementar visitas no Supabase:", vErr);
             }
+
+            fetch(`/api/landing-pages/${encodeURIComponent(foundData.id)}/visit`, { method: "POST" }).catch(() => {});
 
             if (typeof window !== "undefined") {
               const { source, utm } = parseUtm(window.location.search);
@@ -756,6 +759,10 @@ function PublicLPPage() {
                       }),
                     }).catch(() => {});
 
+                    fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
+                      method: "POST",
+                    }).catch(() => {});
+
                     fetch("/api/surveys/responses", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
@@ -1013,6 +1020,10 @@ function PublicLPPage() {
                 source: effectiveSource,
                 webhookUrl: (cometPage as any).settings?.webhookUrl,
               }),
+            }).catch(() => {});
+
+            fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
+              method: "POST",
             }).catch(() => {});
           } catch {}
 
