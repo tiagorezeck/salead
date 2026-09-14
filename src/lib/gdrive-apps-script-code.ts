@@ -133,6 +133,41 @@ function doPost(e) {
       var now = new Date();
       var dateFormatted = formatDate(now);
       var leadId = lead.id || ("lead_lp_" + now.getTime() + "_" + Math.random().toString(36).substring(2, 6));
+      var isTestMode = (payload.isTest === true || lead.isTest === true);
+
+      if (isTestMode) {
+        // 1. Grava apenas na aba de testes "leadtest"
+        var testSheet = getOrCreateSheet(spreadsheet, "leadtest", [
+          "Data / Hora", "ID Lead", "Landing Page (Título)", "ID Landing Page", "Nome", "WhatsApp", "E-mail", "Empresa", "Origem", "UTM Source", "UTM Medium", "UTM Campaign", "Respostas / Quiz", "Status"
+        ]);
+
+        var answersStr = typeof lead.answers === 'object' ? JSON.stringify(lead.answers) : (lead.answers || "");
+        var utm = lead.utm || {};
+
+        testSheet.appendRow([
+          dateFormatted,
+          leadId,
+          lead.landingPageTitle || lead.pageTitle || "Landing Page",
+          lead.landingPageId || "",
+          lead.name || "",
+          lead.whatsapp || "",
+          lead.email || "",
+          lead.company || "",
+          lead.source || "Landing Page (Teste)",
+          utm.utm_source || utm.source || "",
+          utm.utm_medium || utm.medium || "",
+          utm.utm_campaign || utm.campaign || "",
+          answersStr,
+          "Lead de Teste"
+        ]);
+
+        return jsonResponse({
+          status: "success",
+          leadId: leadId,
+          isTest: true,
+          message: "Lead de teste capturado com sucesso na Landing Page e registrado na aba de testes [leadtest]!"
+        });
+      }
 
       // 1. Grava na aba específica de conversões de Landing Pages
       var lpSheet = getOrCreateSheet(spreadsheet, "Leads_LandingPages", [
@@ -399,6 +434,20 @@ function doPost(e) {
           var matchLp = (targetLpTitle && (rOrigem.indexOf(targetLpTitle) !== -1 || rTags.indexOf(targetLpTitle) !== -1));
           if (matchLp) {
             mainLeadsSheet.deleteRow(mi + 1);
+          }
+        }
+      }
+
+      // 3.5 Remove leads de teste da aba "leadtest" se houver
+      var testSheet = spreadsheet.getSheetByName("leadtest");
+      if (testSheet) {
+        var tData = testSheet.getDataRange().getValues();
+        // Percorre de baixo para cima para deleção segura
+        for (var ti = tData.length - 1; ti >= 1; ti--) {
+          var rLpTitle = String(tData[ti][2]);
+          var rLpId = String(tData[ti][3]);
+          if ((targetLpId && rLpId === targetLpId) || (targetLpTitle && rLpTitle.toLowerCase() === targetLpTitle.toLowerCase())) {
+            testSheet.deleteRow(ti + 1);
           }
         }
       }

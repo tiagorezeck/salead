@@ -35,7 +35,7 @@ export function KanbanCard({
   const classification = CLASSIFICATION_CONFIG[lead.classification || "Lead"];
   
   const score = calculateLeadScore(lead);
-  const temp = calculateLeadTemperature(score);
+  const temp = calculateLeadTemperature(score, lead);
   const tempColor = getScoreColor(score);
 
   const linkedProduct = products.find(p => p.id === lead.productId);

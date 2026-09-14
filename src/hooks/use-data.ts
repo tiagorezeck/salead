@@ -1541,6 +1541,34 @@ export function useData() {
 
       let result = Array.from(mergedMap.values()).filter(lp => !isDeleted(lp));
 
+      // Background Sync / Self-Healing: Garante que toda LP salva no banco de dados Supabase ou cache local 
+      // também esteja persistida fisicamente no arquivo landing_pages.json do servidor Express.
+      // Isso resolve o problema de LPs não abrirem em outros navegadores ou dispositivos devido a RLS ou cache local.
+      if (result.length > 0) {
+        setTimeout(async () => {
+          try {
+            for (const lp of result) {
+              const matchedServer = serverLps.find(s => s.id === lp.id || (lp.slug && s.slug === lp.slug));
+              
+              const lpTime = lp.updated_at ? new Date(lp.updated_at).getTime() : 0;
+              const serverTime = matchedServer?.updated_at ? new Date(matchedServer.updated_at).getTime() : 0;
+
+              // Se a página não existir no servidor local do Express ou se a versão do banco/local for mais recente
+              if (!matchedServer || lpTime > serverTime + 5000) {
+                console.info(`[Self-Healing] Sincronizando landing page "${lp.name || lp.title}" para persistência física no servidor...`);
+                await fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(lp),
+                });
+              }
+            }
+          } catch (syncErr) {
+            console.warn("Erro ao executar self-healing de landing pages:", syncErr);
+          }
+        }, 1500);
+      }
+
       // Se todas as fontes estiverem vazias e nenhum ID foi deletado pelo usuário, semeia os dados padrões
       if (result.length === 0 && deletedIds.size === 0) {
         result = getInitialAILandingPages().filter(lp => !isDeleted(lp));

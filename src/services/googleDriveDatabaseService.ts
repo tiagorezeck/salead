@@ -501,6 +501,7 @@ export const submitLpLeadToDrive = async (leadData: {
   utm?: any;
   answers?: any;
   customFields?: any;
+  isTest?: boolean;
 }): Promise<any> => {
   let config = getDriveConfig();
   if (!config.webappUrl) {
@@ -516,7 +517,11 @@ export const submitLpLeadToDrive = async (leadData: {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'SUBMIT_LP_LEAD',
-        lead: leadData,
+        lead: {
+          ...leadData,
+          isTest: leadData.isTest || false
+        },
+        isTest: leadData.isTest || false,
         timestamp: new Date().toISOString()
       }),
       redirect: 'follow'

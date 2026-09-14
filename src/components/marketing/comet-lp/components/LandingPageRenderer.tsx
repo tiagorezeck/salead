@@ -538,15 +538,35 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
 
   const handleConfirmSurveyLead = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!leadCaptureFormInput.name.trim() || !leadCaptureFormInput.whatsapp.trim()) {
+    const name = leadCaptureFormInput.name.trim();
+    const email = leadCaptureFormInput.email.trim();
+    const whatsapp = leadCaptureFormInput.whatsapp.trim();
+
+    if (!name || !whatsapp) {
       toast.error("Por favor, preencha seu Nome e WhatsApp para continuar.");
       return;
     }
 
+    // Email validation
+    if (email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        toast.error("Por favor, insira um endereço de e-mail válido.");
+        return;
+      }
+    }
+
+    // Phone validation (xx) xxxxx-xxxx (10 or 11 digits)
+    const cleanPhone = whatsapp.replace(/\D/g, "");
+    if (cleanPhone.length < 10 || cleanPhone.length > 11) {
+      toast.error("Por favor, insira um número de WhatsApp válido com DDD: (xx) xxxxx-xxxx");
+      return;
+    }
+
     const payload = {
-      name: leadCaptureFormInput.name.trim(),
-      email: leadCaptureFormInput.email.trim(),
-      whatsapp: leadCaptureFormInput.whatsapp.trim(),
+      name,
+      email,
+      whatsapp,
       company: leadCaptureFormInput.company.trim(),
       source: "Survey Direct Lead Form",
       quizAnswers: {},
@@ -561,19 +581,27 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
     }
 
     setSurveyLeadData({
-      name: leadCaptureFormInput.name.trim(),
-      email: leadCaptureFormInput.email.trim(),
-      whatsapp: leadCaptureFormInput.whatsapp.trim(),
+      name,
+      email,
+      whatsapp,
       company: leadCaptureFormInput.company.trim(),
     });
 
-    setLeadName(leadCaptureFormInput.name.trim());
-    setLeadEmail(leadCaptureFormInput.email.trim());
-    setLeadPhone(leadCaptureFormInput.whatsapp.trim());
+    setLeadName(name);
+    setLeadEmail(email);
+    setLeadPhone(whatsapp);
 
     setIsSurveyLeadFormOpen(false);
-    setIsSurveyModalOpen(true);
-    toast.success("✅ Cadastro confirmado! Iniciando pesquisa...");
+
+    // Se houver pesquisa vinculada E for uma pesquisa ativa cadastrada (purpose === min ou diferente do padrão fictício), inicia pesquisa
+    const hasRealSurvey = assignedSurvey && (assignedSurvey.id !== "default-survey-hero" || lp?.surveyId);
+    if (hasRealSurvey) {
+      setIsSurveyModalOpen(true);
+      toast.success("✅ Cadastro confirmado! Iniciando pesquisa...");
+    } else {
+      setIsSubmitted(true);
+      toast.success("✅ Cadastro concluído com sucesso!");
+    }
   };
   const [floatingCardConfig, setFloatingCardConfig] = useState<{
     type: "bento" | "testimonial" | "quiz" | "metric" | "faq" | "hero_media";
@@ -7913,7 +7941,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                   required
                   placeholder="(24) 99938-2195"
                   value={leadCaptureFormInput.whatsapp}
-                  onChange={(e) => setLeadCaptureFormInput({ ...leadCaptureFormInput, whatsapp: e.target.value })}
+                  onChange={(e) => setLeadCaptureFormInput({ ...leadCaptureFormInput, whatsapp: formatBrazilianPhone(e.target.value) })}
                   className="w-full px-3.5 py-3 rounded-xl bg-zinc-900 border border-zinc-800 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 text-white placeholder-zinc-500 text-xs font-medium outline-none transition-all"
                 />
               </div>

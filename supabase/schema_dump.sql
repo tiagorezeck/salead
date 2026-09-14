@@ -231,9 +231,13 @@ ALTER TABLE public.surveys ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.surveys TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.surveys TO service_role;
+GRANT SELECT ON TABLE public.surveys TO anon;
 
 CREATE POLICY surveys_all_access ON public.surveys
     FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY surveys_public_read ON public.surveys
+    FOR SELECT TO anon USING (true);
 
 -- survey_responses
 CREATE TABLE IF NOT EXISTS public.survey_responses (
@@ -249,9 +253,16 @@ ALTER TABLE public.survey_responses ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.survey_responses TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.survey_responses TO service_role;
+GRANT SELECT, INSERT ON TABLE public.survey_responses TO anon;
 
 CREATE POLICY survey_responses_all_access ON public.survey_responses
     FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY survey_responses_public_insert ON public.survey_responses
+    FOR INSERT TO anon WITH CHECK (true);
+
+CREATE POLICY survey_responses_public_select ON public.survey_responses
+    FOR SELECT TO anon USING (true);
 
 -- playbooks
 CREATE TABLE IF NOT EXISTS public.playbooks (
@@ -320,9 +331,13 @@ ALTER TABLE public.landing_pages ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.landing_pages TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.landing_pages TO service_role;
+GRANT SELECT ON TABLE public.landing_pages TO anon;
 
 CREATE POLICY landing_pages_all_access ON public.landing_pages
     FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY landing_pages_public_read ON public.landing_pages
+    FOR SELECT TO anon USING (true);
 
 -- automations
 CREATE TABLE IF NOT EXISTS public.automations (

@@ -446,21 +446,7 @@ function PublicLPPage() {
   useEffect(() => {
     const surveyId = lp?.surveyId || (lp as any)?.config?.surveyId || (lp as any)?.minSurveyId || (lp as any)?.survey_id;
     if (!surveyId) {
-      if (surveys && surveys.length > 0) {
-        setAssignedSurvey(surveys[0]);
-      } else if (SURVEY_PRESETS && SURVEY_PRESETS.length > 0) {
-        setAssignedSurvey({
-          ...SURVEY_PRESETS[0],
-          status: "active",
-          settings: {
-            headline: SURVEY_PRESETS[0].name,
-            description: SURVEY_PRESETS[0].description,
-            buttonText: "Iniciar Diagnóstico",
-            thankYouMessage: "Obrigado por responder nosso diagnóstico!",
-            accentColor: SURVEY_PRESETS[0].accentColor || "#FF6B00",
-          },
-        });
-      }
+      setAssignedSurvey(undefined);
       return;
     }
 
@@ -875,6 +861,7 @@ function PublicLPPage() {
                       source: effectiveSource,
                       utm,
                       answers,
+                      isTest: lp.status === "Teste",
                     }).catch(() => {});
                   } catch {}
 
@@ -1132,6 +1119,7 @@ function PublicLPPage() {
               source: effectiveSource,
               utm,
               answers: lead.quizAnswers || {},
+              isTest: lp.status === "Teste",
             }).catch(() => {});
           } catch {}
 
