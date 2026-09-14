@@ -33,8 +33,10 @@ import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { normalizePhone, validateEmail, parseCurrencyBR } from "@/lib/validators";
 import { 
   getLocalDatabaseRoot, 
+  saveLocalDatabaseRoot,
   getDriveConfig, 
   fetchFromGoogleDrive, 
+  pushToGoogleDrive,
   clearLpTestDataInDrive,
   createCheckpoint,
   saveSystemCheckpoint,
@@ -853,31 +855,57 @@ export function useData() {
   const queryClient = useQueryClient();
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
 
-  // Inscreve no Supabase Realtime para sincronização em tempo real entre todos os dispositivos/navegadores
+  // Sincronizador Automático com Google Drive & Google Sheets
   useEffect(() => {
-    const channelId = `comet-rt-${Math.random().toString(36).substring(2, 9)}`;
-    const channel = supabase
-      .channel(channelId)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public' },
-        (payload) => {
-          const table = payload.table;
-          if (table === 'landing_pages') invalidate('landing_pages');
-          if (table === 'leads') invalidate('leads');
-          if (table === 'tasks') invalidate('tasks');
-          if (table === 'products') invalidate('products');
-          if (table === 'surveys') invalidate('surveys');
-          if (table === 'pipelines') invalidate('pipelines');
-          if (table === 'profiles') invalidate('users');
-          if (table === 'objections') invalidate('objections');
-          if (table === 'playbooks') invalidate('playbooks');
+    if (typeof window === "undefined") return;
+
+    let isPolling = false;
+
+    // Sincroniza e recarrega dados quando a configuração do Google Drive é alterada
+    const handleDriveConfigUpdate = async () => {
+      const cfg = getDriveConfig();
+      if (cfg.webappUrl) {
+        try {
+          const remote = await fetchFromGoogleDrive(cfg.webappUrl);
+          if (remote) {
+            invalidate('leads');
+            invalidate('landing_pages');
+            invalidate('tasks');
+            invalidate('products');
+            invalidate('surveys');
+            invalidate('pipelines');
+            invalidate('users');
+            invalidate('objections');
+            invalidate('playbooks');
+            invalidate('automations');
+            invalidate('marketing_investments');
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
+
+    // Polling periódico em segundo plano para manter dados sincronizados com a planilha/Drive
+    const interval = setInterval(async () => {
+      const cfg = getDriveConfig();
+      if (cfg.webappUrl && cfg.autoSync !== false && !isPolling) {
+        try {
+          isPolling = true;
+          const remote = await fetchFromGoogleDrive(cfg.webappUrl);
+          if (remote) {
+            invalidate('leads');
+            invalidate('landing_pages');
+          }
+        } catch {} finally {
+          isPolling = false;
         }
-      )
-      .subscribe();
+      }
+    }, 15000);
 
     return () => {
-      supabase.removeChannel(channel);
+      window.removeEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
+      clearInterval(interval);
     };
   }, []);
 
@@ -1345,12 +1373,32 @@ export function useData() {
   const tasks = asArray(useQuery({ 
     queryKey: ['tasks'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('tasks').select('*').order('created_at', { ascending: false }); 
-      if (error) {
-        console.error("Erro ao carregar tasks:", error);
-        return [];
+      let dbTasks: any[] = [];
+      try {
+        const { data, error } = await supabase.from('tasks').select('*').order('created_at', { ascending: false }); 
+        if (!error && data && data.length > 0) {
+          dbTasks = data.map(mapTaskFromDb);
+        }
+      } catch {}
+
+      if (dbTasks.length === 0) {
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          const driveTasks = Array.isArray(driveRoot?.tasks) ? driveRoot.tasks : (Array.isArray(driveRoot?.data?.tasks) ? driveRoot.data.tasks : []);
+          if (driveTasks.length > 0) {
+            dbTasks = driveTasks.map(mapTaskFromDb);
+          }
+        } catch {}
       }
-      return (data || []).map(mapTaskFromDb); 
+
+      if (dbTasks.length === 0 && typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("comet_local_tasks");
+          if (raw) dbTasks = JSON.parse(raw);
+        } catch {}
+      }
+
+      return dbTasks;
     } 
   }).data);
 
@@ -1432,12 +1480,32 @@ export function useData() {
   const products = asArray(useQuery({ 
     queryKey: ['products'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('products').select('*').order('name'); 
-      if (error) {
-        console.error("Erro ao carregar produtos:", error);
-        return [];
+      let dbProducts: any[] = [];
+      try {
+        const { data, error } = await supabase.from('products').select('*').order('name'); 
+        if (!error && data && data.length > 0) {
+          dbProducts = data.map(mapProductFromDb);
+        }
+      } catch {}
+
+      if (dbProducts.length === 0) {
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          const driveProds = Array.isArray(driveRoot?.products) ? driveRoot.products : (Array.isArray(driveRoot?.data?.products) ? driveRoot.data.products : []);
+          if (driveProds.length > 0) {
+            dbProducts = driveProds.map(mapProductFromDb);
+          }
+        } catch {}
       }
-      return (data || []).map(mapProductFromDb); 
+
+      if (dbProducts.length === 0 && typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("comet_local_products");
+          if (raw) dbProducts = JSON.parse(raw);
+        } catch {}
+      }
+
+      return dbProducts;
     } 
   }).data);
 
@@ -1445,12 +1513,32 @@ export function useData() {
   const objections = asArray(useQuery({ 
     queryKey: ['objections'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('objections').select('*'); 
-      if (error) {
-        console.error("Erro ao carregar objeções:", error);
-        return [];
+      let dbObjections: any[] = [];
+      try {
+        const { data, error } = await supabase.from('objections').select('*'); 
+        if (!error && data && data.length > 0) {
+          dbObjections = data as Objection[];
+        }
+      } catch {}
+
+      if (dbObjections.length === 0) {
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          const driveObjs = Array.isArray(driveRoot?.objections) ? driveRoot.objections : (Array.isArray(driveRoot?.data?.objections) ? driveRoot.data.objections : []);
+          if (driveObjs.length > 0) {
+            dbObjections = driveObjs;
+          }
+        } catch {}
       }
-      return (data || []) as Objection[]; 
+
+      if (dbObjections.length === 0 && typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("comet_local_objections");
+          if (raw) dbObjections = JSON.parse(raw);
+        } catch {}
+      }
+
+      return dbObjections;
     } 
   }).data);
 
@@ -1458,12 +1546,32 @@ export function useData() {
   const marketingInvestments = asArray(useQuery({ 
     queryKey: ['marketing_investments'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('marketing_investments').select('*').order('start_date', { ascending: false }); 
-      if (error) {
-        console.warn("Marketing investments query:", error.message);
-        return [];
+      let dbInvestments: any[] = [];
+      try {
+        const { data, error } = await supabase.from('marketing_investments').select('*').order('start_date', { ascending: false }); 
+        if (!error && data && data.length > 0) {
+          dbInvestments = data;
+        }
+      } catch {}
+
+      if (dbInvestments.length === 0) {
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          const driveInv = Array.isArray(driveRoot?.marketing_investments) ? driveRoot.marketing_investments : (Array.isArray(driveRoot?.data?.marketing_investments) ? driveRoot.data.marketing_investments : []);
+          if (driveInv.length > 0) {
+            dbInvestments = driveInv;
+          }
+        } catch {}
       }
-      return data || []; 
+
+      if (dbInvestments.length === 0 && typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("comet_local_investments");
+          if (raw) dbInvestments = JSON.parse(raw);
+        } catch {}
+      }
+
+      return dbInvestments;
     } 
   }).data);
 
@@ -1710,12 +1818,32 @@ export function useData() {
   const automations = asArray(useQuery({ 
     queryKey: ['automations'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('automations').select('*').order('created_at', { ascending: false }); 
-      if (error) {
-        console.error("Erro ao carregar automações:", error);
-        return [];
+      let dbAutomations: any[] = [];
+      try {
+        const { data, error } = await supabase.from('automations').select('*').order('created_at', { ascending: false }); 
+        if (!error && data && data.length > 0) {
+          dbAutomations = data.map(mapAutomationFromDb);
+        }
+      } catch {}
+
+      if (dbAutomations.length === 0) {
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          const driveAutos = Array.isArray(driveRoot?.automations) ? driveRoot.automations : (Array.isArray(driveRoot?.data?.automations) ? driveRoot.data.automations : []);
+          if (driveAutos.length > 0) {
+            dbAutomations = driveAutos.map(mapAutomationFromDb);
+          }
+        } catch {}
       }
-      return (data || []).map(mapAutomationFromDb); 
+
+      if (dbAutomations.length === 0 && typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("comet_local_automations");
+          if (raw) dbAutomations = JSON.parse(raw);
+        } catch {}
+      }
+
+      return dbAutomations;
     } 
   }).data);
 
@@ -1831,12 +1959,25 @@ export function useData() {
   const playbooksDb = asArray(useQuery({ 
     queryKey: ['playbooks'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('playbooks').select('*'); 
-      if (error) {
-        console.error("Erro ao carregar playbooks:", error);
-        return [];
+      let dbPbs: any[] = [];
+      try {
+        const { data, error } = await supabase.from('playbooks').select('*'); 
+        if (!error && data && data.length > 0) {
+          dbPbs = data.map(mapPlaybookFromDb);
+        }
+      } catch {}
+
+      if (dbPbs.length === 0) {
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          const drivePbs = Array.isArray(driveRoot?.playbooks) ? driveRoot.playbooks : (Array.isArray(driveRoot?.data?.playbooks) ? driveRoot.data.playbooks : []);
+          if (drivePbs.length > 0) {
+            dbPbs = drivePbs.map(mapPlaybookFromDb);
+          }
+        } catch {}
       }
-      return (data || []).map(mapPlaybookFromDb); 
+
+      return dbPbs;
     } 
   }).data);
 
@@ -2789,7 +2930,6 @@ export function useData() {
           const { error } = await supabase.from('landing_pages').upsert(dbPayload);
           if (error) {
             console.warn("Erro ao fazer upsert no Supabase, tentando update direto:", error.message);
-            // Fallback direto
             const { data } = await supabase.from('landing_pages').select('id').eq('id', targetId).maybeSingle();
             if (data) {
               await supabase.from('landing_pages').update(dbPayload).eq('id', targetId);
@@ -2797,8 +2937,23 @@ export function useData() {
               await supabase.from('landing_pages').insert([dbPayload]);
             }
           }
-        } else if (updatedItem.name) {
-          await supabase.from('landing_pages').update(dbPayload).eq('name', updatedItem.name);
+        } else {
+          // Busca por client_id, slug ou name caso não seja UUID
+          const { data: existingRow } = await supabase
+            .from('landing_pages')
+            .select('id')
+            .or(`config->>client_id.eq.${targetId},config->>slug.eq.${updatedItem.slug || targetId},name.eq.${updatedItem.name || targetId}`)
+            .limit(1)
+            .maybeSingle();
+
+          if (existingRow?.id) {
+            await supabase.from('landing_pages').update(dbPayload).eq('id', existingRow.id);
+          } else {
+            const { data: inserted } = await supabase.from('landing_pages').insert([dbPayload]).select().maybeSingle();
+            if (inserted?.id) {
+              updatedItem.id = inserted.id;
+            }
+          }
         }
       } catch (err: any) {
         console.warn("Supabase update/upsert notice:", err);

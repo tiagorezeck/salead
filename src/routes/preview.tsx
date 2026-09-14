@@ -4,8 +4,9 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createFileRoute, useSearch, useNavigate } from "@tanstack/react-router";
 import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/LandingPageRenderer";
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
+import { ensureCometLP } from "@/components/marketing/comet-lp/utils/cometAdapter";
 import { getInitialAILandingPages } from "@/hooks/use-data";
-import { supabase } from "@/integrations/supabase/client";
+import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 import { fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
 import { parseUtm } from "@/modules/landing-pages";
 import { getStoredTracking } from "@/components/marketing/lp-tracking-capture";
@@ -330,7 +331,7 @@ export function PreviewPage() {
       },
     };
 
-    // Envia direto para o banco de dados do sistema
+    // Envia direto para o banco de dados do sistema e Google Drive/Sheets
     try {
       await fetch("/api/submit-lead", {
         method: "POST",
@@ -345,6 +346,23 @@ export function PreviewPage() {
           body: JSON.stringify(payload),
         });
       } catch {}
+    }
+
+    try {
+      await submitLpLeadToDrive({
+        landingPageId: page?.id || targetId,
+        landingPageTitle: page?.title || page?.name || "Página Preview",
+        name: leadData.name || "Lead Teste Preview",
+        email: leadData.email || "",
+        whatsapp: leadData.whatsapp || "",
+        company: `${leadData.name || "Lead Teste"} (Preview: ${page?.title || page?.name || "LP"})`,
+        source: source || "preview-test",
+        utm,
+        answers: leadData.quizAnswers || {},
+        isTest: true,
+      });
+    } catch (gErr) {
+      console.warn("Google Drive test lead sync notice:", gErr);
     }
 
     toast.success("✅ Lead de Teste registrado com sucesso no CRM!", {
@@ -531,7 +549,7 @@ export function PreviewPage() {
           )}
         >
           <LandingPageRenderer
-            page={page}
+            page={ensureCometLP(page)}
             deviceView={device}
             isEditorPreview={false}
             onLeadSubmit={handleLeadSubmit}
