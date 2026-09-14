@@ -17,10 +17,10 @@
 // 📁 Pasta Raiz: SALEAD
 //    └── 📁 Pasta AppDatabase_Data:
 //         ├── 📄 database_root.json: Arquivo mestre com o estado atual em JSON.
-//         ├── 📊 APP_DATABASE_SHEETS: Planilha do Sheets com abas formatadas.
-//         ├── 📁 Backups: Snapshots automáticos diários da planilha e backups JSON.
+//         ├── 📊 SALEAD_DATA: Planilha mestre do Sheets com abas formatadas.
+//         ├── 📁 Backups: Snapshots diários e checkpoints (ex: SALEAD_14-09-2026_16-09).
 //         ├── 📁 Midia: Imagens e anexos Base64 com links públicos diretos.
-//         └── 📄 checkpoint_YYYY-MM-DD_HH-mm.json: Pontos de restauração manuais.
+//         └── 📄 SALEAD_DATA_DD-MM-YYYY_HH-mm.json: Pontos de restauração manuais.
 // =========================================================================
 
 export const SALEAD_GOOGLE_APPS_SCRIPT_CODE = `// =========================================================================
@@ -31,7 +31,7 @@ const ROOT_FOLDER_NAME = "SALEAD";
 const DATA_FOLDER_NAME = "AppDatabase_Data";
 const BACKUP_FOLDER_NAME = "Backups";
 const MEDIA_FOLDER_NAME = "Midia";
-const SPREADSHEET_BASE_NAME = "APP_DATABASE_SHEETS";
+const SPREADSHEET_BASE_NAME = "SALEAD_DATA";
 const ROOT_FILE_NAME = "database_root.json";
 
 function doGet(e) {
@@ -354,15 +354,15 @@ function doPost(e) {
     if (action === "create_checkpoint") {
       var now = new Date();
       var timestamp = formatDate(now);
-      var checkpointName = "Checkpoint-" + timestamp + ".json";
+      var checkpointName = "SALEAD_DATA_" + timestamp + ".json";
       var content = JSON.stringify(payload.data || payload, null, 2);
       folder.createFile(checkpointName, content, MimeType.PLAIN_TEXT);
 
-      // Snapshot da planilha no Drive
+      // Snapshot da planilha no Drive (EX: SALEAD_14-09-2026_16-09)
       var backupFolder = getOrCreateFolder(BACKUP_FOLDER_NAME, folder);
-      DriveApp.getFileById(spreadsheet.getId()).makeCopy("SHEETS_SNAPSHOT_" + timestamp, backupFolder);
+      DriveApp.getFileById(spreadsheet.getId()).makeCopy("SALEAD_" + timestamp, backupFolder);
 
-      return jsonResponse({ status: "success", fileName: checkpointName, message: "Checkpoint salvo com sucesso!" });
+      return jsonResponse({ status: "success", fileName: checkpointName, message: "Checkpoint salvo com sucesso (" + checkpointName + ")!" });
     }
 
     // =========================================================================
@@ -489,6 +489,310 @@ function doPost(e) {
         status: "success",
         message: "Dados de teste da Landing Page limpos e contadores zerados com sucesso nas planilhas e no banco!"
       });
+    }
+
+    // =========================================================================
+    // AÇÃO: EXCLUIR LANDING PAGE(S) DO GOOGLE DRIVE E SHEETS
+    // =========================================================================
+    if (action === "DELETE_LANDING_PAGE" || action === "DELETE_LP" || action === "DELETE_MULTIPLE_LANDING_PAGES") {
+      var rawIds = payload.ids || (payload.landingPageId ? [payload.landingPageId] : (payload.pageId ? [payload.pageId] : []));
+      var targetIds = Array.isArray(rawIds) ? rawIds.map(String) : [String(rawIds)];
+      var targetTitle = payload.landingPageTitle || payload.pageTitle || "";
+      var targetSlug = payload.slug || "";
+      var idSet = {};
+      targetIds.forEach(function(id) { if (id) idSet[id] = true; });
+
+      // 1. Remove linha(s) da aba Landing_Pages do Google Sheets
+      var lpSheet = spreadsheet.getSheetByName("Landing_Pages");
+      if (lpSheet) {
+        var lpData = lpSheet.getDataRange().getValues();
+        for (var i = lpData.length - 1; i >= 1; i--) {
+          var rowId = String(lpData[i][0] || "");
+          var rowTitle = String(lpData[i][1] || "");
+          var rowSlug = String(lpData[i][2] || "");
+          var shouldDelete = Boolean(
+            (rowId && idSet[rowId]) ||
+            (targetTitle && rowTitle.toLowerCase() === String(targetTitle).toLowerCase()) ||
+            (targetSlug && rowSlug.toLowerCase() === String(targetSlug).toLowerCase())
+          );
+          if (shouldDelete) {
+            lpSheet.deleteRow(i + 1);
+          }
+        }
+      }
+
+      // 2. Remove leads relacionados na aba Leads_LandingPages se solicitado ou por ID/Título
+      var leadsLpSheet = spreadsheet.getSheetByName("Leads_LandingPages");
+      if (leadsLpSheet) {
+        var lData = leadsLpSheet.getDataRange().getValues();
+        for (var li = lData.length - 1; li >= 1; li--) {
+          var rLpTitle = String(lData[li][2] || "");
+          var rLpId = String(lData[li][3] || "");
+          var isMatch = Boolean(
+            (rLpId && idSet[rLpId]) ||
+            (targetTitle && rLpTitle.toLowerCase() === String(targetTitle).toLowerCase())
+          );
+          if (isMatch) {
+            leadsLpSheet.deleteRow(li + 1);
+          }
+        }
+      }
+
+      // 3. Atualiza JSON raiz no Drive
+      var updatedLpList = [];
+      try {
+        var rootFiles = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rootFiles.hasNext()) {
+          var rf = rootFiles.next();
+          var db = JSON.parse(rf.getBlob().getDataAsString("UTF-8")) || {};
+          
+          if (Array.isArray(db.landingPages)) {
+            db.landingPages = db.landingPages.filter(function(p) {
+              if (!p) return false;
+              var pId = String(p.id || "");
+              var pSlug = String(p.slug || "");
+              var pTitle = String(p.title || p.name || "");
+              if (pId && idSet[pId]) return false;
+              if (targetSlug && pSlug.toLowerCase() === String(targetSlug).toLowerCase()) return false;
+              if (targetTitle && pTitle.toLowerCase() === String(targetTitle).toLowerCase()) return false;
+              return true;
+            });
+            updatedLpList = db.landingPages;
+          }
+
+          if (Array.isArray(db.leads_landing_pages)) {
+            db.leads_landing_pages = db.leads_landing_pages.filter(function(l) {
+              var lId = String(l.landingPageId || l["ID Landing Page"] || "");
+              var lTitle = String(l.landingPageTitle || l.landingPage || "");
+              if (lId && idSet[lId]) return false;
+              if (targetTitle && lTitle.toLowerCase() === String(targetTitle).toLowerCase()) return false;
+              return true;
+            });
+          }
+
+          rf.setContent(JSON.stringify(db, null, 2));
+        }
+      } catch(eDbDel) {}
+
+      return jsonResponse({
+        status: "success",
+        deletedIds: targetIds,
+        remainingCount: updatedLpList.length,
+        message: "Landing Page excluída permanentemente do Google Drive e Google Sheets!"
+      });
+    }
+
+    // =========================================================================
+    // AÇÃO: EXCLUIR LEAD(S) DO GOOGLE DRIVE E SHEETS
+    // =========================================================================
+    if (action === "DELETE_LEAD" || action === "DELETE_MULTIPLE_LEADS") {
+      var rawLeadIds = payload.ids || (payload.leadId ? [payload.leadId] : (payload.id ? [payload.id] : []));
+      var targetLeadIds = Array.isArray(rawLeadIds) ? rawLeadIds.map(String) : [String(rawLeadIds)];
+      var leadEmail = (payload.email || "").trim().toLowerCase();
+      var leadPhone = (payload.whatsapp || payload.phone || "").replace(/[^0-9]/g, "");
+      var leadIdSet = {};
+      targetLeadIds.forEach(function(id) { if (id) leadIdSet[id] = true; });
+
+      // 1. Remove da aba principal Leads
+      var mainLeads = spreadsheet.getSheetByName("Leads");
+      if (mainLeads) {
+        var mRows = mainLeads.getDataRange().getValues();
+        for (var mi = mRows.length - 1; mi >= 1; mi--) {
+          var rId = String(mRows[mi][0] || "");
+          var rEmail = String(mRows[mi][3] || "").trim().toLowerCase();
+          var rPhone = String(mRows[mi][4] || "").replace(/[^0-9]/g, "");
+          var match = Boolean(
+            (rId && leadIdSet[rId]) ||
+            (leadEmail && rEmail === leadEmail) ||
+            (leadPhone && leadPhone.length >= 8 && rPhone === leadPhone)
+          );
+          if (match) {
+            mainLeads.deleteRow(mi + 1);
+          }
+        }
+      }
+
+      // 2. Remove da aba Leads_LandingPages
+      var llSheet = spreadsheet.getSheetByName("Leads_LandingPages");
+      if (llSheet) {
+        var llRows = llSheet.getDataRange().getValues();
+        for (var lli = llRows.length - 1; lli >= 1; lli--) {
+          var lId = String(llRows[lli][1] || "");
+          var lEmail = String(llRows[lli][6] || "").trim().toLowerCase();
+          var lPhone = String(llRows[lli][5] || "").replace(/[^0-9]/g, "");
+          var lMatch = Boolean(
+            (lId && leadIdSet[lId]) ||
+            (leadEmail && lEmail === leadEmail) ||
+            (leadPhone && leadPhone.length >= 8 && lPhone === leadPhone)
+          );
+          if (lMatch) {
+            llSheet.deleteRow(lli + 1);
+          }
+        }
+      }
+
+      // 3. Remove da aba leadtest
+      var ltSheet = spreadsheet.getSheetByName("leadtest");
+      if (ltSheet) {
+        var ltRows = ltSheet.getDataRange().getValues();
+        for (var lti = ltRows.length - 1; lti >= 1; lti--) {
+          var tId = String(ltRows[lti][1] || "");
+          var tEmail = String(ltRows[lti][6] || "").trim().toLowerCase();
+          var tPhone = String(ltRows[lti][5] || "").replace(/[^0-9]/g, "");
+          var tMatch = Boolean(
+            (tId && leadIdSet[tId]) ||
+            (leadEmail && tEmail === leadEmail) ||
+            (leadPhone && leadPhone.length >= 8 && tPhone === leadPhone)
+          );
+          if (tMatch) {
+            ltSheet.deleteRow(lti + 1);
+          }
+        }
+      }
+
+      // 4. Atualiza JSON raiz
+      try {
+        var rFiles = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rFiles.hasNext()) {
+          var rRoot = rFiles.next();
+          var dbRoot = JSON.parse(rRoot.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbRoot.leads)) {
+            dbRoot.leads = dbRoot.leads.filter(function(l) {
+              if (!l) return false;
+              var lId = String(l.id || "");
+              var lEm = String(l.email || "").trim().toLowerCase();
+              var lPh = String(l.whatsapp || "").replace(/[^0-9]/g, "");
+              if (lId && leadIdSet[lId]) return false;
+              if (leadEmail && lEm === leadEmail) return false;
+              if (leadPhone && leadPhone.length >= 8 && lPh === leadPhone) return false;
+              return true;
+            });
+          }
+          rRoot.setContent(JSON.stringify(dbRoot, null, 2));
+        }
+      } catch(eDbLeadDel) {}
+
+      return jsonResponse({
+        status: "success",
+        deletedIds: targetLeadIds,
+        message: "Lead(s) excluído(s) permanentemente do Google Drive e Sheets!"
+      });
+    }
+
+    // =========================================================================
+    // AÇÃO: EXCLUIR PRODUTO DO GOOGLE DRIVE E SHEETS
+    // =========================================================================
+    if (action === "DELETE_PRODUCT") {
+      var prodId = String(payload.productId || payload.id || "");
+      var pSheet = spreadsheet.getSheetByName("Produtos");
+      if (pSheet) {
+        var pData = pSheet.getDataRange().getValues();
+        for (var pi = pData.length - 1; pi >= 1; pi--) {
+          if (String(pData[pi][0] || "") === prodId) {
+            pSheet.deleteRow(pi + 1);
+          }
+        }
+      }
+      try {
+        var rfProd = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rfProd.hasNext()) {
+          var rfp = rfProd.next();
+          var dbP = JSON.parse(rfp.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbP.products)) {
+            dbP.products = dbP.products.filter(function(p) { return String(p.id || "") !== prodId; });
+          }
+          rfp.setContent(JSON.stringify(dbP, null, 2));
+        }
+      } catch(eDbP) {}
+      return jsonResponse({ status: "success", message: "Produto excluído com sucesso do Drive e Sheets!" });
+    }
+
+    // =========================================================================
+    // AÇÃO: EXCLUIR TAREFA DO GOOGLE DRIVE E SHEETS
+    // =========================================================================
+    if (action === "DELETE_TASK") {
+      var taskId = String(payload.taskId || payload.id || "");
+      var currentYear = new Date().getFullYear();
+      var tSheet = spreadsheet.getSheetByName("Tarefas_" + currentYear);
+      if (tSheet) {
+        var tData = tSheet.getDataRange().getValues();
+        for (var ti = tData.length - 1; ti >= 1; ti--) {
+          if (String(tData[ti][0] || "") === taskId) {
+            tSheet.deleteRow(ti + 1);
+          }
+        }
+      }
+      try {
+        var rfTask = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rfTask.hasNext()) {
+          var rft = rfTask.next();
+          var dbT = JSON.parse(rft.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbT.tasks)) {
+            dbT.tasks = dbT.tasks.filter(function(t) { return String(t.id || "") !== taskId; });
+          }
+          rft.setContent(JSON.stringify(dbT, null, 2));
+        }
+      } catch(eDbT) {}
+      return jsonResponse({ status: "success", message: "Tarefa excluída com sucesso do Drive e Sheets!" });
+    }
+
+    // =========================================================================
+    // AÇÃO: EXCLUIR PESQUISA / DIAGNÓSTICO DO GOOGLE DRIVE E SHEETS
+    // =========================================================================
+    if (action === "DELETE_SURVEY") {
+      var surveyId = String(payload.surveyId || payload.id || "");
+      var surveyName = String(payload.surveyName || payload.name || "");
+      var sSheet = spreadsheet.getSheetByName("Diagnosticos_Surveys");
+      if (sSheet) {
+        var sData = sSheet.getDataRange().getValues();
+        for (var si = sData.length - 1; si >= 1; si--) {
+          var rSId = String(sData[si][0] || "");
+          var rSName = String(sData[si][1] || "");
+          if ((surveyId && rSId === surveyId) || (surveyName && rSName.toLowerCase() === surveyName.toLowerCase())) {
+            sSheet.deleteRow(si + 1);
+          }
+        }
+      }
+      try {
+        var rfSurvey = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rfSurvey.hasNext()) {
+          var rfs = rfSurvey.next();
+          var dbS = JSON.parse(rfs.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbS.surveys)) {
+            dbS.surveys = dbS.surveys.filter(function(s) {
+              var sId = String(s.id || "");
+              var sNm = String(s.name || "");
+              if (surveyId && sId === surveyId) return false;
+              if (surveyName && sNm.toLowerCase() === surveyName.toLowerCase()) return false;
+              return true;
+            });
+          }
+          rfs.setContent(JSON.stringify(dbS, null, 2));
+        }
+      } catch(eDbS) {}
+      return jsonResponse({ status: "success", message: "Pesquisa excluída com sucesso do Drive e Sheets!" });
+    }
+
+    // =========================================================================
+    // AÇÃO: LIMPAR BANCO E MANTER APENAS 1 LANDING PAGE (CLEAN_KEEP_ONE)
+    // =========================================================================
+    if (action === "CLEAN_DATABASE_KEEP_ONE") {
+      var keepId = String(payload.keepId || payload.id || "");
+      try {
+        var rfRoot = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rfRoot.hasNext()) {
+          var rfr = rfRoot.next();
+          var dbK = JSON.parse(rfr.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbK.landingPages)) {
+            var keptLp = dbK.landingPages.find(function(p) { return String(p.id || "") === keepId || String(p.slug || "") === keepId; });
+            if (!keptLp && dbK.landingPages.length > 0) keptLp = dbK.landingPages[0];
+            dbK.landingPages = keptLp ? [keptLp] : [];
+          }
+          rfr.setContent(JSON.stringify(dbK, null, 2));
+          syncDataToGoogleSheets(spreadsheet, dbK);
+        }
+      } catch(eDbK) {}
+      return jsonResponse({ status: "success", message: "Banco limpo mantendo apenas 1 Landing Page!" });
     }
 
     // =========================================================================
@@ -782,6 +1086,13 @@ function getOrCreateSpreadsheet(folder) {
   if (files.hasNext()) {
     return SpreadsheetApp.openById(files.next().getId());
   }
+  // Migração transparente de versão legada APP_DATABASE_SHEETS
+  var legacyFiles = folder.getFilesByName("APP_DATABASE_SHEETS");
+  if (legacyFiles.hasNext()) {
+    var legacyFile = legacyFiles.next();
+    legacyFile.setName(SPREADSHEET_BASE_NAME);
+    return SpreadsheetApp.openById(legacyFile.getId());
+  }
   var newSs = SpreadsheetApp.create(SPREADSHEET_BASE_NAME);
   var ssFile = DriveApp.getFileById(newSs.getId());
   try {
@@ -816,12 +1127,14 @@ function getOrCreateSheet(ss, sheetName, headers) {
 }
 
 function writeRowsToSheet(sheet, rows) {
-  if (!rows || rows.length === 0) return;
   var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+  var lastCol = sheet.getLastColumn() || (rows && rows[0] ? rows[0].length : 1);
+  if (lastRow > 1 && lastCol > 0) {
+    sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
   }
-  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  if (rows && rows.length > 0 && rows[0] && rows[0].length > 0) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
 }
 
 function mergeDatabaseObjects(existing, incoming) {
@@ -829,18 +1142,10 @@ function mergeDatabaseObjects(existing, incoming) {
   if (!incoming) return existing;
   var result = Object.assign({}, incoming);
 
-  for (var key in incoming) {
-    if (Array.isArray(incoming[key]) && Array.isArray(existing[key])) {
-      var itemMap = {};
-      existing[key].forEach(function(item) { if (item && item.id) itemMap[item.id] = item; });
-      incoming[key].forEach(function(item) {
-        if (item && item.id) {
-          itemMap[item.id] = Object.assign({}, itemMap[item.id] || {}, item);
-        }
-      });
-      var mergedList = [];
-      for (var idKey in itemMap) { mergedList.push(itemMap[idKey]); }
-      result[key] = mergedList;
+  // Se o incoming não contém alguma chave existente, preserva do existing
+  for (var key in existing) {
+    if (incoming[key] === undefined) {
+      result[key] = existing[key];
     }
   }
   result.ultimoBackup = new Date().toISOString();
@@ -876,10 +1181,10 @@ function runDailyBackup() {
     var ss = getOrCreateSpreadsheet(folder);
     var timestamp = formatDate(new Date());
 
-    DriveApp.getFileById(ss.getId()).makeCopy("BACKUP_SHEETS_" + timestamp, backupFolder);
+    DriveApp.getFileById(ss.getId()).makeCopy("SALEAD_" + timestamp, backupFolder);
     var files = folder.getFilesByName(ROOT_FILE_NAME);
     if (files.hasNext()) {
-      files.next().makeCopy("BACKUP_JSON_" + timestamp + ".json", backupFolder);
+      files.next().makeCopy("SALEAD_DATA_" + timestamp + ".json", backupFolder);
     }
   } catch (e) {}
 }
@@ -897,6 +1202,6 @@ function jsonResponse(obj) {
 
 function formatDate(date) {
   var pad = function(n) { return n < 10 ? '0' + n : n; };
-  return pad(date.getDate()) + "-" + pad(date.getMonth() + 1) + "-" + date.getFullYear() + "-" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+  return pad(date.getDate()) + "-" + pad(date.getMonth() + 1) + "-" + date.getFullYear() + "_" + pad(date.getHours()) + "-" + pad(date.getMinutes());
 }
 `;

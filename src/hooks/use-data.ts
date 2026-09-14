@@ -38,6 +38,12 @@ import {
   fetchFromGoogleDrive, 
   pushToGoogleDrive,
   clearLpTestDataInDrive,
+  deleteLandingPageFromDrive,
+  deleteLeadFromDrive,
+  deleteProductFromDrive,
+  deleteTaskFromDrive,
+  deleteSurveyFromDrive,
+  cleanDatabaseKeepOneInDrive,
   createCheckpoint,
   saveSystemCheckpoint,
   formatCheckpointName
@@ -2408,7 +2414,26 @@ export function useData() {
         await fetch(`/api/leads/${encodeURIComponent(id)}`, { method: "DELETE" });
       } catch {}
 
-      // 3. Remove no Supabase por id, email ou whatsapp
+      // 3. Remove no Google Drive e Google Sheets
+      try {
+        await deleteLeadFromDrive(id, targetEmail, targetPhone);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.leads = (rootDb.leads || []).filter((l: any) => {
+            if (l.id === id) return false;
+            if (targetEmail && l.email && l.email.trim().toLowerCase() === targetEmail) return false;
+            if (targetPhone && targetPhone.length >= 8 && l.whatsapp && l.whatsapp.replace(/\D/g, "") === targetPhone) return false;
+            return true;
+          });
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (driveErr) {
+        console.warn("Aviso ao remover lead no Google Drive:", driveErr);
+      }
+
+      // 4. Remove no Supabase por id, email ou whatsapp se aplicável
       try {
         await supabase.from('leads').delete().eq('id', id);
         if (targetEmail) {
@@ -2422,12 +2447,37 @@ export function useData() {
     },
 
     bulkDeleteLeads: async (ids: string[]) => { 
-      const { error } = await supabase.from('leads').delete().in('id', ids);
-      if (error) {
-        console.error("Erro em bulk delete:", error);
-        toast.error(`Falha ao excluir selecionados: ${error.message}`);
-        throw error;
+      // 1. Atualização do cache
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        const idSet = new Set(ids);
+        return old.filter((l: any) => !idSet.has(l.id));
+      });
+
+      // 2. Deleta no Google Drive & Sheets
+      try {
+        await deleteLeadFromDrive(ids);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          const idSet = new Set(ids);
+          rootDb.leads = (rootDb.leads || []).filter((l: any) => !idSet.has(l.id));
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (driveErr) {
+        console.warn("Aviso ao deletar leads em massa no Google Drive:", driveErr);
       }
+
+      // 3. Deleta no Supabase se aplicável
+      try {
+        const { error } = await supabase.from('leads').delete().in('id', ids);
+        if (error) {
+          console.warn("Supabase bulk delete aviso:", error);
+        }
+      } catch {}
+
+      toast.success("Leads excluídos com sucesso.");
       invalidate('leads');
     },
 
@@ -2467,12 +2517,15 @@ export function useData() {
     },
 
     deleteTask: async (id: string) => { 
-      const { error } = await supabase.from('tasks').delete().eq('id', id);
-      if (error) {
-        console.error("Erro ao apagar tarefa:", error);
-        toast.error(`Falha ao excluir tarefa: ${error.message}`);
-        throw error;
-      }
+      try {
+        await deleteTaskFromDrive(id);
+      } catch {}
+      try {
+        const { error } = await supabase.from('tasks').delete().eq('id', id);
+        if (error) {
+          console.warn("Supabase deleteTask notice:", error);
+        }
+      } catch {}
       invalidate('tasks');
     },
 
@@ -2603,12 +2656,15 @@ export function useData() {
     },
 
     deleteProduct: async (id: string) => { 
-      const { error } = await supabase.from('products').delete().eq('id', id);
-      if (error) {
-        console.error("Erro ao excluir produto:", error);
-        toast.error(`Falha ao remover produto: ${error.message}`);
-        throw error;
-      }
+      try {
+        await deleteProductFromDrive(id);
+      } catch {}
+      try {
+        const { error } = await supabase.from('products').delete().eq('id', id);
+        if (error) {
+          console.warn("Supabase deleteProduct notice:", error);
+        }
+      } catch {}
       invalidate('products');
     },
 
@@ -2992,18 +3048,20 @@ export function useData() {
       }
 
       // 1. Remove do localStorage
+      let updatedLocalList: LandingPage[] = [];
       try {
         const localList = getLocalLandingPages();
-        saveLocalLandingPages(localList.filter(p => !isTarget(p)));
+        updatedLocalList = localList.filter(p => !isTarget(p));
+        saveLocalLandingPages(updatedLocalList);
       } catch {}
 
-      // 2. Atualiza cache
+      // 2. Atualiza cache do React Query
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         return list.filter(p => !isTarget(p));
       });
 
-      // 3. Remove da API do servidor
+      // 3. Remove da API do servidor Express
       try {
         fetch(`/api/landing-pages/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
         if (target?.id && target.id !== id) {
@@ -3011,7 +3069,7 @@ export function useData() {
         }
       } catch {}
 
-      // 4. Remove do Supabase por ID isolado
+      // 4. Remove do Supabase por ID isolado se aplicável
       try {
         if (isUUID(id)) {
           await supabase.from('landing_pages').delete().eq('id', id);
@@ -3021,6 +3079,23 @@ export function useData() {
         }
       } catch (err: any) {
         console.warn("Supabase delete notice:", err);
+      }
+
+      // 5. Exclui permanentemente no Google Drive & Google Sheets
+      try {
+        const targetTitle = target?.title || target?.name || "";
+        const targetSlug = target?.slug || "";
+        await deleteLandingPageFromDrive(Array.from(idsToMark), targetSlug, targetTitle);
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.landingPages = (rootDb.landingPages || []).filter((p: any) => !isTarget(p));
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (driveErr) {
+        console.warn("Aviso ao remover LP do Google Drive:", driveErr);
       }
 
       try {
@@ -3072,6 +3147,20 @@ export function useData() {
         console.warn("Supabase bulk delete notice:", err);
       }
 
+      // 5. Remove no Google Drive e Google Sheets
+      try {
+        await deleteLandingPageFromDrive(ids);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.landingPages = (rootDb.landingPages || []).filter((p: any) => !idsSet.has(p.id) && !idsSet.has(p.slug || ""));
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (driveErr) {
+        console.warn("Aviso ao remover LPs em massa no Google Drive:", driveErr);
+      }
+
       toast.success("Landing Pages selecionadas foram excluídas.");
       invalidate('landing_pages');
     },
@@ -3116,6 +3205,20 @@ export function useData() {
         }
       } catch (err) {
         console.warn("Supabase clean database notice:", err);
+      }
+
+      // 5. Limpa no Google Drive e Google Sheets
+      try {
+        await cleanDatabaseKeepOneInDrive(toKeep.id);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.landingPages = [toKeep];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (driveErr) {
+        console.warn("Aviso ao limpar banco no Google Drive:", driveErr);
       }
 
       toast.success("Banco de dados limpo! Apenas 1 Landing Page foi mantida.");
@@ -3208,7 +3311,11 @@ export function useData() {
 
     deleteSurvey: async (id: string) => { 
       const current = getLocalSurveys();
+      const targetSurvey = current.find(x => x.id === id);
       saveLocalSurveys(current.filter(x => x.id !== id));
+      try {
+        await deleteSurveyFromDrive(id, targetSurvey?.name);
+      } catch {}
       try {
         await supabase.from('surveys').delete().eq('id', id);
       } catch (err) {

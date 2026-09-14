@@ -133,21 +133,15 @@ app.post("/api/drive-proxy", async (req, res) => {
         "User-Agent": "SALEAD-Connector/2.0",
       };
     } else {
-      // POST payload (save, create_checkpoint, set_as_root, SUBMIT_LP_LEAD, SUBMIT_SURVEY_RESPONSE, UPLOAD_MEDIA)
+      // POST payload (save, create_checkpoint, set_as_root, SUBMIT_LP_LEAD, SUBMIT_SURVEY_RESPONSE, UPLOAD_MEDIA, DELETE_LANDING_PAGE, DELETE_LEAD, etc.)
       fetchOptions.method = "POST";
       fetchOptions.headers = {
         "Content-Type": "text/plain;charset=utf-8",
         "Accept": "application/json, text/plain, */*",
         "User-Agent": "SALEAD-Connector/2.0",
       };
-      const payload: any = { action: action || "save" };
-      if (data !== undefined) payload.data = data;
-      if (fileName !== undefined) payload.fileName = fileName;
-      if (base64Data !== undefined) payload.base64Data = base64Data;
-      if (folderCategory !== undefined) payload.folderCategory = folderCategory;
-      if (mimeType !== undefined) payload.mimeType = mimeType;
-      if (req.body.lead !== undefined) payload.lead = req.body.lead;
-      if (req.body.surveyResponse !== undefined) payload.surveyResponse = req.body.surveyResponse;
+      const payload: any = { ...req.body, action: action || "save" };
+      delete payload.targetUrl;
 
       fetchOptions.body = JSON.stringify(payload);
     }

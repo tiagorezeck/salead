@@ -523,13 +523,13 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
 
                       <div className="flex items-center gap-2">
                         <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-bold">APP_DATABASE_SHEETS</span>
+                        <span className="text-emerald-400 font-bold">SALEAD_DATA</span>
                         <span className="text-muted-foreground font-sans text-[10px]">— Planilha com abas: Leads, Usuários, LPs, Pesquisas, etc.</span>
                       </div>
 
                       <div className="flex items-center gap-2 text-purple-400 font-bold pt-1">
                         <span>📁</span> <span>Backups/</span>
-                        <span className="text-muted-foreground font-sans font-normal text-[10px]">— Snapshots automáticos diários e backups JSON</span>
+                        <span className="text-muted-foreground font-sans font-normal text-[10px]">— Snapshots diários (ex: SALEAD_14-09-2026) e backups JSON</span>
                       </div>
 
                       <div className="flex items-center gap-2 text-amber-400 font-bold">
@@ -539,7 +539,7 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
 
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <FileJson className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span>checkpoint_YYYY-MM-DD_HH-mm.json</span>
+                        <span>SALEAD_DATA_DD-MM-YYYY_HH-mm.json</span>
                         <span className="font-sans text-[10px]">— Pontos de restauração manuais</span>
                       </div>
                     </div>

@@ -370,7 +370,7 @@ export const formatCheckpointName = (d: Date = new Date()): string => {
   const year = d.getFullYear();
   const hours = pad(d.getHours());
   const minutes = pad(d.getMinutes());
-  return `Checkpoint-${day}-${month}-${year}-${hours}:${minutes}`;
+  return `SALEAD_${day}-${month}-${year}_${hours}-${minutes}`;
 };
 
 export interface SystemCheckpoint {
@@ -581,21 +581,218 @@ export const clearLpTestDataInDrive = async (lpId: string, lpTitle?: string): Pr
   if (!cleanUrl) return null;
 
   try {
-    const res = await fetch(cleanUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'CLEAR_LP_TEST_DATA',
-        landingPageId: lpId,
-        landingPageTitle: lpTitle || '',
-        timestamp: new Date().toISOString()
-      }),
-      redirect: 'follow'
-    }).then(r => r.json());
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'CLEAR_LP_TEST_DATA',
+      landingPageId: lpId,
+      landingPageTitle: lpTitle || '',
+      timestamp: new Date().toISOString()
+    });
     return res;
   } catch (err) {
     console.warn("Aviso ao limpar dados de teste da LP nas planilhas do Google Drive:", err);
     return null;
   }
 };
+
+// =========================================================================
+// DELEÇÕES DIRETAS NO GOOGLE DRIVE E GOOGLE SHEETS
+// =========================================================================
+
+export const deleteLandingPageFromDrive = async (
+  ids: string | string[],
+  slug?: string,
+  title?: string
+): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  const idArray = Array.isArray(ids) ? ids : [ids];
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+
+  // 1. Atualiza cache local offline do root
+  const localDb = getLocalDatabaseRoot<any>();
+  if (localDb && Array.isArray(localDb.landingPages)) {
+    const idSet = new Set(idArray);
+    localDb.landingPages = localDb.landingPages.filter((p: any) => {
+      if (!p) return false;
+      if (p.id && idSet.has(p.id)) return false;
+      if (slug && p.slug && p.slug.toLowerCase() === slug.toLowerCase()) return false;
+      if (title && (p.title || p.name) && (p.title || p.name).toLowerCase() === title.toLowerCase()) return false;
+      return true;
+    });
+    saveLocalDatabaseRoot(localDb);
+  }
+
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'DELETE_LANDING_PAGE',
+      ids: idArray,
+      slug: slug || '',
+      landingPageTitle: title || '',
+      timestamp: new Date().toISOString()
+    });
+    return res;
+  } catch (err) {
+    console.warn("Aviso ao deletar Landing Page do Google Drive/Sheets:", err);
+    return null;
+  }
+};
+
+export const deleteLeadFromDrive = async (
+  ids: string | string[],
+  email?: string,
+  whatsapp?: string
+): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  const idArray = Array.isArray(ids) ? ids : [ids];
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+
+  // 1. Atualiza cache local offline do root
+  const localDb = getLocalDatabaseRoot<any>();
+  if (localDb && Array.isArray(localDb.leads)) {
+    const idSet = new Set(idArray);
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanPhone = (whatsapp || '').replace(/\D/g, '');
+    localDb.leads = localDb.leads.filter((l: any) => {
+      if (!l) return false;
+      if (l.id && idSet.has(l.id)) return false;
+      if (cleanEmail && l.email && l.email.trim().toLowerCase() === cleanEmail) return false;
+      if (cleanPhone && cleanPhone.length >= 8 && l.whatsapp && l.whatsapp.replace(/\D/g, '') === cleanPhone) return false;
+      return true;
+    });
+    saveLocalDatabaseRoot(localDb);
+  }
+
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'DELETE_LEAD',
+      ids: idArray,
+      email: email || '',
+      whatsapp: whatsapp || '',
+      timestamp: new Date().toISOString()
+    });
+    return res;
+  } catch (err) {
+    console.warn("Aviso ao deletar lead do Google Drive/Sheets:", err);
+    return null;
+  }
+};
+
+export const deleteProductFromDrive = async (id: string): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+
+  const localDb = getLocalDatabaseRoot<any>();
+  if (localDb && Array.isArray(localDb.products)) {
+    localDb.products = localDb.products.filter((p: any) => p && p.id !== id);
+    saveLocalDatabaseRoot(localDb);
+  }
+
+  if (!cleanUrl) return null;
+
+  try {
+    return await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'DELETE_PRODUCT',
+      productId: id,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn("Aviso ao deletar produto do Google Drive:", err);
+    return null;
+  }
+};
+
+export const deleteTaskFromDrive = async (id: string): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+
+  const localDb = getLocalDatabaseRoot<any>();
+  if (localDb && Array.isArray(localDb.tasks)) {
+    localDb.tasks = localDb.tasks.filter((t: any) => t && t.id !== id);
+    saveLocalDatabaseRoot(localDb);
+  }
+
+  if (!cleanUrl) return null;
+
+  try {
+    return await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'DELETE_TASK',
+      taskId: id,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn("Aviso ao deletar tarefa do Google Drive:", err);
+    return null;
+  }
+};
+
+export const deleteSurveyFromDrive = async (id: string, name?: string): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+
+  const localDb = getLocalDatabaseRoot<any>();
+  if (localDb && Array.isArray(localDb.surveys)) {
+    localDb.surveys = localDb.surveys.filter((s: any) => s && s.id !== id && (!name || (s.name && s.name.toLowerCase() !== name.toLowerCase())));
+    saveLocalDatabaseRoot(localDb);
+  }
+
+  if (!cleanUrl) return null;
+
+  try {
+    return await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'DELETE_SURVEY',
+      surveyId: id,
+      surveyName: name || '',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn("Aviso ao deletar pesquisa do Google Drive:", err);
+    return null;
+  }
+};
+
+export const cleanDatabaseKeepOneInDrive = async (keepId: string): Promise<any> => {
+  let config = getDriveConfig();
+  if (!config.webappUrl) {
+    config = await initializeSharedDriveConfig();
+  }
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  if (!cleanUrl) return null;
+
+  try {
+    return await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'CLEAN_DATABASE_KEEP_ONE',
+      keepId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn("Aviso ao limpar banco no Google Drive:", err);
+    return null;
+  }
+};
+
 
