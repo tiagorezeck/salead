@@ -6,39 +6,43 @@
 // This mock client completely avoids remote Supabase network connections,
 // satisfying the user's request to fully audit and eliminate Supabase reliance.
 
-const createMockChain = (dataValue: any = []) => {
-  const chain: any = () => Promise.resolve({ data: dataValue, error: null });
-  
-  // Make the chain directly awaitable as a standard Promise
-  chain.then = (onfulfilled: any) => Promise.resolve({ data: dataValue, error: null }).then(onfulfilled);
-  chain.catch = (onrejected: any) => Promise.resolve({ data: dataValue, error: null }).catch(onrejected);
-  
-  const proxy: any = new Proxy(chain, {
-    get(target, prop) {
-      if (prop === 'then') return chain.then;
-      if (prop === 'catch') return chain.catch;
-      
-      // Standard query and filtering methods that return the same builder pattern
-      if ([
-        'select', 'insert', 'update', 'upsert', 'delete', 
-        'eq', 'order', 'limit', 'in', 'maybeSingle', 'single', 
-        'neq', 'gt', 'lt', 'gte', 'lte', 'like', 'ilike', 
-        'is', 'or', 'match', 'filter', 'range'
-      ].includes(prop as string)) {
-        return () => proxy;
-      }
-      
-      return () => Promise.resolve({ data: dataValue, error: null });
-    }
-  });
-  
-  return proxy;
+const createMockBuilder = (dataValue: any = []) => {
+  const resultPromise = Promise.resolve({ data: dataValue, error: null });
+
+  const builder: any = {
+    then: (onfulfilled?: any, onrejected?: any) => resultPromise.then(onfulfilled, onrejected),
+    catch: (onrejected?: any) => resultPromise.catch(onrejected),
+    select: () => builder,
+    insert: () => builder,
+    update: () => builder,
+    upsert: () => builder,
+    delete: () => builder,
+    eq: () => builder,
+    neq: () => builder,
+    gt: () => builder,
+    lt: () => builder,
+    gte: () => builder,
+    lte: () => builder,
+    like: () => builder,
+    ilike: () => builder,
+    is: () => builder,
+    or: () => builder,
+    match: () => builder,
+    filter: () => builder,
+    range: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    in: () => builder,
+    maybeSingle: () => builder,
+    single: () => builder,
+  };
+
+  return builder;
 };
 
 export const supabase: any = {
   from: (table: string) => {
-    // Return a mock chain that resolves gracefully, allowing fallback mechanisms to run
-    return createMockChain([]);
+    return createMockBuilder([]);
   },
   rpc: (fn: string, args?: any) => {
     return Promise.resolve({ data: null, error: null });

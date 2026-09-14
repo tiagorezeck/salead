@@ -5,31 +5,43 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { applyThematicImagesToPage } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
 // Offline Bypass Mock Supabase Client on Express Server
-const createMockChain = (dataValue: any = []) => {
-  const chain: any = () => Promise.resolve({ data: dataValue, error: null });
-  chain.then = (onfulfilled: any) => Promise.resolve({ data: dataValue, error: null }).then(onfulfilled);
-  chain.catch = (onrejected: any) => Promise.resolve({ data: dataValue, error: null }).catch(onrejected);
-  const proxy: any = new Proxy(chain, {
-    get(target, prop) {
-      if (prop === 'then') return chain.then;
-      if (prop === 'catch') return chain.catch;
-      if ([
-        'select', 'insert', 'update', 'upsert', 'delete', 
-        'eq', 'order', 'limit', 'in', 'maybeSingle', 'single', 
-        'neq', 'gt', 'lt', 'gte', 'lte', 'like', 'ilike', 
-        'is', 'or', 'match', 'filter', 'range'
-      ].includes(prop as string)) {
-        return () => proxy;
-      }
-      return () => Promise.resolve({ data: dataValue, error: null });
-    }
-  });
-  return proxy;
+const createMockBuilder = (dataValue: any = []) => {
+  const resultPromise = Promise.resolve({ data: dataValue, error: null });
+
+  const builder: any = {
+    then: (onfulfilled?: any, onrejected?: any) => resultPromise.then(onfulfilled, onrejected),
+    catch: (onrejected?: any) => resultPromise.catch(onrejected),
+    select: () => builder,
+    insert: () => builder,
+    update: () => builder,
+    upsert: () => builder,
+    delete: () => builder,
+    eq: () => builder,
+    neq: () => builder,
+    gt: () => builder,
+    lt: () => builder,
+    gte: () => builder,
+    lte: () => builder,
+    like: () => builder,
+    ilike: () => builder,
+    is: () => builder,
+    or: () => builder,
+    match: () => builder,
+    filter: () => builder,
+    range: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    in: () => builder,
+    maybeSingle: () => builder,
+    single: () => builder,
+  };
+
+  return builder;
 };
 
 const supabase: any = {
   from: (table: string) => {
-    return createMockChain([]);
+    return createMockBuilder([]);
   },
   rpc: (fn: string, args?: any) => {
     return Promise.resolve({ data: null, error: null });
@@ -994,10 +1006,14 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
   try {
     const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, webhookUrl, source } = req.body || {};
 
+    const pageIdStr = pageId || "unknown";
+    const lp = await findLandingPageAnywhere(pageIdStr);
+    const isTestMode = req.body.isTest === true || (lp && lp.status === "Teste") || false;
+
     const lead: LeadSubmission = {
       id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      pageId: pageId || "unknown",
-      pageTitle: pageTitle || "Landing Page",
+      pageId: pageIdStr,
+      pageTitle: pageTitle || (lp && (lp.name || lp.title)) || "Landing Page",
       name: name || "",
       whatsapp: whatsapp || "",
       email: email || "",
@@ -1089,8 +1105,11 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
               quizAnswers: lead.quizAnswers || {},
               utms: lead.utms || {},
               source: source || lead.utms?.utm_source || "Landing Page",
-              submittedAt: lead.submittedAt
-            }
+              submittedAt: lead.submittedAt,
+              isTest: isTestMode
+            },
+            isTest: isTestMode,
+            timestamp: new Date().toISOString()
           }),
           redirect: "follow"
         });
