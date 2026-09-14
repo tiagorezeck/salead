@@ -1547,6 +1547,7 @@ export function useData() {
       if (result.length > 0) {
         setTimeout(async () => {
           try {
+            // 1. Sincronização Server-Side (Garante arquivos físicos no disco do Express)
             for (const lp of result) {
               const matchedServer = serverLps.find(s => s.id === lp.id || (lp.slug && s.slug === lp.slug));
               
@@ -1561,6 +1562,17 @@ export function useData() {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(lp),
                 });
+              }
+            }
+
+            // 2. Sincronização Client-Side -> Supabase (Garante persistência de LPs que só existem no localStorage)
+            for (const localLp of localLps) {
+              const matchedDb = dbLps.find(d => d.id === localLp.id || (localLp.slug && d.slug === localLp.slug));
+              if (!matchedDb && isUUID(localLp.id)) {
+                console.info(`[Self-Healing] Sincronizando LP local "${localLp.name || localLp.title}" com o Supabase...`);
+                const dbPayload = mapLPToDb(localLp);
+                dbPayload.id = localLp.id;
+                await supabase.from('landing_pages').upsert(dbPayload);
               }
             }
           } catch (syncErr) {
@@ -2823,16 +2835,27 @@ export function useData() {
         ]);
       } catch {}
 
-      // 4. Atualiza no Supabase
+      // 4. Sincroniza com Supabase de forma resiliente usando upsert (insere se não existir, atualiza se existir)
       try {
         const dbPayload = mapLPToDb(updatedItem);
         if (isUUID(targetId)) {
-          await supabase.from('landing_pages').update(dbPayload).eq('id', targetId);
+          dbPayload.id = targetId;
+          const { error } = await supabase.from('landing_pages').upsert(dbPayload);
+          if (error) {
+            console.warn("Erro ao fazer upsert no Supabase, tentando update direto:", error.message);
+            // Fallback direto
+            const { data } = await supabase.from('landing_pages').select('id').eq('id', targetId).maybeSingle();
+            if (data) {
+              await supabase.from('landing_pages').update(dbPayload).eq('id', targetId);
+            } else {
+              await supabase.from('landing_pages').insert([dbPayload]);
+            }
+          }
         } else if (updatedItem.name) {
           await supabase.from('landing_pages').update(dbPayload).eq('name', updatedItem.name);
         }
       } catch (err: any) {
-        console.warn("Supabase update notice:", err);
+        console.warn("Supabase update/upsert notice:", err);
       }
 
       invalidate('landing_pages');

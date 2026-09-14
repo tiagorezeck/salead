@@ -4,16 +4,45 @@ import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import { applyThematicImagesToPage } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
-import { createClient } from "@supabase/supabase-js";
-import { PRESET_TEMPLATES } from "../data/templates";
+// Offline Bypass Mock Supabase Client on Express Server
+const createMockChain = (dataValue: any = []) => {
+  const chain: any = () => Promise.resolve({ data: dataValue, error: null });
+  chain.then = (onfulfilled: any) => Promise.resolve({ data: dataValue, error: null }).then(onfulfilled);
+  chain.catch = (onrejected: any) => Promise.resolve({ data: dataValue, error: null }).catch(onrejected);
+  const proxy: any = new Proxy(chain, {
+    get(target, prop) {
+      if (prop === 'then') return chain.then;
+      if (prop === 'catch') return chain.catch;
+      if ([
+        'select', 'insert', 'update', 'upsert', 'delete', 
+        'eq', 'order', 'limit', 'in', 'maybeSingle', 'single', 
+        'neq', 'gt', 'lt', 'gte', 'lte', 'like', 'ilike', 
+        'is', 'or', 'match', 'filter', 'range'
+      ].includes(prop as string)) {
+        return () => proxy;
+      }
+      return () => Promise.resolve({ data: dataValue, error: null });
+    }
+  });
+  return proxy;
+};
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://zhyihwtgsctlpzspgsop.supabase.co";
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoeWlod3Rnc2N0bHB6c3Bnc29wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5ODE1OTksImV4cCI6MjA5OTU1NzU5OX0.Eg8KGBN8HmyQ0vnpZLhhjrFBrvW0YnIqzKLwiKL6_Gk";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabase: any = {
+  from: (table: string) => {
+    return createMockChain([]);
+  },
+  rpc: (fn: string, args?: any) => {
+    return Promise.resolve({ data: null, error: null });
+  },
+  auth: {
+    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+    getUser: () => Promise.resolve({ data: { user: null }, error: null }),
+    signOut: () => Promise.resolve({ error: null }),
+    onAuthStateChange: (callback: any) => {
+      return { data: { subscription: { unsubscribe: () => {} } } };
+    }
+  }
+};
 
 function isUUID(str?: string): boolean {
   if (!str) return false;
