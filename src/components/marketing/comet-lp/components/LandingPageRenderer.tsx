@@ -23,7 +23,6 @@ import { InlineEditableText } from "./InlineEditableText";
 import { DraggableElement, EditorContext } from "./DraggableElement";
 import { VisualEditableButton } from "./VisualEditableButton";
 import { formatBrazilianPhone, extractUrlUtms } from "../utils/formUtils";
-import { recordLocalLead } from "../utils/storage";
 import { POPULAR_LOGO_PRESETS } from "./LogoManagerModal";
 import { SectionControlToolbar } from "./SectionControlToolbar";
 import { HeroModelSelector, HERO_MODELS } from "./HeroModelSelector";
@@ -82,8 +81,12 @@ import {
   Gift,
   Maximize2,
   X,
+  FileSpreadsheet,
+  FileText,
+  FileBox,
 } from "lucide-react";
 import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-viewer";
+import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 
 interface LandingPageRendererProps {
   page: LandingPage;
@@ -533,7 +536,12 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
   });
 
   const openSurveyFlow = () => {
-    setIsSurveyLeadFormOpen(true);
+    // O formulário da LP é o processo principal de cadastro do lead
+    if (!leadName && !leadPhone) {
+      setIsLeadModalOpen(true);
+    } else {
+      setIsSurveyModalOpen(true);
+    }
   };
 
   const handleConfirmSurveyLead = (e: React.FormEvent) => {
@@ -754,9 +762,22 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
   const [leadEmail, setLeadEmail] = useState("");
   const [customFormAnswers, setCustomFormAnswers] = useState<Record<string, string>>({});
   const [isLeadFormFieldsModalOpen, setIsLeadFormFieldsModalOpen] = useState(false);
+  const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
+  const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  // Campos limpos padrão: apenas Nome, WhatsApp e E-mail (removido faturamento conforme solicitado pelo usuário)
+  const cleanFormFields = useMemo(() => {
+    const rawFields =
+      page.formSection.fields && page.formSection.fields.length > 0
+        ? page.formSection.fields
+        : DEFAULT_LEAD_FIELDS;
+    return rawFields.filter(
+      (f) => f.id !== "revenue" && !f.label.toLowerCase().includes("faturamento")
+    );
+  }, [page.formSection.fields]);
 
   // Video modal / active player
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
@@ -834,12 +855,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
   const handleLeadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const formFields =
-      page.formSection.fields && page.formSection.fields.length > 0
-        ? page.formSection.fields
-        : DEFAULT_LEAD_FIELDS;
-
-    const enabledFields = formFields.filter((f) => f.enabled !== false);
+    const enabledFields = cleanFormFields.filter((f) => f.enabled !== false);
 
     // Validate required fields
     for (const f of enabledFields) {
@@ -874,6 +890,8 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
       }
     });
 
+    const isTest = (page as any).status === "Teste";
+
     const payload = {
       pageId: page.id,
       pageTitle: page.title,
@@ -884,6 +902,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
       customFields: customFormAnswers,
       quizAnswers: quizSummary,
       utms,
+      isTest,
       submittedAt: new Date().toISOString(),
       webhookStatus: "pending",
     };
@@ -895,15 +914,82 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           mode: "no-cors",
-        });
+        }).catch(() => {});
         payload.webhookStatus = "sent";
       }
 
-      recordLocalLead(payload as any);
+      // 1. Notifica callback da página para sincronização imediata
       if (onLeadSubmit) {
-        try { onLeadSubmit(payload); } catch (e) { console.warn("onLeadSubmit callback error:", e); }
+        try {
+          await onLeadSubmit(payload);
+        } catch (e) {
+          console.warn("onLeadSubmit callback error:", e);
+        }
       }
-      setIsSubmitted(true);
+
+      // 2. Grava 100% direto no banco de dados do sistema (sem localStorage)
+      try {
+        await fetch("/api/submit-lead", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch (apiErr) {
+        console.warn("Direct database API lead save notice:", apiErr);
+      }
+
+      // 3. Computa conversão atômica da LP no banco de dados
+      try {
+        fetch(`/api/landing-pages/${encodeURIComponent(page.id)}/conversion`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pageId: page.id, title: page.title }),
+        }).catch(() => {});
+      } catch {}
+
+      // 4. Sincroniza diretamente com o banco de dados do Google Sheets / Drive
+      try {
+        await submitLpLeadToDrive({
+          id: `lead_${Date.now()}`,
+          name: leadName,
+          whatsapp: leadPhone,
+          email: leadEmail,
+          pageId: page.id,
+          pageTitle: page.title,
+          landingPageId: page.id,
+          landingPageTitle: page.title,
+          quizAnswers: quizSummary,
+          utms,
+          source: utms?.utm_source || "Landing Page Form",
+          submittedAt: new Date().toISOString(),
+          isTest,
+        });
+      } catch (dErr) {
+        console.warn("Google Drive direct sync notice:", dErr);
+      }
+
+      // Configura dados do lead para qualquer pesquisa ou brinde posterior
+      setSurveyLeadData({
+        name: leadName,
+        email: leadEmail,
+        whatsapp: leadPhone,
+      });
+
+      // Fecha modal de formulário se estava aberto
+      setIsLeadModalOpen(false);
+
+      // FLUXO UNIFICADO:
+      // Se tiver pesquisa vinculada -> abre pesquisa (DeepFind)
+      // Se não tiver pesquisa mas tiver brinde -> abre modal de brinde
+      // Se nenhum -> exibe tela de sucesso padrão
+      if (assignedSurvey) {
+        setIsSurveyModalOpen(true);
+      } else if (page.formSection?.gift?.enabled) {
+        setIsGiftModalOpen(true);
+        setIsSubmitted(true);
+      } else {
+        setIsSubmitted(true);
+      }
 
       try {
         confetti({
@@ -914,18 +1000,14 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
       } catch {}
     } catch (err: any) {
       console.error("Submission failed:", err);
-      recordLocalLead({
-        id: `lead_${Date.now()}`,
-        pageId: page.id,
-        pageTitle: page.title,
-        name: leadName,
-        whatsapp: leadPhone,
-        email: leadEmail,
-        quizAnswers: quizSummary,
-        utms,
-        submittedAt: new Date().toISOString(),
-        webhookStatus: "skipped",
-      });
+      // Tentativa de gravação direta de emergência no banco de dados (sem localStorage)
+      try {
+        await fetch("/api/submit-lead", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch {}
       setIsSubmitted(true);
     } finally {
       setIsSubmitting(false);
@@ -933,9 +1015,15 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
   };
 
   const scrollToSection = (id: string) => {
-    if (assignedSurvey && (id === "form-section" || id === "quiz-section")) {
-      setIsSurveyModalOpen(true);
+    // Se o formulário estiver em modo modal/flutuante e o destino for o formulário ou quiz, abre o card flutuante
+    if (
+      page.formSection?.displayMode === "modal" &&
+      (id === "form-section" || id === "quiz-section")
+    ) {
+      setIsLeadModalOpen(true);
+      return;
     }
+
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: "smooth" });
@@ -6613,6 +6701,19 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                   <p className={`text-sm max-w-md mx-auto ${page.theme === "light" ? "text-zinc-600" : "text-zinc-400"}`}>
                     Nossa equipe executiva entrará em contato via WhatsApp e e-mail nos próximos minutos para dar continuidade ao seu atendimento.
                   </p>
+                  {page.formSection.gift?.enabled && (
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsGiftModalOpen(true)}
+                        className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-sm shadow-lg shadow-amber-500/20 inline-flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+                      >
+                        <Gift className="w-4 h-4" />
+                        <span>{page.formSection.gift.buttonText || "Baixar Meu Brinde / Material Exclusivo"}</span>
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setIsSubmitted(false)}
@@ -6703,10 +6804,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                         <div>
                           <div className="font-bold text-white text-xs">Perguntas de Qualificação do Lead</div>
                           <div className="text-[10px] text-zinc-400">
-                            {((page.formSection.fields && page.formSection.fields.length > 0)
-                              ? page.formSection.fields
-                              : DEFAULT_LEAD_FIELDS
-                            ).filter((f) => f.enabled !== false).length} perguntas ativas (Nome, WhatsApp, E-mail, Faturamento, etc.)
+                            {cleanFormFields.filter((f) => f.enabled !== false).length} perguntas ativas (Nome, WhatsApp, E-mail, etc.)
                           </div>
                         </div>
                       </div>
@@ -6716,70 +6814,93 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                         className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md hover:scale-[1.02]"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>Editar Perguntas & Faturamento</span>
+                        <span>Configurar Formulário, Exibição & Brinde</span>
                       </button>
                     </div>
                   )}
 
-                  {assignedSurvey ? (
-                    <div className="rounded-3xl bg-gradient-to-br from-zinc-900 via-zinc-900 to-purple-950/40 border border-purple-500/30 p-8 sm:p-10 shadow-2xl space-y-6 text-left relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-80 h-80 bg-purple-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-                      
-                      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
-                        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/80 border border-purple-500/40 text-purple-300 font-extrabold text-xs tracking-wider uppercase">
-                          <ClipboardList className="w-4 h-4 text-amber-400 animate-pulse" />
-                          <span>{page.quiz.badge || "PESQUISA DE QUALIFICAÇÃO"}</span>
-                        </div>
-                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                          <span>Acesso Imediato</span>
-                        </span>
+                  {page.formSection.displayMode === "modal" ? (
+                    <div className="rounded-3xl bg-gradient-to-br from-zinc-900 via-zinc-900 to-purple-950/40 border border-purple-500/30 p-8 sm:p-10 shadow-2xl space-y-6 text-center relative overflow-hidden">
+                      <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/80 border border-purple-500/40 text-purple-300 font-extrabold text-xs tracking-wider uppercase mx-auto">
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                        <span>{page.formSection.badge || "ACESSO PRIORITÁRIO"}</span>
                       </div>
 
-                      <div className="space-y-3">
+                      <div className="space-y-3 max-w-xl mx-auto">
                         <h3 className="text-2xl sm:text-3xl font-extrabold text-white font-display leading-tight">
-                          {page.quiz.title || assignedSurvey.name || "Questionário Rápido de Diagnóstico"}
+                          {page.formSection.title || "Garanta Sua Condição Exclusiva Agora"}
                         </h3>
-                        <p className="text-sm text-zinc-300 leading-relaxed max-w-xl">
-                          {page.quiz.subtitle || assignedSurvey.description || "Responda algumas perguntas objetivas para analisarmos seu momento e liberarmos seu presente exclusivo."}
+                        <p className="text-sm text-zinc-300 leading-relaxed">
+                          {page.formSection.subtitle || "Clique no botão abaixo para preencher seus dados de forma rápida e garantir seu acesso prioritário."}
                         </p>
                       </div>
 
-                      {/* Micro Benefícios */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                        <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-zinc-800 flex items-center gap-2.5 text-xs text-zinc-300 font-medium">
+                      {/* Badges / Benefícios */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl mx-auto pt-2">
+                        <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 flex items-center justify-center gap-2 text-xs text-zinc-300 font-medium">
                           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                          <span>Perguntas rápidas (&lt; 1 min)</span>
+                          <span>Preenchimento em 30s</span>
                         </div>
-                        <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-zinc-800 flex items-center gap-2.5 text-xs text-zinc-300 font-medium">
-                          <Gift className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span>Voucher / Brinde no Final</span>
-                        </div>
-                        <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-zinc-800 flex items-center gap-2.5 text-xs text-zinc-300 font-medium">
+                        {page.formSection.gift?.enabled && (
+                          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 flex items-center justify-center gap-2 text-xs text-amber-300 font-medium">
+                            <Gift className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>Brinde Exclusivo</span>
+                          </div>
+                        )}
+                        {assignedSurvey && (
+                          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 flex items-center justify-center gap-2 text-xs text-purple-300 font-medium">
+                            <ClipboardList className="w-4 h-4 text-purple-400 shrink-0" />
+                            <span>Diagnóstico VIP</span>
+                          </div>
+                        )}
+                        <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 flex items-center justify-center gap-2 text-xs text-zinc-300 font-medium">
                           <ShieldCheck className="w-4 h-4 text-purple-400 shrink-0" />
-                          <span>100% Gratuito e Seguro</span>
+                          <span>100% Seguro</span>
                         </div>
                       </div>
 
-                      {/* Botão de Ação Direta para abrir o Modal de Cadastro */}
-                      <div className="pt-2">
+                      <div className="pt-3">
                         <button
                           type="button"
-                          onClick={openSurveyFlow}
-                          className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 hover:from-orange-600 hover:to-amber-600 active:scale-95 text-white font-extrabold text-base shadow-xl shadow-orange-500/25 transition-all cursor-pointer flex items-center justify-center gap-3 border border-orange-400/30"
+                          onClick={() => setIsLeadModalOpen(true)}
+                          className="w-full sm:w-auto px-10 py-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-base shadow-xl shadow-purple-600/30 active:scale-95 transition-all cursor-pointer inline-flex items-center justify-center gap-3 border border-white/20"
                         >
-                          <ClipboardList className="w-5 h-5 text-amber-200" />
-                          <span>INICIAR DIAGNÓSTICO & LIBERAR RECOMPENSA</span>
-                          <ArrowRight className="w-5 h-5 text-amber-200" />
+                          <span>{page.formSection.ctaButtonText || "ABRIR FORMULÁRIO DE CADASTRO"}</span>
+                          <ArrowRight className="w-5 h-5" />
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <form onSubmit={handleLeadSubmit} className="space-y-4">
-                    {((page.formSection.fields && page.formSection.fields.length > 0)
-                      ? page.formSection.fields
-                      : DEFAULT_LEAD_FIELDS
-                    )
+                    <div className="space-y-4">
+                      {/* Banners informativos se há pesquisa ou brinde atrelado */}
+                      {assignedSurvey && (
+                        <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-500/40 text-purple-200 flex items-center gap-3 text-xs text-left">
+                          <ClipboardList className="w-5 h-5 text-amber-400 shrink-0 animate-pulse" />
+                          <div>
+                            <span className="font-bold text-white block">Diagnóstico & Pesquisa Vinculada</span>
+                            <span className="text-zinc-300 text-[11px]">
+                              Preencha seus dados de contato abaixo. Ao enviar, você responderá a uma rápida pesquisa e receberá seu diagnóstico.
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {page.formSection.gift?.enabled && (
+                        <div className="p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/40 text-amber-200 flex items-center gap-3 text-xs text-left">
+                          <Gift className="w-5 h-5 text-amber-400 shrink-0" />
+                          <div>
+                            <span className="font-bold text-white block">
+                              Brinde Exclusivo: {page.formSection.gift.title || "Material Gratuito Liberado"}
+                            </span>
+                            <span className="text-zinc-300 text-[11px]">
+                              {page.formSection.gift.description || "Preencha o formulário para liberar seu download imediatamente."}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <form onSubmit={handleLeadSubmit} className="space-y-4">
+                      {cleanFormFields
                       .filter((f) => f.enabled !== false)
                       .map((field) => {
                         if (field.id === "name") {
@@ -6974,6 +7095,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                       />
                     </div>
                   </form>
+                  </div>
                   )}
                 </>
               )}
@@ -7872,12 +7994,16 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
           isOpen={isLeadFormFieldsModalOpen}
           onClose={() => setIsLeadFormFieldsModalOpen(false)}
           fields={page.formSection.fields || DEFAULT_LEAD_FIELDS}
-          onSave={(newFields) => {
+          displayMode={page.formSection.displayMode || "inline"}
+          gift={page.formSection.gift}
+          onSave={(newFields, displayMode, gift) => {
             updateP((p) => ({
               ...p,
               formSection: {
                 ...p.formSection,
                 fields: newFields,
+                displayMode,
+                gift,
               },
             }));
           }}
@@ -8081,6 +8207,10 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                         try { onLeadSubmit(payload); } catch {}
                       }
                       setIsSubmitted(true);
+                      setIsSurveyModalOpen(false);
+                      if (page.formSection?.gift?.enabled) {
+                        setIsGiftModalOpen(true);
+                      }
                       try {
                         confetti({
                           particleCount: 120,
@@ -8092,6 +8222,222 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                   />
                 );
               })()}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Flutuante de Cadastro de Lead (quando displayMode === 'modal' ou chamado por CTA) */}
+      {isLeadModalOpen && (
+        <div className="fixed inset-0 z-[99998] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-2xl text-white space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-zinc-800 pb-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[10px] font-extrabold uppercase tracking-wider mb-1.5">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>{page.formSection?.badge || "Acesso Exclusivo"}</span>
+                </div>
+                <h3 className="font-extrabold text-xl text-white font-display">
+                  {page.formSection?.title || "Garanta Sua Vaga"}
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  {page.formSection?.subtitle || "Preencha seus dados abaixo para continuar com segurança."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsLeadModalOpen(false)}
+                className="p-1.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {assignedSurvey && (
+              <div className="p-3 rounded-xl bg-purple-950/50 border border-purple-500/30 text-xs text-purple-200 flex items-center gap-2.5">
+                <ClipboardList className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Após preencher, você responderá a uma rápida pesquisa e receberá seu diagnóstico.</span>
+              </div>
+            )}
+
+            {page.formSection?.gift?.enabled && (
+              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/30 text-xs text-amber-200 flex items-center gap-2.5">
+                <Gift className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Brinde liberado após o envio: {page.formSection.gift.title || "Material Gratuito"}.</span>
+              </div>
+            )}
+
+            {submitError && (
+              <div className="p-3 rounded-xl bg-red-950/60 border border-red-800 text-xs text-red-300">
+                {submitError}
+              </div>
+            )}
+
+            <form onSubmit={handleLeadSubmit} className="space-y-4">
+              {cleanFormFields
+                .filter((f) => f.enabled !== false)
+                .map((field) => {
+                  if (field.id === "name") {
+                    return (
+                      <div key={field.id}>
+                        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                          {field.label} {field.required && "*"}
+                        </label>
+                        <input
+                          type="text"
+                          required={field.required}
+                          value={leadName}
+                          onChange={(e) => setLeadName(e.target.value)}
+                          placeholder={field.placeholder || "Ex: Carlos Eduardo Silva"}
+                          className="w-full px-4 py-3 rounded-xl text-sm bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    );
+                  }
+                  if (field.id === "phone") {
+                    return (
+                      <div key={field.id}>
+                        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                          {field.label} {field.required && "*"}
+                        </label>
+                        <input
+                          type="tel"
+                          required={field.required}
+                          value={leadPhone}
+                          onChange={(e) => setLeadPhone(formatBrazilianPhone(e.target.value))}
+                          placeholder={field.placeholder || "(11) 98765-4321"}
+                          className="w-full px-4 py-3 rounded-xl text-sm bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    );
+                  }
+                  if (field.id === "email") {
+                    return (
+                      <div key={field.id}>
+                        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                          {field.label} {field.required && "*"}
+                        </label>
+                        <input
+                          type="email"
+                          required={field.required}
+                          value={leadEmail}
+                          onChange={(e) => setLeadEmail(e.target.value)}
+                          placeholder={field.placeholder || "carlos@empresa.com.br"}
+                          className="w-full px-4 py-3 rounded-xl text-sm bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={field.id}>
+                      <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                        {field.label} {field.required && "*"}
+                      </label>
+                      <input
+                        type={field.type === "number" ? "number" : field.type === "tel" ? "tel" : "text"}
+                        required={field.required}
+                        value={customFormAnswers[field.id] || ""}
+                        onChange={(e) =>
+                          setCustomFormAnswers((prev) => ({
+                            ...prev,
+                            [field.id]: e.target.value,
+                          }))
+                        }
+                        placeholder={field.placeholder || ""}
+                        className="w-full px-4 py-3 rounded-xl text-sm bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  );
+                })}
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-sm shadow-xl shadow-purple-600/30 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 border border-white/20"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    <span>{page.formSection?.ctaButtonText || "CONFIRMAR E CONTINUAR"}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+
+              <div className="pt-2 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>{page.formSection?.guaranteeText || "Seus dados estão 100% seguros e protegidos."}</span>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Download / Entrega do Brinde Atrelado */}
+      {isGiftModalOpen && page.formSection?.gift && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-gradient-to-b from-zinc-900 via-zinc-950 to-zinc-950 border border-amber-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl text-white text-center space-y-5">
+            <div className="absolute top-4 right-4">
+              <button
+                type="button"
+                onClick={() => setIsGiftModalOpen(false)}
+                className="p-1.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/20 animate-bounce">
+              <Gift className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>Material Exclusivo Liberado</span>
+              </div>
+              <h3 className="text-2xl font-black text-white font-display leading-tight">
+                {page.formSection.gift.title || "Parabéns! Seu Brinde Está Pronto"}
+              </h3>
+              <p className="text-xs text-zinc-300 leading-relaxed max-w-sm mx-auto">
+                {page.formSection.gift.description || "Clique no botão abaixo para baixar seu brinde exclusivo agora mesmo."}
+              </p>
+            </div>
+
+            {/* Badges do formato */}
+            <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-center gap-3 text-xs text-zinc-300">
+              <FileText className="w-4 h-4 text-amber-400" />
+              <span className="font-bold uppercase tracking-wider text-amber-300">
+                Formato: {page.formSection.gift.fileType || "PDF"}
+              </span>
+              <span>•</span>
+              <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Acesso Imediato
+              </span>
+            </div>
+
+            <div className="pt-2">
+              <a
+                href={page.formSection.gift.downloadUrl || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  toast.success("Download iniciado com sucesso!");
+                }}
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-sm shadow-xl shadow-amber-500/30 inline-flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-98 cursor-pointer"
+              >
+                <Download className="w-5 h-5" />
+                <span>{page.formSection.gift.buttonText || "BAIXAR MATERIAL AGORA"}</span>
+              </a>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsGiftModalOpen(false)}
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors font-semibold cursor-pointer"
+            >
+              Fechar esta janela
+            </button>
           </div>
         </div>
       )}

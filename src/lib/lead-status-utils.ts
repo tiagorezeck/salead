@@ -4,7 +4,7 @@ import { differenceInDays } from "date-fns";
 import { type Lead, type Product } from "@/data/mock";
 import { 
   Crown, Sparkles, Ban, Trash2, User, Clock, Calendar, AlertCircle, 
-  Check, X, CheckCircle2, XCircle, type LucideIcon 
+  Check, X, CheckCircle2, XCircle, FlaskConical, type LucideIcon 
 } from "lucide-react";
 
 export type LeadStatusCode = 
@@ -12,7 +12,8 @@ export type LeadStatusCode =
   | 'recorrente_sem_compra'     // Visto Amarelo - Recorrente que Nunca comprou
   | 'desqualificado'           // Visto Vermelho - Desqualificado
   | 'cliente_recorrente'        // Visto Azul - Cliente Recorrente
-  | 'excluido';                 // X Vermelho - Excluído
+  | 'excluido'                  // X Vermelho - Excluído
+  | 'lead_teste';               // 🧪 Modo Teste - Lead cadastrado via LP de teste
 
 export interface LeadStatusCodeInfo {
   code: LeadStatusCode;
@@ -20,7 +21,7 @@ export interface LeadStatusCodeInfo {
   badgeLabel: string;
   shortLabel: string;
   visualCodeName: string; // "Visto Verde", "Visto Amarelo", etc.
-  visualCodeEmoji: string; // "🟢", "🟡", "🔴", "🔵", "❌"
+  visualCodeEmoji: string; // "🟢", "🟡", "🔴", "🔵", "❌", "🧪"
   icon: LucideIcon;
   iconShape: 'check' | 'x';
   textClass: string;
@@ -49,6 +50,23 @@ export const LEAD_STATUS_CONFIG: Record<LeadStatusCode, LeadStatusCodeInfo> = {
     ringClass: 'ring-emerald-500/30',
     checkboxAccentClass: 'text-emerald-500 border-emerald-500/40 bg-emerald-500/10',
     description: 'Novo lead em primeiro contato na base'
+  },
+  lead_teste: {
+    code: 'lead_teste',
+    label: 'Lead Teste (LP em Teste)',
+    badgeLabel: '🧪 Modo Teste',
+    shortLabel: 'Teste',
+    visualCodeName: 'Modo Teste',
+    visualCodeEmoji: '🧪',
+    icon: FlaskConical,
+    iconShape: 'check',
+    textClass: 'text-amber-500 dark:text-amber-400',
+    bgClass: 'bg-amber-500/15',
+    borderClass: 'border-amber-500/30',
+    dotColor: 'bg-amber-500',
+    ringClass: 'ring-amber-500/30',
+    checkboxAccentClass: 'text-amber-500 border-amber-500/40 bg-amber-500/10',
+    description: 'Lead capturado em Landing Page de Teste (será excluído automaticamente ao ativar a LP)'
   },
   recorrente_sem_compra: {
     code: 'recorrente_sem_compra',
@@ -129,6 +147,19 @@ export function getLeadStatusCode(lead: Lead | any): LeadStatusCode {
 
   if (lead.status === 'Desqualificado') {
     return 'desqualificado';
+  }
+
+  const isTest = Boolean(
+    lead.isTest === true ||
+    lead.classification === 'Lead Teste' ||
+    lead.metadata?.isTest === true ||
+    (Array.isArray(lead.tags) && (lead.tags.includes('leadtest') || lead.tags.includes('modo-teste') || lead.tags.includes('teste'))) ||
+    lead.source?.toLowerCase().includes('[modo-teste]') ||
+    lead.source?.toLowerCase().includes('[teste]')
+  );
+
+  if (isTest) {
+    return 'lead_teste';
   }
 
   const isCustomer = Boolean(

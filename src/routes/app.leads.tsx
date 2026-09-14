@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { 
   Search, Download, Plus, Eye, Timer, Clock, Calendar, Filter, X, 
   ChevronDown, Check, Sparkles, Flame, UserCheck, Trash2, 
-  RefreshCw, Ban, CheckSquare, Square, AlertTriangle, Globe, MessageCircle, Mail, DollarSign
+  RefreshCw, Ban, CheckSquare, Square, AlertTriangle, Globe, MessageCircle, Mail, DollarSign,
+  FileCheck
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useData } from "@/hooks/use-data";
@@ -132,7 +133,8 @@ export const Route = createFileRoute("/app/leads")({
 function LeadsPage() {
   const { 
     leads, addLead, updateLead, deleteLead, bulkDeleteLeads, 
-    bulkUpdateLeadStatus, stages, initialized, dateFilter, products 
+    bulkUpdateLeadStatus, stages, initialized, dateFilter, products,
+    surveysResponses = []
   } = useData();
   
   const [q, setQ] = useState("");
@@ -166,6 +168,7 @@ function LeadsPage() {
     const counts = {
       all: leads.length,
       novo: 0,
+      lead_teste: 0,
       recorrente_sem_compra: 0,
       cliente_recorrente: 0,
       desqualificado: 0,
@@ -216,6 +219,7 @@ function LeadsPage() {
       result = result.filter(l => {
         const code = getLeadStatusCode(l);
         if (filterStatus === 'novo') return code === 'novo';
+        if (filterStatus === 'lead_teste') return code === 'lead_teste';
         if (filterStatus === 'recorrente_sem_compra') return code === 'recorrente_sem_compra';
         if (filterStatus === 'cliente_recorrente') return code === 'cliente_recorrente';
         if (filterStatus === 'desqualificado') return code === 'desqualificado';
@@ -329,6 +333,7 @@ function LeadsPage() {
               options={[
                 { v: 'all', l: `Todos Status (${statusCounts.all})` },
                 { v: 'novo', l: `🟢 Lead - 1º Contato (${statusCounts.novo})` },
+                { v: 'lead_teste', l: `🧪 Modo Teste (${statusCounts.lead_teste})` },
                 { v: 'recorrente_sem_compra', l: `🟡 Recorrente - Sem Compra (${statusCounts.recorrente_sem_compra})` },
                 { v: 'cliente_recorrente', l: `🔵 Cliente Recorrente (${statusCounts.cliente_recorrente})` },
                 { v: 'desqualificado', l: `🔴 Desqualificado (${statusCounts.desqualificado})` },
@@ -470,6 +475,31 @@ function LeadsPage() {
                           <span className="font-bold text-sm text-foreground">{l.name}</span>
                           {l.personType && (
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">{l.personType}</span>
+                          )}
+                          {Boolean(
+                            l.quizAnswers || 
+                            l.metadata?.surveyAnswers || 
+                            l.metadata?.answers || 
+                            (l as any).surveyAnswers ||
+                            surveysResponses.some((r: any) => 
+                              r.leadId === l.id || 
+                              r.lead_id === l.id || 
+                              (l.email && (r.leadEmail === l.email || r.answers?.email === l.email)) ||
+                              (l.whatsapp && (r.leadWhatsapp === l.whatsapp || r.answers?.whatsapp === l.whatsapp))
+                            )
+                          ) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedId(l.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 border border-purple-500/40 text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+                              title="Lead respondeu à pesquisa - clique para ver as respostas completas"
+                            >
+                              <FileCheck className="h-2.5 w-2.5" />
+                              <span>Pesquisa</span>
+                            </button>
                           )}
                         </div>
                         

@@ -270,7 +270,91 @@ export function DeepFindSurveyViewer({
         });
       }
 
-      // 4. Envia resposta para o Google Drive / Google Sheets (em tabela separada da Pesquisa)
+      // 4. Salva no banco local de respostas de pesquisa (comet_crm_survey_responses) para exibição imediata
+      try {
+        const rawSurveyResponses = localStorage.getItem("comet_crm_survey_responses");
+        const existingResponses = rawSurveyResponses ? JSON.parse(rawSurveyResponses) : [];
+        const newResponseItem = {
+          id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          survey_id: survey.id || "pesquisa_custom",
+          surveyId: survey.id || "pesquisa_custom",
+          survey_name: survey.name || "Pesquisa de Qualificação",
+          surveyTitle: survey.name || "Pesquisa de Qualificação",
+          lead_id: targetLead?.id || leadId || "",
+          leadId: targetLead?.id || leadId || "",
+          lead_name: contactInfo.name || targetLead?.name || "",
+          leadName: contactInfo.name || targetLead?.name || "",
+          lead_email: contactInfo.email || targetLead?.email || "",
+          leadEmail: contactInfo.email || targetLead?.email || "",
+          lead_whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+          leadWhatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+          lead_company: contactInfo.company || targetLead?.company || "",
+          answers: finalAnswers,
+          score,
+          minScore: score,
+          minClassification: minProfile.temperatura,
+          created_at: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        };
+
+        if (Array.isArray(existingResponses)) {
+          existingResponses.unshift(newResponseItem);
+          localStorage.setItem("comet_crm_survey_responses", JSON.stringify(existingResponses.slice(0, 500)));
+        }
+
+        // Atualiza o lead no banco de dados via API se leadId existir
+        if (targetLead?.id || leadId) {
+          const lId = targetLead?.id || leadId;
+          fetch(`/api/leads/${encodeURIComponent(lId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              score: Math.max(targetLead?.score || 0, score),
+              quizAnswers: { ...(targetLead?.quizAnswers || {}), ...finalAnswers },
+              surveyAnswers: finalAnswers,
+              metadata: {
+                ...(targetLead?.metadata || {}),
+                surveyId: survey.id,
+                surveyName: survey.name,
+                surveyScore: score,
+                surveyTemperature: minProfile.temperatura,
+                surveyAnswers: finalAnswers,
+                surveyAnsweredAt: new Date().toISOString()
+              }
+            })
+          }).catch(() => {});
+        }
+      } catch (saveErr) {
+        console.warn("Aviso ao processar respostas da pesquisa:", saveErr);
+      }
+
+      // 5. Envia para o endpoint do servidor Express /api/surveys/responses
+      try {
+        fetch("/api/surveys/responses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            surveyId: survey.id || "pesquisa_custom",
+            leadId: targetLead?.id || leadId || null,
+            leadForm: {
+              name: contactInfo.name || targetLead?.name || "",
+              whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+              email: contactInfo.email || targetLead?.email || "",
+              company: contactInfo.company || targetLead?.company || ""
+            },
+            answers: finalAnswers,
+            score,
+            duration: 0,
+            extraPayload: {
+              surveyName: survey.name,
+              score,
+              temperature: minProfile.temperatura
+            }
+          })
+        }).catch(() => {});
+      } catch {}
+
+      // 6. Envia resposta para o Google Drive / Google Sheets (em tabela separada da Pesquisa)
       try {
         submitSurveyResponseToDrive({
           surveyId: survey.id || "pesquisa_custom",

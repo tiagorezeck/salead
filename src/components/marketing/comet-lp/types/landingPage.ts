@@ -397,8 +397,20 @@ export interface FormSection {
   originalPrice?: string;
   installmentsText?: string;
   whatsappHelpNumber?: string;
-  // Campos e perguntas customizáveis do Lead (nome, telefone, email, faturamento, etc.)
+  // Campos e perguntas customizáveis do Lead (nome, telefone, email, etc.)
   fields?: LeadFormField[];
+  // Modo de exibição do formulário: 'inline' (visível na LP) ou 'modal' (card flutuante quando clica no botão)
+  displayMode?: "inline" | "modal";
+  // Brinde atrelado (ebook, pdf, planilha xlsx, pptx, etc.)
+  gift?: {
+    enabled?: boolean;
+    type?: "ebook" | "pdf" | "spreadsheet" | "presentation" | "other";
+    title?: string;
+    description?: string;
+    downloadUrl?: string;
+    fileName?: string;
+    buttonText?: string;
+  };
   // Visual Customizations
   align?: TextAlign;
   headlineSize?: FontSize;

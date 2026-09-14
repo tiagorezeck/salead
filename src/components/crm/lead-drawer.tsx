@@ -109,15 +109,42 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
 
   const leadSurveyResponses = useMemo(() => {
     if (!lead) return [];
-    return surveysResponses.filter(
-      (r) =>
-        r.leadId === lead.id ||
-        r.lead_id === lead.id ||
-        r.answers?.leadId === lead.id ||
-        r.answers?.lead_id === lead.id ||
-        (r.answers?.email && lead.email && String(r.answers.email).toLowerCase() === String(lead.email).toLowerCase())
-    );
-  }, [surveysResponses, lead?.id, lead?.email]);
+    const cleanLeadPhone = (lead.whatsapp || "").replace(/\D/g, "");
+    const cleanLeadEmail = (lead.email || "").trim().toLowerCase();
+
+    const matched = surveysResponses.filter((r) => {
+      if (r.leadId === lead.id || r.lead_id === lead.id) return true;
+      if (r.answers?.leadId === lead.id || r.answers?.lead_id === lead.id) return true;
+      
+      const rEmail = (r.leadEmail || r.lead_email || r.answers?.email || "").trim().toLowerCase();
+      if (cleanLeadEmail && rEmail && rEmail === cleanLeadEmail) return true;
+
+      const rPhone = (r.leadWhatsapp || r.lead_whatsapp || r.answers?.whatsapp || r.answers?.phone || "").replace(/\D/g, "");
+      if (cleanLeadPhone && rPhone && rPhone === cleanLeadPhone) return true;
+
+      return false;
+    });
+
+    if (matched.length === 0) {
+      const answers = lead.metadata?.surveyAnswers || lead.metadata?.answers || lead.quizAnswers || (lead as any).surveyAnswers;
+      if (answers && Object.keys(answers).length > 0) {
+        return [
+          {
+            id: `synthetic_${lead.id}`,
+            survey_id: lead.metadata?.surveyId || "pesquisa_lp",
+            surveyId: lead.metadata?.surveyId || "pesquisa_lp",
+            lead_id: lead.id,
+            leadId: lead.id,
+            answers,
+            minClassification: lead.metadata?.surveyTemperature || lead.minQualification || "Respondido",
+            created_at: lead.metadata?.surveyAnsweredAt || lead.created_at || new Date().toISOString(),
+          } as any,
+        ];
+      }
+    }
+
+    return matched;
+  }, [surveysResponses, lead?.id, lead?.email, lead?.whatsapp, lead?.metadata, lead?.quizAnswers]);
 
   if (!lead) return null;
 
@@ -484,6 +511,34 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'perfil' ? (
             <div className="p-5 space-y-6 pb-12">
+
+              {/* CARD DE RESPOSTAS DA PESQUISA (DEEPFIND) */}
+              {leadSurveyResponses.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/15 via-purple-500/5 to-muted/20 border border-purple-500/30 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-black text-purple-400 uppercase tracking-wider">
+                      <FileCheck className="h-4 w-4 text-purple-400" /> Respostas da Pesquisa (DeepFind)
+                    </div>
+                    <span className="text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      {leadSurveyResponses.length} {leadSurveyResponses.length === 1 ? "Registro" : "Registros"}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    Este lead preencheu as perguntas da pesquisa/diagnóstico da Landing Page. Clique no botão abaixo para ver todas as respostas.
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowSurveyModal(true)}
+                    className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-purple-600/20 transition-all cursor-pointer hover:scale-[1.01]"
+                  >
+                    <Layers className="h-4 w-4" />
+                    <span>Ver Respostas da Pesquisa do Lead</span>
+                    <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                  </button>
+                </div>
+              )}
 
               {/* CARD DE AGENDAMENTO NO GOOGLE CALENDAR */}
               {lead.metadata?.calendarEvent ? (

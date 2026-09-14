@@ -6,7 +6,7 @@ import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
 import { getInitialAILandingPages } from "@/hooks/use-data";
 import { supabase } from "@/integrations/supabase/client";
-import { recordLocalLead, fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
+import { fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
 import { parseUtm } from "@/modules/landing-pages";
 import { getStoredTracking } from "@/components/marketing/lp-tracking-capture";
 import {
@@ -330,35 +330,7 @@ export function PreviewPage() {
       },
     };
 
-    // 1. Salva localmente
-    try {
-      recordLocalLead({
-        id: `lead_${Date.now()}`,
-        pageId: payload.pageId,
-        pageTitle: payload.pageTitle,
-        name: payload.name,
-        whatsapp: payload.whatsapp,
-        email: payload.email,
-        quizAnswers: payload.quizAnswers,
-        utms: payload.utms as any,
-        submittedAt: new Date().toISOString(),
-        webhookStatus: "pending" as any,
-      });
-    } catch {}
-
-    // 2. Fila local para ingestão do CRM
-    try {
-      const queueRaw = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-      const queue = JSON.parse(queueRaw);
-      queue.unshift({
-        ...payload,
-        id: `queue_${Date.now()}`,
-        capturedAt: new Date().toISOString(),
-      });
-      localStorage.setItem("comet_inbound_leads_queue", JSON.stringify(queue.slice(0, 50)));
-    } catch {}
-
-    // 3. Envia para o endpoint de lead capture (funciona na Vercel e no Express)
+    // Envia direto para o banco de dados do sistema
     try {
       await fetch("/api/submit-lead", {
         method: "POST",

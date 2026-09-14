@@ -217,22 +217,10 @@ export function duplicateLandingPage(page: LandingPage): LandingPage {
 }
 
 export function loadStoredLeads(): LeadSubmission[] {
-  try {
-    const raw = localStorage.getItem(LEADS_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return [];
 }
 
 export function recordLocalLead(lead: LeadSubmission): void {
-  try {
-    const leads = loadStoredLeads();
-    leads.unshift(lead);
-    localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(leads.slice(0, 300)));
-  } catch (err) {
-    console.error("Error storing local lead:", err);
-  }
+  // Desativado: leads agora são gravados 100% direto no banco de dados
 }
 

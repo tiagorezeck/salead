@@ -31,7 +31,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/LandingPageRenderer";
 import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-viewer";
 import { ensureCometLP } from "@/components/marketing/comet-lp/utils/cometAdapter";
-import { recordLocalLead, fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
+import { fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
 import { LPTrackingCapture, getStoredTracking } from "@/components/marketing/lp-tracking-capture";
 import { PublicRenderer } from "@/modules/landing-pages/renderer/PublicRenderer";
 import { getLPModule, parseUtm } from "@/modules/landing-pages";
@@ -108,7 +108,7 @@ function normalizeSlug(str: string): string {
 
 function PublicLPPage() {
   const { id } = useParams({ from: "/lp/$id" });
-  const { products, pipelines, surveys } = useData();
+  const { products, pipelines, surveys, leads } = useData();
 
   const [lp, setLp] = useState<any>(null);
   const [assignedSurvey, setAssignedSurvey] = useState<any>(null);
@@ -731,9 +731,7 @@ function PublicLPPage() {
                   try {
                     const cleanPhone = (leadWhatsapp || "").replace(/\D/g, "");
                     const normEmail = (leadEmail || "").trim().toLowerCase();
-                    const rawL = localStorage.getItem("comet_local_leads") || "[]";
-                    const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-                    const allPrior = [...JSON.parse(rawL), ...JSON.parse(rawQ)];
+                    const allPrior = (leads as any[]) || [];
                     
                     const match = allPrior.find((x: any) => {
                       if (normEmail && x.email && x.email.trim().toLowerCase() === normEmail) return true;
@@ -755,6 +753,7 @@ function PublicLPPage() {
                   const tags = [effectiveSource, utm?.utm_campaign || "inbound", "comet-lp", "pesquisa-externa"].filter(Boolean);
                   if (isCustomer) tags.push("cliente");
                   if (isRecurring) tags.push("recorrência");
+                  if (lp.status === "Teste") tags.push("leadtest", "modo-teste");
 
                   const leadRecord = {
                     name: leadName,
@@ -766,13 +765,14 @@ function PublicLPPage() {
                     product_id: lp.productId || null,
                     pipeline_id: defaultPipeline?.id || null,
                     stage: "Leads",
-                    classification: isCustomer ? "Cliente" : "Lead",
+                    classification: lp.status === "Teste" ? "Lead Teste" : (isCustomer ? "Cliente" : "Lead"),
                     temperature: "Quente",
                     type: isRecurring ? "Recorrente" : "Inbound",
                     tags,
                     lpVisits: totalLpVisits,
                     isCustomer,
                     isRecurring,
+                    isTest: lp.status === "Teste",
                     metadata: {
                       capturedVia: "COMET External Survey Link Engine",
                       source: effectiveSource,
@@ -784,28 +784,13 @@ function PublicLPPage() {
                       lpVisits: totalLpVisits,
                       isCustomer,
                       isRecurring,
+                      isTest: lp.status === "Teste",
                     },
                   };
 
-                  // 1. Salva localmente para compatibilidade offline / instantânea
+                  // 1. Grava diretamente no banco de dados e sincroniza com Google Sheets / Drive
                   try {
-                    recordLocalLead({
-                      id: `lead_${Date.now()}`,
-                      pageId: lp.id,
-                      pageTitle: lp.name || lp.title || "Landing Page",
-                      name: leadName,
-                      whatsapp: leadWhatsapp,
-                      email: leadEmail,
-                      quizAnswers: answers || {},
-                      utms: (utm as Record<string, string>) || {},
-                      submittedAt: new Date().toISOString(),
-                      webhookStatus: "pending" as any,
-                    });
-                  } catch {}
-
-                  // 2. Envia para os endpoints de capturas de leads e respostas da pesquisa
-                  try {
-                    fetch("/api/submit-lead", {
+                    await fetch("/api/submit-lead", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -817,18 +802,36 @@ function PublicLPPage() {
                         quizAnswers: answers,
                         utms: utm,
                         source: effectiveSource,
+                        isTest: lp.status === "Teste",
                       }),
-                    }).catch(() => {});
+                    });
 
                     fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
                       method: "POST",
                     }).catch(() => {});
 
+                    await submitLpLeadToDrive({
+                      landingPageId: lp.id,
+                      landingPageTitle: lp.name || lp.title || "Landing Page",
+                      name: leadName,
+                      email: leadEmail,
+                      whatsapp: leadWhatsapp,
+                      company: `${leadName} (LP: ${lp.name || lp.title})`,
+                      source: effectiveSource,
+                      utm,
+                      answers: answers || {},
+                      isTest: lp.status === "Teste",
+                    });
+                  } catch (dbErr) {
+                    console.warn("Direct database lead submission notice:", dbErr);
+                  }
+
+                  try {
                     fetch("/api/surveys/responses", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
-                        surveyId: assignedSurvey.id || lp.surveyId,
+                        surveyId: assignedSurvey?.id || lp.surveyId,
                         leadForm: {
                           name: leadName,
                           whatsapp: leadWhatsapp,
@@ -850,53 +853,9 @@ function PublicLPPage() {
                     fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
                       method: "POST",
                     }).catch(() => {});
-
-                    // Envia para Google Drive / Google Sheets em tempo real
-                    submitLpLeadToDrive({
-                      landingPageId: lp.id,
-                      landingPageTitle: lp.name || lp.title || "Landing Page",
-                      name: leadName || "",
-                      email: leadEmail || "",
-                      whatsapp: leadWhatsapp || "",
-                      source: effectiveSource,
-                      utm,
-                      answers,
-                      isTest: lp.status === "Teste",
-                    }).catch(() => {});
                   } catch {}
 
-                  // 3. Atualiza contagem no localStorage
-                  try {
-                    const updateLpList = (storageKey: string) => {
-                      const raw = localStorage.getItem(storageKey);
-                      if (!raw) return;
-                      const list = JSON.parse(raw);
-                      if (!Array.isArray(list)) return;
-                      const updated = list.map((p: any) => {
-                        if (p.id === lp.id || p.slug === lp.slug) {
-                          const newLeads = (p.leads || p.leads_count || 0) + 1;
-                          const currentVisits = Number(p.visits || p.viewsCount || 0);
-                          const newVisits = Math.max(currentVisits, newLeads);
-                          const newConv = newVisits > 0 ? Math.min(100, Math.round((newLeads / newVisits) * 100)) : 0;
-                          return {
-                            ...p,
-                            leads: newLeads,
-                            leads_count: newLeads,
-                            visits: newVisits,
-                            viewsCount: newVisits,
-                            conv: newConv,
-                          };
-                        }
-                        return p;
-                      });
-                      localStorage.setItem(storageKey, JSON.stringify(updated));
-                    };
-                    updateLpList("comet_local_landing_pages");
-                    updateLpList("people_cro_landing_pages_v1");
-                    updateLpList("app:lps:v1");
-                  } catch {}
-
-                  // 4. Tenta gravar diretamente no Supabase e incrementar leads_count
+                  // 2. Grava diretamente no Supabase e incrementa leads_count
                   try {
                     await supabase.from("leads").insert([leadRecord]);
                     if (isUUID(lp.id)) {
@@ -941,9 +900,7 @@ function PublicLPPage() {
           try {
             const cleanPhone = (lead.whatsapp || "").replace(/\D/g, "");
             const normEmail = (lead.email || "").trim().toLowerCase();
-            const rawL = localStorage.getItem("comet_local_leads") || "[]";
-            const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-            const allPrior = [...JSON.parse(rawL), ...JSON.parse(rawQ)];
+            const allPrior = (leads as any[]) || [];
             
             const match = allPrior.find((x: any) => {
               if (normEmail && x.email && x.email.trim().toLowerCase() === normEmail) return true;
@@ -965,6 +922,7 @@ function PublicLPPage() {
           const tags = [effectiveSource, utm?.utm_campaign || "inbound", "comet-lp"].filter(Boolean);
           if (isCustomer) tags.push("cliente");
           if (isRecurring) tags.push("recorrência");
+          if (lp.status === "Teste") tags.push("leadtest", "modo-teste");
 
           const linkedProductIds = lp.productIds && lp.productIds.length > 0 ? lp.productIds : (lp.productId ? [lp.productId] : []);
           const primaryProductId = linkedProductIds[0] || null;
@@ -977,20 +935,21 @@ function PublicLPPage() {
             name: lead.name || "Lead Capturado",
             email: lead.email || "",
             whatsapp: lead.whatsapp || "",
-            company: lead.company || "",
+            company: lead.company || `${lead.name || "Lead"} (LP: ${lp.name || lp.title})`,
             source: effectiveSource,
             landing_page: lp.name || lp.title || lp.id,
             product_id: primaryProductId,
             value: totalDealValue,
             pipeline_id: defaultPipeline?.id || null,
             stage: "Leads",
-            classification: isCustomer ? "Cliente" : "Lead",
+            classification: lp.status === "Teste" ? "Lead Teste" : (isCustomer ? "Cliente" : "Lead"),
             temperature: "Quente",
             type: isRecurring ? "Recorrente" : "Inbound",
             tags,
             lpVisits: totalLpVisits,
             isCustomer,
             isRecurring,
+            isTest: lp.status === "Teste",
             metadata: {
               capturedVia: "COMET High-Conversion Engine",
               source: effectiveSource,
@@ -1002,73 +961,13 @@ function PublicLPPage() {
               lpVisits: totalLpVisits,
               isCustomer,
               isRecurring,
+              isTest: lp.status === "Teste",
             },
           };
 
-          // 1. Salva localmente no armazenamento do Comet LP
+          // 1. Grava diretamente no banco de dados do sistema (Express / Arquivo do Banco de Dados de Leads)
           try {
-            recordLocalLead({
-              id: `lead_${Date.now()}`,
-              pageId: lp.id,
-              pageTitle: lp.name || lp.title || "Landing Page",
-              name: lead.name || "",
-              whatsapp: lead.whatsapp || "",
-              email: lead.email || "",
-              quizAnswers: lead.quizAnswers || {},
-              utms: (utm as Record<string, string>) || {},
-              submittedAt: new Date().toISOString(),
-              webhookStatus: "pending" as any,
-            });
-          } catch {}
-
-          // 2. Registra na fila persistente de leads inbound para sincronização garantida
-          try {
-            const rawQueue = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-            const queue = JSON.parse(rawQueue);
-            queue.unshift({
-              ...leadRecord,
-              id: `lead_queue_${Date.now()}`,
-              rawLead: lead,
-            });
-            localStorage.setItem("comet_inbound_leads_queue", JSON.stringify(queue.slice(0, 100)));
-          } catch {}
-
-          // 3. Incrementa contagem de leads da LP no localStorage
-          try {
-            const updateLpStorage = (key: string) => {
-              const rawLps = localStorage.getItem(key);
-              if (rawLps) {
-                const lpsList = JSON.parse(rawLps);
-                if (Array.isArray(lpsList)) {
-                  const updatedLps = lpsList.map((p: any) => {
-                    if (p.id === lp.id || p.slug === lp.slug) {
-                      const newLeads = (p.leads || p.leads_count || 0) + 1;
-                      const currentVisits = Number(p.visits || p.viewsCount || 0);
-                      const newVisits = Math.max(currentVisits, newLeads);
-                      const newConv = newVisits > 0 ? Math.min(100, Math.round((newLeads / newVisits) * 100)) : 0;
-                      return {
-                        ...p,
-                        leads: newLeads,
-                        leads_count: newLeads,
-                        visits: newVisits,
-                        viewsCount: newVisits,
-                        conv: newConv,
-                      };
-                    }
-                    return p;
-                  });
-                  localStorage.setItem(key, JSON.stringify(updatedLps));
-                }
-              }
-            };
-            updateLpStorage("comet_local_landing_pages");
-            updateLpStorage("people_cro_landing_pages_v1");
-            updateLpStorage("app:lps:v1");
-          } catch {}
-
-          // 4. Envia para o endpoint de lead capture (compatível com Vercel e Express)
-          try {
-            fetch("/api/submit-lead", {
+            await fetch("/api/submit-lead", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1081,49 +980,56 @@ function PublicLPPage() {
                 utms: utm,
                 source: effectiveSource,
                 webhookUrl: (cometPage as any).settings?.webhookUrl,
+                isTest: lp.status === "Teste",
               }),
-            }).catch(() => {});
+            });
 
-            fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
+            await fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
               method: "POST",
-            }).catch(() => {});
+            });
+          } catch (dbErr) {
+            console.warn("Direct database submit notice:", dbErr);
+          }
+
+          // 2. Encaminha para o endpoint de webhook se configurado
+          try {
+            if ((cometPage as any).settings?.webhookUrl) {
+              fetch("/api/webhook/submit-lead", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  pageId: lp.id,
+                  pageTitle: lp.name || lp.title,
+                  name: lead.name,
+                  whatsapp: lead.whatsapp,
+                  email: lead.email,
+                  quizAnswers: lead.quizAnswers,
+                  utms: utm,
+                  webhookUrl: (cometPage as any).settings?.webhookUrl,
+                }),
+              }).catch(() => {});
+            }
           } catch {}
 
-          // 5. Encaminha para o endpoint de webhook local
+          // 3. Sincroniza diretamente com o banco de dados do Google Drive / Google Sheets em tempo real
           try {
-            fetch("/api/webhook/submit-lead", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                pageId: lp.id,
-                pageTitle: lp.name || lp.title,
-                name: lead.name,
-                whatsapp: lead.whatsapp,
-                email: lead.email,
-                quizAnswers: lead.quizAnswers,
-                utms: utm,
-                webhookUrl: (cometPage as any).settings?.webhookUrl,
-              }),
-            }).catch(() => {});
-          } catch {}
-
-          // Envia para Google Drive / Google Sheets em tempo real
-          try {
-            submitLpLeadToDrive({
+            await submitLpLeadToDrive({
               landingPageId: lp.id,
               landingPageTitle: lp.name || lp.title || "Landing Page",
               name: lead.name || "",
               email: lead.email || "",
               whatsapp: lead.whatsapp || "",
-              company: lead.company || "",
+              company: lead.company || `${lead.name || "Lead"} (LP: ${lp.name || lp.title})`,
               source: effectiveSource,
               utm,
               answers: lead.quizAnswers || {},
               isTest: lp.status === "Teste",
-            }).catch(() => {});
-          } catch {}
+            });
+          } catch (gErr) {
+            console.warn("Google Drive direct sync notice:", gErr);
+          }
 
-          // 6. Grava diretamente no Supabase e atualiza leads_count e visits em tempo real
+          // 4. Grava diretamente no Supabase e atualiza leads_count e visits em tempo real
           try {
             const dbPayload = mapLeadToDb(leadRecord);
             await supabase.from("leads").insert([dbPayload]);
@@ -1178,6 +1084,7 @@ interface DirectExternalLeadFormProps {
 }
 
 function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLeadFormProps) {
+  const { leads } = useData();
   const [name, setName] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [email, setEmail] = useState("");
@@ -1220,14 +1127,12 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
     try {
       const defaultPipeline = pipelines.find((p) => p.name?.toUpperCase().includes("PROSPECÇÃO")) || pipelines[0];
 
-      // Checa se o lead já existia anteriormente
+      // Checa se o lead já existia anteriormente diretamente no banco de dados
       let isCustomer = false;
       let priorVisits = 0;
       try {
         const normEmail = email.trim().toLowerCase();
-        const rawL = localStorage.getItem("comet_local_leads") || "[]";
-        const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-        const allPrior = [...JSON.parse(rawL), ...JSON.parse(rawQ)];
+        const allPrior = (leads as any[]) || [];
         
         const match = allPrior.find((x: any) => {
           if (normEmail && x.email && x.email.trim().toLowerCase() === normEmail) return true;
@@ -1256,24 +1161,26 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
 
       if (isCustomer) tags.push("cliente");
       if (isRecurring) tags.push("recorrência");
+      if (lp.status === "Teste") tags.push("leadtest", "modo-teste");
 
       const leadRecord = {
         name: name.trim(),
         email: email.trim(),
         whatsapp: whatsapp.trim(),
-        company: notes.trim() || "",
+        company: notes.trim() || `${name.trim()} (LP: ${lp.name || lp.title})`,
         source: effectiveSource,
         landing_page: lp.name || lp.title || lp.id,
         product_id: lp.productId || null,
         pipeline_id: defaultPipeline?.id || null,
         stage: "Leads",
-        classification: isCustomer ? "Cliente" : "Lead",
+        classification: lp.status === "Teste" ? "Lead Teste" : (isCustomer ? "Cliente" : "Lead"),
         temperature: "Quente",
         type: isRecurring ? "Recorrente" : "Inbound",
         tags,
         lpVisits: totalLpVisits,
         isCustomer,
         isRecurring,
+        isTest: lp.status === "Teste",
         metadata: {
           capturedVia: "COMET Direct Bridge Lead Form",
           source: effectiveSource,
@@ -1285,66 +1192,13 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
           lpVisits: totalLpVisits,
           isCustomer,
           isRecurring,
+          isTest: lp.status === "Teste",
         },
       };
 
-      // 1. Grava no localStorage de leads
+      // 1. Grava diretamente no banco de dados do sistema (sem localStorage)
       try {
-        recordLocalLead({
-          id: `lead_${Date.now()}`,
-          pageId: lp.id,
-          pageTitle: lp.name || lp.title || "Landing Page",
-          name: name.trim(),
-          whatsapp: whatsapp.trim(),
-          email: email.trim(),
-          quizAnswers: { observacoes: notes.trim() },
-          utms: (utm as Record<string, string>) || {},
-          submittedAt: new Date().toISOString(),
-          webhookStatus: "pending" as any,
-        });
-      } catch {}
-
-      // 2. Fila local de leads inbound
-      try {
-        const rawQueue = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-        const queue = JSON.parse(rawQueue);
-        queue.unshift({
-          ...leadRecord,
-          id: `lead_queue_${Date.now()}`,
-        });
-        localStorage.setItem("comet_inbound_leads_queue", JSON.stringify(queue.slice(0, 100)));
-      } catch {}
-
-      // 3. Atualiza contagem de leads da LP no localStorage
-      try {
-        const updateLpList = (storageKey: string) => {
-          const raw = localStorage.getItem(storageKey);
-          if (!raw) return;
-          const list = JSON.parse(raw);
-          if (!Array.isArray(list)) return;
-          const updated = list.map((p: any) => {
-            if (p.id === lp.id || p.slug === lp.slug) {
-              const newLeads = (p.leads || p.leads_count || 0) + 1;
-              const visits = p.visits || 1;
-              return {
-                ...p,
-                leads: newLeads,
-                leads_count: newLeads,
-                conv: Math.round((newLeads / visits) * 100),
-              };
-            }
-            return p;
-          });
-          localStorage.setItem(storageKey, JSON.stringify(updated));
-        };
-        updateLpList("comet_local_landing_pages");
-        updateLpList("people_cro_landing_pages_v1");
-        updateLpList("app:lps:v1");
-      } catch {}
-
-      // 4. API Endpoints
-      try {
-        fetch("/api/submit-lead", {
+        await fetch("/api/submit-lead", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1356,15 +1210,36 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
             quizAnswers: { observacoes: notes.trim() },
             utms: utm,
             source: effectiveSource,
+            isTest: lp.status === "Teste",
           }),
-        }).catch(() => {});
+        });
 
         fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
           method: "POST",
         }).catch(() => {});
-      } catch {}
+      } catch (dbErr) {
+        console.warn("Direct database submit notice:", dbErr);
+      }
 
-      // 5. Gravação no Supabase
+      // 2. Sincroniza diretamente com o banco de dados do Google Drive / Google Sheets
+      try {
+        await submitLpLeadToDrive({
+          landingPageId: lp.id,
+          landingPageTitle: lp.name || lp.title || "Landing Page",
+          name: name.trim(),
+          email: email.trim(),
+          whatsapp: whatsapp.trim(),
+          company: notes.trim() || `${name.trim()} (LP: ${lp.name || lp.title})`,
+          source: effectiveSource,
+          utm,
+          answers: { observacoes: notes.trim() },
+          isTest: lp.status === "Teste",
+        });
+      } catch (gErr) {
+        console.warn("Google Drive direct sync notice:", gErr);
+      }
+
+      // 3. Gravação direta no Supabase
       try {
         await supabase.from("leads").insert([leadRecord]);
         if (isUUID(lp.id)) {
@@ -1376,7 +1251,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         console.warn("Supabase lead direct insert notice:", err);
       }
 
-      // 6. Analytics
+      // 4. Analytics
       try {
         getLPModule().analytics.track({
           lpId: lp.id,

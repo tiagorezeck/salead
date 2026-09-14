@@ -341,13 +341,19 @@ async function saveLeadToSupabase(leadData: {
   quizAnswers: any;
   utms: any;
   source?: string;
+  isTest?: boolean;
 }) {
   try {
-    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, source } = leadData;
+    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, source, isTest } = leadData;
     const cleanName = (name || "Lead Capturado").trim();
     const cleanWhatsapp = normalizePhoneServer(whatsapp);
     const cleanEmail = (email || "").trim().toLowerCase();
     const effectiveSource = source || utms?.utm_source || utms?.src || "direct";
+
+    const tags = [effectiveSource, utms?.utm_campaign || "inbound", "comet-lp"].filter(Boolean);
+    if (isTest) {
+      tags.push("leadtest", "modo-teste");
+    }
 
     const leadRecord = {
       name: cleanName,
@@ -356,9 +362,9 @@ async function saveLeadToSupabase(leadData: {
       company: `${cleanName} (LP: ${pageTitle || pageId || "Landing Page"})`,
       source: `LP: ${pageTitle || pageId} [${effectiveSource}]`,
       stage: "Leads",
-      classification: "Lead",
+      classification: isTest ? "Lead Teste" : "Lead",
       temperature: "Quente",
-      tags: [effectiveSource, utms?.utm_campaign || "inbound", "comet-lp"].filter(Boolean),
+      tags,
       metadata: {
         capturedVia: "COMET Public Landing Page Engine (Express)",
         pageId,
@@ -366,6 +372,7 @@ async function saveLeadToSupabase(leadData: {
         source: effectiveSource,
         utms: utms || {},
         answers: quizAnswers || {},
+        isTest: Boolean(isTest),
         extra: {},
         capturedAt: new Date().toISOString(),
       },
@@ -454,7 +461,7 @@ interface LeadSubmission {
   webhookResponse?: string;
 }
 
-const leadSubmissions: LeadSubmission[] = readStoredLeads();
+let leadSubmissions: LeadSubmission[] = readStoredLeads();
 
 // Gemini Client initialization
 function getGeminiClient(): GoogleGenAI | null {
@@ -1078,6 +1085,7 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
         quizAnswers: lead.quizAnswers,
         utms: lead.utms,
         source: source,
+        isTest: isTestMode,
       });
     } catch (saveErr) {
       console.error("Error in automatic Supabase background save:", saveErr);
@@ -1116,6 +1124,42 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       } catch (dErr) {
         console.warn("Drive sync error in Express submit-lead:", dErr);
       }
+    }
+
+    // Increment lead conversion on the landing page in disk and memory
+    try {
+      const diskList = readStoredLandingPages();
+      const matchIndex = diskList.findIndex(
+        (p) =>
+          p.id === pageIdStr ||
+          p.slug === pageIdStr ||
+          (lp && (p.id === lp.id || p.slug === lp.slug))
+      );
+      if (matchIndex !== -1) {
+        const target = diskList[matchIndex];
+        const newLeads = (Number(target.leads || target.leads_count) || 0) + 1;
+        const currentVisits = Math.max(
+          Number(target.visits || target.viewsCount || target.views_count) || 0,
+          newLeads
+        );
+        diskList[matchIndex] = {
+          ...target,
+          leads: newLeads,
+          leads_count: newLeads,
+          conv: Math.round((newLeads / currentVisits) * 100),
+          updated_at: new Date().toISOString(),
+        };
+        writeStoredLandingPages(diskList);
+        if (lp) {
+          lp.leads = newLeads;
+          lp.leads_count = newLeads;
+          lp.conv = Math.round((newLeads / currentVisits) * 100);
+          previewPagesStore.set(lp.id, lp);
+          if (lp.slug) previewPagesStore.set(lp.slug, lp);
+        }
+      }
+    } catch (lpErr) {
+      console.warn("Express disk lead increment notice:", lpErr);
     }
 
     leadSubmissions.unshift(lead);
@@ -1887,12 +1931,49 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     const current = readStoredLandingPages();
     const existing = current.find((p) => p.id === id || p.slug === id);
 
-    const updatedPage = {
+    const prevStatus = existing?.status;
+    const nextStatus = body.status || existing?.status;
+    const isExitingTestMode = prevStatus === "Teste" && (nextStatus === "Ativa" || nextStatus === "Pausada");
+
+    let updatedPage = {
       ...(existing || {}),
       ...body,
       id: existing?.id || id,
       updated_at: new Date().toISOString(),
     };
+
+    // Se saiu de Teste para Ativa, zera métricas e limpa leads de teste
+    if (isExitingTestMode || (nextStatus === "Ativa" && prevStatus === "Teste")) {
+      updatedPage = {
+        ...updatedPage,
+        visits: 0,
+        leads: 0,
+        conv: 0,
+        leads_count: 0,
+        viewsCount: 0,
+      };
+
+      try {
+        const targetTitle = (existing?.name || existing?.title || updatedPage.name || updatedPage.title || "").toLowerCase();
+        const targetSlug = (existing?.slug || updatedPage.slug || "").toLowerCase();
+        const storedLeads = readStoredLeads();
+        const cleanedLeads = storedLeads.filter((lead: any) => {
+          if (lead.pageId === id || lead.pageId === updatedPage.id) return false;
+          const lTitle = (lead.pageTitle || lead.landingPage || "").toLowerCase();
+          const lSource = (lead.source || "").toLowerCase();
+          const isTestLead = lead.isTest || lead.classification === "Lead Teste" || lead.metadata?.isTest || (lead.tags && lead.tags.includes("leadtest"));
+          if (isTestLead) {
+            if (targetTitle && (lTitle.includes(targetTitle) || lSource.includes(targetTitle))) return false;
+            if (targetSlug && (lTitle.includes(targetSlug) || lSource.includes(targetSlug))) return false;
+          }
+          return true;
+        });
+        writeStoredLeads(cleanedLeads);
+        leadSubmissions = cleanedLeads;
+      } catch (cleanErr) {
+        console.warn("Express notice clearing test leads on LP activation:", cleanErr);
+      }
+    }
 
     const updatedList = current.map((p) => (p.id === updatedPage.id ? updatedPage : p));
     if (!current.some((p) => p.id === updatedPage.id)) {
@@ -1920,6 +2001,13 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
       } else if (updatedPage.name) {
         await supabase.from("landing_pages").update(dbPayload).eq("name", updatedPage.name);
       }
+
+      if (isExitingTestMode) {
+        const targetTitle = existing?.name || existing?.title || updatedPage.name || updatedPage.title;
+        if (targetTitle) {
+          await supabase.from("leads").delete().match({ classification: "Lead Teste" }).ilike("source", `%${targetTitle}%`);
+        }
+      }
     } catch (sbErr) {
       console.info("Supabase update notice (LP updated in server DB):", sbErr);
     }
@@ -1927,6 +2015,46 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     res.json({ success: true, landingPage: updatedPage });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// Endpoint explícito para limpar leads de teste de uma Landing Page
+cometLpRouter.post("/api/landing-pages/:id/clear-test-leads", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { pageTitle, pageSlug } = req.body || {};
+    const normTitle = (pageTitle || "").trim().toLowerCase();
+    const normSlug = (pageSlug || "").trim().toLowerCase();
+
+    const storedLeads = readStoredLeads();
+    const cleanedLeads = storedLeads.filter((lead: any) => {
+      if (lead.pageId === id || lead.landingPageId === id) return false;
+      const lTitle = (lead.pageTitle || lead.landingPage || "").trim().toLowerCase();
+      const lSource = (lead.source || "").trim().toLowerCase();
+      const isTestLead = lead.isTest || lead.classification === "Lead Teste" || lead.metadata?.isTest || (lead.tags && lead.tags.includes("leadtest"));
+      if (isTestLead) {
+        if (normTitle && (lTitle.includes(normTitle) || lSource.includes(normTitle))) return false;
+        if (normSlug && (lTitle.includes(normSlug) || lSource.includes(normSlug))) return false;
+      }
+      return true;
+    });
+    writeStoredLeads(cleanedLeads);
+    leadSubmissions = cleanedLeads;
+
+    try {
+      if (isUUID(id)) {
+        await supabase.from("leads").delete().eq("landing_page_id", id);
+      }
+      if (pageTitle) {
+        await supabase.from("leads").delete().match({ classification: "Lead Teste" }).ilike("source", `%${pageTitle}%`);
+      }
+    } catch (sbErr) {
+      console.warn("Supabase clear test leads notice:", sbErr);
+    }
+
+    return res.json({ success: true, message: "Leads de teste excluídos com sucesso" });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Failed to clear test leads" });
   }
 });
 
@@ -2009,64 +2137,8 @@ cometLpRouter.post("/api/landing-pages/:id/visit", async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ error: "Missing landing page id" });
-
-    const current = readStoredLandingPages();
-    let updatedLP: any = null;
-
-    const updatedList = current.map((p) => {
-      if (
-        p.id === id ||
-        p.slug === id ||
-        (p.config && (p.config.slug === id || p.config.client_id === id)) ||
-        (p.name && p.name.toLowerCase() === id.toLowerCase()) ||
-        (p.title && p.title.toLowerCase() === id.toLowerCase())
-      ) {
-        const newVisits = (Number(p.visits) || 0) + 1;
-        const leads = Number(p.leads || p.leads_count) || 0;
-        const conv = Math.round((leads / newVisits) * 100);
-        updatedLP = {
-          ...p,
-          visits: newVisits,
-          conv,
-          updated_at: new Date().toISOString(),
-        };
-        return updatedLP;
-      }
-      return p;
-    });
-
-    if (updatedLP) {
-      writeStoredLandingPages(updatedList);
-      previewPagesStore.set(updatedLP.id, updatedLP);
-      if (updatedLP.slug) previewPagesStore.set(updatedLP.slug, updatedLP);
-
-      // Sincroniza Supabase
-      try {
-        if (isUUID(updatedLP.id)) {
-          await supabase.rpc("increment_lp_visits", { lp_id: updatedLP.id });
-        } else if (updatedLP.name) {
-          const { data: lpData } = await supabase.from("landing_pages").select("id, visits").eq("name", updatedLP.name).maybeSingle();
-          if (lpData) {
-            const currentVisits = Number(lpData.visits) || 0;
-            await supabase.from("landing_pages").update({ visits: currentVisits + 1 }).eq("id", lpData.id);
-          }
-        }
-      } catch (sbErr) {
-        console.info("Notice: Supabase visit increment sync:", sbErr);
-      }
-
-      return res.json({ success: true, visits: updatedLP.visits, conv: updatedLP.conv, landingPage: updatedLP });
-    }
-
-    // Fallback: se não achou no disco, tenta Supabase
-    if (isUUID(id)) {
-      try {
-        await supabase.rpc("increment_lp_visits", { lp_id: id });
-        return res.json({ success: true, id });
-      } catch {}
-    }
-
-    res.json({ success: true, tracked: true });
+    const result = await incrementLPVisits(id, req.body);
+    return res.json(result);
   } catch (err: any) {
     console.error("Error incrementing LP visit:", err);
     res.status(500).json({ error: err?.message || "Internal server error" });

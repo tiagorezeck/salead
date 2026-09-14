@@ -1335,13 +1335,6 @@ export function useData() {
         }
       }
 
-      // Limpa os cadastros duplicados no localStorage
-      if (typeof window !== "undefined") {
-        try {
-          localStorage.setItem("comet_local_leads", JSON.stringify(consolidated.slice(0, 500)));
-        } catch {}
-      }
-
       return consolidated.sort((a, b) => 
         new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
@@ -1783,6 +1776,17 @@ export function useData() {
         console.warn("Supabase survey_responses offline:", err);
       }
 
+      // Tenta buscar também da rota local da API Express
+      try {
+        const apiRes = await fetch("/api/surveys/responses");
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (Array.isArray(apiData)) {
+            dbResp = [...dbResp, ...apiData];
+          }
+        }
+      } catch {}
+
       const map = new Map<string, SurveyResponse>();
       for (const r of dbResp) {
         const key = r.id || `${r.survey_id || r.surveyId}_${r.lead_id || r.leadId}_${r.created_at || r.completedAt}`;
@@ -2030,36 +2034,28 @@ export function useData() {
     addLead: async (l: any) => { 
       const generatedId = isUUID(l.id) ? l.id : (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `lead_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
       
-      // Busca lead existente para mesclagem automática
+      // Busca lead existente no cache para mesclagem automática
       let existingLeadMatch: any = null;
-      if (typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_leads") || "[]";
-          const list = JSON.parse(raw);
-          const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-          const listQ = JSON.parse(rawQ);
-          const cachedLeads = (queryClient.getQueryData(['leads']) as any[]) || [];
-          const allLocal = [...list, ...listQ, ...cachedLeads];
-          
-          const cleanPhone = (l.whatsapp || "").replace(/\D/g, "");
-          const normEmail = (l.email || "").trim().toLowerCase();
-          const cleanName = (l.name || "").trim().toLowerCase();
-          const cleanComp = (l.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
+      try {
+        const cachedLeads = (queryClient.getQueryData(['leads']) as any[]) || [];
+        const cleanPhone = (l.whatsapp || "").replace(/\D/g, "");
+        const normEmail = (l.email || "").trim().toLowerCase();
+        const cleanName = (l.name || "").trim().toLowerCase();
+        const cleanComp = (l.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
 
-          existingLeadMatch = allLocal.find((x: any) => {
-            if (!x) return false;
-            if (x.id === l.id) return true;
-            if (normEmail && x.email && x.email.trim().toLowerCase() === normEmail) return true;
-            if (cleanPhone && cleanPhone.length >= 8 && x.whatsapp && x.whatsapp.replace(/\D/g, "") === cleanPhone) return true;
-            if (cleanName && cleanName !== "novo lead" && cleanName !== "lead" && cleanName.length >= 3) {
-              const xName = (x.name || "").trim().toLowerCase();
-              const xComp = (x.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
-              if (cleanComp && xComp && cleanComp === xComp && cleanName === xName) return true;
-            }
-            return false;
-          });
-        } catch {}
-      }
+        existingLeadMatch = cachedLeads.find((x: any) => {
+          if (!x) return false;
+          if (x.id === l.id) return true;
+          if (normEmail && x.email && x.email.trim().toLowerCase() === normEmail) return true;
+          if (cleanPhone && cleanPhone.length >= 8 && x.whatsapp && x.whatsapp.replace(/\D/g, "") === cleanPhone) return true;
+          if (cleanName && cleanName !== "novo lead" && cleanName !== "lead" && cleanName.length >= 3) {
+            const xName = (x.name || "").trim().toLowerCase();
+            const xComp = (x.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
+            if (cleanComp && xComp && cleanComp === xComp && cleanName === xName) return true;
+          }
+          return false;
+        });
+      } catch {}
 
       // Se já existe um lead cadastrado, unifica no mesmo registro!
       if (existingLeadMatch) {
@@ -2108,34 +2104,40 @@ export function useData() {
           ]
         };
 
-        // Salva atualização do lead no ID principal
-        if (typeof window !== "undefined") {
-          try {
-            const raw = localStorage.getItem("comet_local_leads") || "[]";
-            const list = JSON.parse(raw);
-            const updatedList = list.map((item: any) => item.id === existingLeadMatch.id ? { ...item, ...updatedFields } : item);
-            if (!updatedList.some((x: any) => x.id === existingLeadMatch.id)) {
-              updatedList.unshift({ ...existingLeadMatch, ...updatedFields });
-            }
-            localStorage.setItem("comet_local_leads", JSON.stringify(updatedList.slice(0, 500)));
-          } catch {}
-        }
-
         try {
           const dbPayload = mapLeadToDb({ ...existingLeadMatch, ...updatedFields });
           if (Object.keys(dbPayload).length > 0) {
             await supabase.from('leads').update(dbPayload).eq('id', existingLeadMatch.id);
           }
+          await fetch(`/api/leads/${encodeURIComponent(existingLeadMatch.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updatedFields),
+          }).catch(() => {});
         } catch {}
 
         invalidate('leads');
         return { ...existingLeadMatch, ...updatedFields };
       }
 
-      const isCustomer = l.classification === 'Cliente' || l.stage === 'Ganho' || !!l.isCustomer;
-      const isRecurring = l.type === 'Recorrente' || !!l.isRecurring;
+      const isTestLead = Boolean(
+        l.isTest === true ||
+        l.classification === 'Lead Teste' ||
+        l.metadata?.isTest === true ||
+        (Array.isArray(l.tags) && (l.tags.includes('leadtest') || l.tags.includes('modo-teste') || l.tags.includes('teste'))) ||
+        l.source?.toLowerCase().includes('[modo-teste]') ||
+        l.source?.toLowerCase().includes('[teste]') ||
+        l.company?.toLowerCase().includes('(lp: teste')
+      );
+
+      const isCustomer = !isTestLead && (l.classification === 'Cliente' || l.stage === 'Ganho' || !!l.isCustomer);
+      const isRecurring = !isTestLead && (l.type === 'Recorrente' || !!l.isRecurring);
 
       const tags = Array.isArray(l.tags) ? [...l.tags] : [];
+      if (isTestLead) {
+        if (!tags.includes("leadtest")) tags.push("leadtest");
+        if (!tags.includes("modo-teste")) tags.push("modo-teste");
+      }
       if (isCustomer && !tags.includes("cliente")) tags.push("cliente");
       if (isRecurring && !tags.includes("recorrência")) tags.push("recorrência");
 
@@ -2149,7 +2151,7 @@ export function useData() {
         stage: l.stage || "Leads",
         owner: l.owner || "Sem dono",
         source: l.source || "Manual",
-        classification: isCustomer ? "Cliente" : (l.classification || "Lead"),
+        classification: isTestLead ? "Lead Teste" : (isCustomer ? "Cliente" : (l.classification || "Lead")),
         temperature: l.temperature || "Frio",
         type: isRecurring ? "Recorrente" : (l.type || "Novo"),
         strategy: l.strategy || "Nenhuma",
@@ -2178,31 +2180,33 @@ export function useData() {
         lastLpVisitAt: new Date().toISOString(),
         metadata: {
           ...(l.metadata || {}),
+          isTest: isTestLead,
           lpVisits: Number(l.lpVisits) || 1,
           isCustomer,
           isRecurring
         }
       };
 
-      // 1. Salva no localStorage local
-      if (typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_leads") || "[]";
-          const list = JSON.parse(raw);
-          const updated = [fullLead, ...list.filter((x: any) => x.id !== fullLead.id)];
-          localStorage.setItem("comet_local_leads", JSON.stringify(updated.slice(0, 500)));
-        } catch {}
-      }
-
-      // 2. Tenta salvar no Supabase
+      // 1. Salva diretamente no banco de dados (Supabase e backend Express)
       try {
         const dbPayload = mapLeadToDb(fullLead);
-        const { data, error } = await supabase.from('leads').insert([dbPayload]).select();
-        if (error) {
-          console.info("Lead salvo no armazenamento local seguro (Supabase notice):", error.message);
-        }
+        await supabase.from('leads').insert([dbPayload]).select();
+        await fetch("/api/submit-lead", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pageId: fullLead.landingPage || "crm-manual",
+            pageTitle: fullLead.landingPage || "Cadastro Direto",
+            name: fullLead.name,
+            whatsapp: fullLead.whatsapp,
+            email: fullLead.email,
+            quizAnswers: fullLead.metadata?.answers || {},
+            source: fullLead.source,
+            isTest: fullLead.classification === "Lead Teste" || fullLead.tags.includes("leadtest"),
+          }),
+        }).catch(() => {});
       } catch (err) {
-        console.warn("Sincronização remota pendente, mantido em armazenamento local seguro:", err);
+        console.warn("Supabase lead insert notice:", err);
       }
 
       invalidate('leads');
@@ -2216,60 +2220,23 @@ export function useData() {
         return old.map((lead: any) => lead.id === id ? { ...lead, ...u } : lead);
       });
 
-      // 2. Atualiza no localStorage seguro (comet_local_leads, comet_inbound_leads_queue, people_cro_leads_v1)
-      if (typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_leads") || "[]";
-          const list = JSON.parse(raw);
-          const existingIdx = list.findIndex((item: any) => item.id === id);
-          let updatedList: any[];
-          if (existingIdx !== -1) {
-            updatedList = list.map((item: any) => item.id === id ? { ...item, ...u } : item);
-          } else {
-            const currentCachedLeads = (queryClient.getQueryData(['leads']) as any[]) || [];
-            const currentLead = currentCachedLeads.find((l: any) => l.id === id) || { id, ...u };
-            updatedList = [{ ...currentLead, ...u }, ...list];
-          }
-          localStorage.setItem("comet_local_leads", JSON.stringify(updatedList.slice(0, 500)));
-
-          // Atualiza também nas filas de captura caso o lead esteja lá
-          const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-          const listQ = JSON.parse(rawQ);
-          if (Array.isArray(listQ) && listQ.some((x: any) => x.id === id || (x.lead && x.lead.id === id))) {
-            const updatedQ = listQ.map((x: any) => {
-              if (x.id === id) return { ...x, ...u, stage: u.stage || x.stage };
-              if (x.lead && x.lead.id === id) return { ...x, lead: { ...x.lead, ...u }, stage: u.stage || x.stage };
-              return x;
-            });
-            localStorage.setItem("comet_inbound_leads_queue", JSON.stringify(updatedQ));
-          }
-
-          const rawP = localStorage.getItem("people_cro_leads_v1") || "[]";
-          const listP = JSON.parse(rawP);
-          if (Array.isArray(listP) && listP.some((x: any) => x.id === id)) {
-            const updatedP = listP.map((x: any) => x.id === id ? { ...x, ...u, stage: u.stage || x.stage } : x);
-            localStorage.setItem("people_cro_leads_v1", JSON.stringify(updatedP));
-          }
-        } catch {}
-      }
-
-      // 3. Atualiza no backend server (Express in-memory store)
+      // 2. Atualiza no backend server (Express / Banco de Dados)
       try {
-        await fetch(`/api/leads/${id}`, {
+        await fetch(`/api/leads/${encodeURIComponent(id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(u)
         });
       } catch {}
 
-      // 4. Atualiza no Supabase se possível
+      // 3. Atualiza diretamente no Supabase
       try {
         const dbPayload = mapLeadToDb(u);
         if (Object.keys(dbPayload).length > 0) {
           await supabase.from('leads').update(dbPayload).eq('id', id).select();
         }
       } catch (err) {
-        console.warn("Supabase lead update pendente, atualizado localmente:", err);
+        console.warn("Supabase lead update pendente:", err);
       }
 
       invalidate('leads');
@@ -2295,45 +2262,19 @@ export function useData() {
         });
       });
 
-      // Helper para filtrar listas por id, email e whatsapp
-      const filterLeadList = (list: any[]) => {
-        if (!Array.isArray(list)) return [];
-        return list.filter((x: any) => {
-          if (!x) return false;
-          if (x.id === id) return false;
-          if (targetEmail && x.email && x.email.trim().toLowerCase() === targetEmail) return false;
-          if (targetPhone && targetPhone.length >= 8 && x.whatsapp && x.whatsapp.replace(/\D/g, "") === targetPhone) return false;
-          return true;
-        });
-      };
-
-      // 2. Remove de todos os storages locais
-      if (typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_leads") || "[]";
-          localStorage.setItem("comet_local_leads", JSON.stringify(filterLeadList(JSON.parse(raw))));
-
-          const rawQ = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-          localStorage.setItem("comet_inbound_leads_queue", JSON.stringify(filterLeadList(JSON.parse(rawQ))));
-
-          const rawP = localStorage.getItem("people_cro_leads_v1") || "[]";
-          localStorage.setItem("people_cro_leads_v1", JSON.stringify(filterLeadList(JSON.parse(rawP))));
-        } catch {}
-      }
-
-      // 3. Remove no backend Express se presente
+      // 2. Remove no backend Express se presente
       try {
-        await fetch(`/api/leads/${id}`, { method: "DELETE" });
+        await fetch(`/api/leads/${encodeURIComponent(id)}`, { method: "DELETE" });
       } catch {}
 
-      // 4. Remove no Supabase por id, email ou whatsapp
+      // 3. Remove no Supabase por id, email ou whatsapp
       try {
         await supabase.from('leads').delete().eq('id', id);
         if (targetEmail) {
           await supabase.from('leads').delete().eq('email', targetEmail);
         }
       } catch (err) {
-        console.warn("Supabase lead delete pendente, removido localmente:", err);
+        console.warn("Supabase lead delete notice:", err);
       }
 
       invalidate('leads');
@@ -2777,11 +2718,16 @@ export function useData() {
           }
         }
 
-        // 3. Remove leads do Supabase associados a esta LP
+        // 3. Remove leads do Supabase e do servidor Express associados a esta LP
         try {
           if (targetTitle) {
             await supabase.from('leads').delete().or(`landing_page.eq.${targetTitle},source.ilike.%${targetTitle}%`);
           }
+          await fetch(`/api/landing-pages/${encodeURIComponent(targetId)}/clear-test-leads`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pageTitle: targetTitle, pageSlug: targetSlug })
+          }).catch(() => {});
         } catch (supErr) {
           console.warn("Aviso ao deletar leads de teste do Supabase:", supErr);
         }
