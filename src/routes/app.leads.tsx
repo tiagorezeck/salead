@@ -186,11 +186,20 @@ function LeadsPage() {
   const filteredRows = useMemo(() => {
     let result = [...leads];
 
-    if (dateFilter.from && dateFilter.to) {
-      result = result.filter(l => isWithinInterval(new Date(l.createdAt), { 
-        start: dateFilter.from!, 
-        end: dateFilter.to! 
-      }));
+    if (dateFilter.type !== "all" && dateFilter.from && dateFilter.to) {
+      result = result.filter(l => {
+        try {
+          if (!l.createdAt) return true;
+          const leadDate = new Date(l.createdAt);
+          if (isNaN(leadDate.getTime())) return true;
+          return isWithinInterval(leadDate, { 
+            start: dateFilter.from!, 
+            end: dateFilter.to! 
+          });
+        } catch {
+          return true;
+        }
+      });
     }
 
     if (q) {

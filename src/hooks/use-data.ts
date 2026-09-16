@@ -25,6 +25,7 @@ import {
   DEFAULT_VISIBILITY,
   DEFAULT_ROLE_PERMISSIONS,
   DEFAULT_ROLE_MODULES,
+  DEFAULT_SYSTEM_LEADS,
   SYSTEM_MODULES,
   type SystemModule
 } from "@/data/mock";
@@ -977,7 +978,7 @@ export function useData() {
     queryFn: async () => { 
       let dbLeads: Lead[] = [];
 
-      // 1b. Server in-memory submissions (capturados via /api/submit-lead)
+      // 1b. Server in-memory submissions (capturados via /api/submit-lead ou /api/leads)
       let apiLeads: Lead[] = [];
       try {
         const res = await fetch("/api/leads");
@@ -988,33 +989,37 @@ export function useData() {
             apiLeads = rawList.map((item: any) => ({
               id: item.id || `api_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
               name: item.name || "Lead Capturado",
-              company: item.name ? `${item.name} (LP: ${item.pageTitle || item.pageId || "Landing Page"})` : "Empresa",
+              company: item.company || (item.name ? `${item.name} (LP: ${item.pageTitle || item.pageId || item.landingPage || "Landing Page"})` : "Empresa"),
               email: item.email || "",
               whatsapp: item.whatsapp || "",
-              value: 0,
-              stage: "Leads",
-              owner: "Inbound LP",
-              source: `LP: ${item.pageTitle || item.pageId || "Landing Page"}`,
-              classification: "Lead",
-              temperature: "Quente",
-              type: "Inbound",
-              strategy: "CRO Auto",
-              decisionRole: "Decisor",
-              minScore: "Aprovado",
-              landingPage: item.pageTitle || item.pageId,
-              tags: ["inbound", "landing-page"],
-              score: 85,
-              sla: "ok",
-              lastInteraction: "Formulário enviado na LP",
-              createdAt: item.submittedAt || new Date().toISOString(),
-              activities: [],
-              completedCheckpoints: [],
-              status: "Ativo",
-              personType: "PJ",
-              role: "",
-              revenue: "",
-              capag: "",
-              metadata: item
+              value: Number(item.value) || 0,
+              stage: item.stage || "Leads",
+              owner: item.owner || "Inbound LP",
+              source: item.source || (item.pageTitle || item.pageId ? `LP: ${item.pageTitle || item.pageId}` : "Inbound"),
+              classification: item.classification || "Lead",
+              temperature: item.temperature || "Quente",
+              type: item.type || "Inbound",
+              strategy: item.strategy || "CRO Auto",
+              decisionRole: item.decisionRole || "Decisor",
+              minScore: item.minScore || "Aprovado",
+              minQualification: item.minQualification,
+              landingPage: item.landingPage || item.pageTitle || item.pageId,
+              tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
+              score: Number(item.score) || 85,
+              sla: item.sla || "ok",
+              lastInteraction: item.lastInteraction || "Formulário enviado na LP",
+              createdAt: item.submittedAt || item.createdAt || new Date().toISOString(),
+              activities: Array.isArray(item.activities) ? item.activities : [],
+              completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
+              status: item.status || "Ativo",
+              personType: item.personType || "PJ",
+              role: item.role || "",
+              revenue: item.revenue || "",
+              capag: item.capag || "",
+              lpVisits: Number(item.lpVisits) || 1,
+              isCustomer: Boolean(item.isCustomer || item.classification === "Cliente" || item.stage === "Ganho"),
+              isRecurring: Boolean(item.isRecurring || item.type === "Recorrente"),
+              metadata: item.metadata || item
             }));
           }
         }
@@ -1043,32 +1048,36 @@ export function useData() {
               return {
                 id: item.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
                 name,
-                company: `${name} (LP: ${pageTitle})`,
+                company: item.company || `${name} (LP: ${pageTitle})`,
                 email,
                 whatsapp,
-                value: 0,
+                value: Number(item.value || raw.value) || 0,
                 stage: item.stage || "Leads",
                 owner: item.owner || "Inbound LP",
-                source: `LP: ${pageTitle} [${source}]`,
-                classification: "Lead",
-                temperature: "Quente",
-                type: "Inbound",
-                strategy: "CRO Auto",
-                decisionRole: "Decisor",
-                minScore: "Aprovado",
+                source: item.source || `LP: ${pageTitle} [${source}]`,
+                classification: item.classification || "Lead",
+                temperature: item.temperature || "Quente",
+                type: item.type || "Inbound",
+                strategy: item.strategy || "CRO Auto",
+                decisionRole: item.decisionRole || "Decisor",
+                minScore: item.minScore || "Aprovado",
+                minQualification: item.minQualification || raw.minQualification,
                 landingPage: pageTitle,
-                tags: ["inbound", "landing-page"],
-                score: 80,
-                sla: "ok",
-                lastInteraction: "Capturado via LP",
+                tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
+                score: Number(item.score) || 80,
+                sla: item.sla || "ok",
+                lastInteraction: item.lastInteraction || "Capturado via LP",
                 createdAt: item.capturedAt || item.createdAt || item.submittedAt || new Date().toISOString(),
-                activities: [],
-                completedCheckpoints: [],
-                status: "Ativo",
-                personType: "PJ",
-                role: "",
-                revenue: "",
-                capag: "",
+                activities: Array.isArray(item.activities) ? item.activities : [],
+                completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
+                status: item.status || "Ativo",
+                personType: item.personType || "PJ",
+                role: item.role || "",
+                revenue: item.revenue || "",
+                capag: item.capag || "",
+                lpVisits: Number(item.lpVisits) || 1,
+                isCustomer: Boolean(item.isCustomer),
+                isRecurring: Boolean(item.isRecurring),
                 metadata: item
               };
             }) as any);
@@ -1088,7 +1097,21 @@ export function useData() {
         } catch {}
       }
 
-      // 1e. Google Drive / Sheets Sync (capturados na planilha do Google Drive)
+      // 1e. comet_crm_data em localStorage (usado por pesquisas e diagnósticos)
+      let crmDataLeads: Lead[] = [];
+      if (typeof window !== "undefined") {
+        try {
+          const rawCrm = localStorage.getItem("comet_crm_data");
+          if (rawCrm) {
+            const parsed = JSON.parse(rawCrm);
+            if (Array.isArray(parsed.leads)) {
+              crmDataLeads = parsed.leads;
+            }
+          }
+        } catch {}
+      }
+
+      // 1f. Google Drive / Sheets Sync (capturados na planilha do Google Drive)
       let driveLeads: Lead[] = [];
       if (typeof window !== "undefined") {
         try {
@@ -1151,7 +1174,17 @@ export function useData() {
       }
 
       // Consolidação e desduplicação por Union-Find (e-mail, WhatsApp, nome/empresa e ID)
-      const allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads, ...driveLeads];
+      let allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads, ...crmDataLeads, ...driveLeads];
+
+      // Se a base estiver totalmente vazia (ex: nova instalação ou primeiro acesso na Vercel), carrega leads de demonstração
+      if (allRawLeads.length === 0 && DEFAULT_SYSTEM_LEADS.length > 0) {
+        allRawLeads = [...DEFAULT_SYSTEM_LEADS];
+        if (typeof window !== "undefined" && !localStorage.getItem("comet_local_leads")) {
+          try {
+            localStorage.setItem("comet_local_leads", JSON.stringify(DEFAULT_SYSTEM_LEADS));
+          } catch {}
+        }
+      }
 
       function mergeSourcesStr(...sources: (string | undefined)[]): string {
         const set = new Set<string>();

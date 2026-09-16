@@ -937,6 +937,67 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
           console.warn("Direct database API lead save notice:", apiErr);
         }
 
+        // Persistência local imediata e sincronização com a base do CRM (Vercel SPA & Local)
+        if (typeof window !== "undefined") {
+          try {
+            const effectiveSource = utms?.utm_source || utms?.src || "Landing Page Form";
+            const newLeadObj = {
+              id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              name: leadName || "Lead Capturado",
+              company: `${leadName || "Lead"} (LP: ${page.title || page.id || "Landing Page"})`,
+              email: leadEmail || "",
+              whatsapp: leadPhone || "",
+              value: 0,
+              stage: "Leads",
+              owner: "Inbound LP",
+              source: `LP: ${page.title || page.id || "Landing Page"} [${effectiveSource}]`,
+              classification: isTest ? "Lead Teste" : "Lead",
+              temperature: "Quente",
+              type: "Inbound",
+              strategy: "CRO Auto",
+              decisionRole: "Decisor",
+              minScore: "Aprovado",
+              landingPage: page.title || page.id,
+              tags: [effectiveSource, utms?.utm_campaign || "inbound", "comet-lp", isTest ? "leadtest" : ""].filter(Boolean),
+              score: 85,
+              sla: "ok",
+              lastInteraction: "Formulário enviado na LP",
+              createdAt: new Date().toISOString(),
+              activities: [
+                {
+                  id: `act_${Date.now()}`,
+                  type: "conversion",
+                  description: `Capturado via formulário na LP ${page.title || page.id}`,
+                  timestamp: new Date().toISOString(),
+                }
+              ],
+              completedCheckpoints: [],
+              status: "Ativo",
+              personType: "PJ",
+              role: "",
+              revenue: "",
+              capag: "",
+              lpVisits: 1,
+              isCustomer: false,
+              isRecurring: false,
+              metadata: payload,
+            };
+
+            const rawLoc = localStorage.getItem("comet_local_leads");
+            const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
+            localStorage.setItem("comet_local_leads", JSON.stringify([newLeadObj, ...curLoc.filter((x: any) => x.id !== newLeadObj.id)]));
+
+            const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
+            const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
+            localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([newLeadObj, ...curQueue]));
+
+            window.dispatchEvent(new CustomEvent("lead-submitted", { detail: newLeadObj }));
+            window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
+          } catch (stErr) {
+            console.warn("Storage persistence notice:", stErr);
+          }
+        }
+
         // Sincronização em background com o Google Drive (não-bloqueante)
         submitLpLeadToDrive({
           id: `lead_${Date.now()}`,

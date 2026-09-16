@@ -860,6 +860,38 @@ function PublicLPPage() {
             console.warn("Direct database submit notice:", dbErr);
           }
 
+          // Persistência local imediata e sincronização cross-tab com a Base de Leads do CRM
+          if (typeof window !== "undefined") {
+            try {
+              const fullLeadRecord = {
+                id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                ...leadRecord,
+                createdAt: new Date().toISOString(),
+                activities: [
+                  {
+                    id: `act_${Date.now()}`,
+                    type: "conversion",
+                    description: `Capturado via Landing Page ${lp.name || lp.title}`,
+                    timestamp: new Date().toISOString(),
+                  }
+                ],
+              };
+
+              const rawLoc = localStorage.getItem("comet_local_leads");
+              const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
+              localStorage.setItem("comet_local_leads", JSON.stringify([fullLeadRecord, ...curLoc.filter((x: any) => x.id !== fullLeadRecord.id)]));
+
+              const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
+              const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
+              localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([fullLeadRecord, ...curQueue]));
+
+              window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
+              window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
+            } catch (storageErr) {
+              console.warn("Storage persistence notice in LP submit:", storageErr);
+            }
+          }
+
           // 2. Encaminha conversão e Google Drive de forma assíncrona (não-bloqueante)
           fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
             method: "POST",
@@ -1019,7 +1051,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         },
       };
 
-      // 1. Grava diretamente no banco de dados do sistema (sem localStorage)
+      // 1. Grava diretamente no banco de dados do sistema (Express / API)
       try {
         await fetch("/api/submit-lead", {
           method: "POST",
@@ -1042,6 +1074,38 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         }).catch(() => {});
       } catch (dbErr) {
         console.warn("Direct database submit notice:", dbErr);
+      }
+
+      // Persistência local imediata e sincronização cross-tab com a Base de Leads do CRM
+      if (typeof window !== "undefined") {
+        try {
+          const fullLeadRecord = {
+            id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            ...leadRecord,
+            createdAt: new Date().toISOString(),
+            activities: [
+              {
+                id: `act_${Date.now()}`,
+                type: "conversion",
+                description: `Capturado via formulário bridge na LP ${lp.name || lp.title}`,
+                timestamp: new Date().toISOString(),
+              }
+            ],
+          };
+
+          const rawLoc = localStorage.getItem("comet_local_leads");
+          const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
+          localStorage.setItem("comet_local_leads", JSON.stringify([fullLeadRecord, ...curLoc.filter((x: any) => x.id !== fullLeadRecord.id)]));
+
+          const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
+          const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
+          localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([fullLeadRecord, ...curQueue]));
+
+          window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
+          window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
+        } catch (storageErr) {
+          console.warn("Storage persistence notice in Direct form submit:", storageErr);
+        }
       }
 
       // 2. Sincroniza diretamente com o banco de dados do Google Drive / Google Sheets
