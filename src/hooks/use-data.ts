@@ -983,8 +983,9 @@ export function useData() {
         const res = await fetch("/api/leads");
         if (res.ok) {
           const resJson = await res.json();
-          if (Array.isArray(resJson.leads)) {
-            apiLeads = resJson.leads.map((item: any) => ({
+          const rawList = Array.isArray(resJson) ? resJson : (Array.isArray(resJson?.leads) ? resJson.leads : []);
+          if (rawList.length > 0) {
+            apiLeads = rawList.map((item: any) => ({
               id: item.id || `api_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
               name: item.name || "Lead Capturado",
               company: item.name ? `${item.name} (LP: ${item.pageTitle || item.pageId || "Landing Page"})` : "Empresa",

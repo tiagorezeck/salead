@@ -183,8 +183,9 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
       try {
         const localLeadsRes = await fetch('/api/leads');
         if (localLeadsRes.ok) {
-          const leadsFromApi = await localLeadsRes.json();
-          if (Array.isArray(leadsFromApi) && leadsFromApi.length > 0) {
+          const rawApi = await localLeadsRes.json();
+          const leadsFromApi = Array.isArray(rawApi) ? rawApi : (Array.isArray(rawApi?.leads) ? rawApi.leads : []);
+          if (leadsFromApi.length > 0) {
             const currentRoot = getLocalDatabaseRoot() || {};
             const existingLeads = Array.isArray(currentRoot.leads) ? currentRoot.leads : [];
             const ids = new Set(existingLeads.map((l: any) => l.id));

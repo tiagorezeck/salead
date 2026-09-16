@@ -206,6 +206,21 @@ export function DeepFindSurveyViewer({
     setIsSubmitting(true);
     const { score, minProfile } = calculateScoreAndTemperature(finalAnswers);
 
+    const minM: 0 | 1 = minProfile.momento === "Imediato" ? 1 : 0;
+    const minI: 0 | 1 = minProfile.interesse === "Alto" ? 1 : 0;
+    const minN: 0 | 1 = minProfile.necessidade === "Crítica" ? 1 : 0;
+    const minTotal = minM + minI + minN;
+    const minClassification = minProfile.temperatura.toUpperCase() as "QUENTE" | "MORNO" | "FRIO" | "DESCARTE";
+    const minScoreCode = minTotal === 3 ? "MIN" : (minTotal === 2 ? "MI" : (minTotal === 1 ? "M" : "Nenhum"));
+
+    const minQualificationObj = {
+      m: minM,
+      i: minI,
+      n: minN,
+      total: minTotal,
+      classification: minClassification,
+    };
+
     try {
       // 1. Atualiza dados no localStorage do CRM
       const rawLocal = localStorage.getItem("comet_crm_data");
@@ -228,8 +243,11 @@ export function DeepFindSurveyViewer({
             targetLead = {
               ...l,
               score: Math.max(l.score || 0, score),
-              tags: Array.from(new Set([...(l.tags || []), "pesquisa-concluida", `temp-${minProfile.temperatura.toLowerCase()}`])),
-              notes: `${l.notes || ""}\n[${new Date().toLocaleDateString()}] Pesquisa: ${survey.name} (Score: ${score}/100, Temp: ${minProfile.temperatura})`.trim()
+              temperature: minProfile.temperatura,
+              minScore: minScoreCode,
+              minQualification: minQualificationObj,
+              tags: Array.from(new Set([...(l.tags || []), "pesquisa-concluida", "min-qualificado", `temp-${minProfile.temperatura.toLowerCase()}`])),
+              notes: `${l.notes || ""}\n[${new Date().toLocaleDateString()}] Pesquisa: ${survey.name} (Score: ${score}/100, Temp: ${minProfile.temperatura}, MIN: ${minScoreCode})`.trim()
             };
             return targetLead;
           }
@@ -244,9 +262,12 @@ export function DeepFindSurveyViewer({
           whatsapp: contactInfo.whatsapp || "",
           email: contactInfo.email || "",
           score: score,
+          temperature: minProfile.temperatura,
+          minScore: minScoreCode,
+          minQualification: minQualificationObj,
           source: `Pesquisa: ${survey.name || "Questionário Interativo"}`,
           stage: minProfile.temperatura === "Quente" ? "Oportunidade" : "Leads",
-          tags: ["pesquisa-interativa", `temp-${minProfile.temperatura.toLowerCase()}`],
+          tags: ["pesquisa-interativa", "min-qualificado", `temp-${minProfile.temperatura.toLowerCase()}`],
           value: minProfile.temperatura === "Quente" ? 8500 : 3500,
           created_at: new Date().toISOString()
         };
@@ -310,6 +331,9 @@ export function DeepFindSurveyViewer({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               score: Math.max(targetLead?.score || 0, score),
+              temperature: minProfile.temperatura,
+              minScore: minScoreCode,
+              minQualification: minQualificationObj,
               quizAnswers: { ...(targetLead?.quizAnswers || {}), ...finalAnswers },
               surveyAnswers: finalAnswers,
               metadata: {
@@ -318,6 +342,7 @@ export function DeepFindSurveyViewer({
                 surveyName: survey.name,
                 surveyScore: score,
                 surveyTemperature: minProfile.temperatura,
+                minQualification: minQualificationObj,
                 surveyAnswers: finalAnswers,
                 surveyAnsweredAt: new Date().toISOString()
               }
@@ -348,7 +373,10 @@ export function DeepFindSurveyViewer({
             extraPayload: {
               surveyName: survey.name,
               score,
-              temperature: minProfile.temperatura
+              temperature: minProfile.temperatura,
+              minProfile,
+              minQualification: minQualificationObj,
+              minScore: minScoreCode,
             }
           })
         }).catch(() => {});

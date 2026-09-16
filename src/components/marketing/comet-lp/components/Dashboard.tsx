@@ -89,8 +89,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     fetch("/api/leads")
       .then((res) => res.json())
       .then((data) => {
-        if (data && Array.isArray(data.leads) && data.leads.length > 0) {
-          setLeads(data.leads);
+        const rawList = Array.isArray(data) ? data : (Array.isArray(data?.leads) ? data.leads : []);
+        if (rawList.length > 0) {
+          setLeads(rawList);
         }
       })
       .catch(() => {});

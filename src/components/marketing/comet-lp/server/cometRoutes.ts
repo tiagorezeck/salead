@@ -4,87 +4,21 @@ import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import { applyThematicImagesToPage } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
-// Offline Bypass Mock Supabase Client on Express Server
-const createMockBuilder = (dataValue: any = []) => {
-  const resultPromise = Promise.resolve({ data: dataValue, error: null });
-
-  const builder: any = {
-    then: (onfulfilled?: any, onrejected?: any) => resultPromise.then(onfulfilled, onrejected),
-    catch: (onrejected?: any) => resultPromise.catch(onrejected),
-    select: () => builder,
-    insert: () => builder,
-    update: () => builder,
-    upsert: () => builder,
-    delete: () => builder,
-    eq: () => builder,
-    neq: () => builder,
-    gt: () => builder,
-    lt: () => builder,
-    gte: () => builder,
-    lte: () => builder,
-    like: () => builder,
-    ilike: () => builder,
-    is: () => builder,
-    or: () => builder,
-    match: () => builder,
-    filter: () => builder,
-    range: () => builder,
-    order: () => builder,
-    limit: () => builder,
-    in: () => builder,
-    maybeSingle: () => builder,
-    single: () => builder,
-  };
-
-  return builder;
-};
-
-const supabase: any = {
-  from: (table: string) => {
-    return createMockBuilder([]);
-  },
-  rpc: (fn: string, args?: any) => {
-    return Promise.resolve({ data: null, error: null });
-  },
-  auth: {
-    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-    getUser: () => Promise.resolve({ data: { user: null }, error: null }),
-    signOut: () => Promise.resolve({ error: null }),
-    onAuthStateChange: (callback: any) => {
-      return { data: { subscription: { unsubscribe: () => {} } } };
-    }
-  }
-};
-
 function isUUID(str?: string): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
-}
-
-function getSystemDriveUrl(): string {
-  try {
-    const configPath = "/tmp/drive_config.json";
-    if (fs.existsSync(configPath)) {
-      const raw = fs.readFileSync(configPath, "utf-8");
-      const cfg = JSON.parse(raw);
-      if (cfg && cfg.webappUrl) return cfg.webappUrl;
-    }
-  } catch {}
-  try {
-    const rootConfigPath = path.join(process.cwd(), "drive_config.json");
-    if (fs.existsSync(rootConfigPath)) {
-      const raw = fs.readFileSync(rootConfigPath, "utf-8");
-      const cfg = JSON.parse(raw);
-      if (cfg && cfg.webappUrl) return cfg.webappUrl;
-    }
-  } catch {}
-  return process.env.GOOGLE_DRIVE_WEBAPP_URL || "";
 }
 
 const LP_DATA_FILE = path.join(process.cwd(), "data", "landing_pages.json");
 const SURVEYS_DATA_FILE = path.join(process.cwd(), "data", "surveys.json");
 const RESPONSES_DATA_FILE = path.join(process.cwd(), "data", "survey_responses.json");
 const LEADS_DATA_FILE = path.join(process.cwd(), "data", "leads_submissions.json");
+
+// In-memory caches for sub-millisecond response times
+let memoryLps: any[] | null = null;
+let memoryLeads: any[] | null = null;
+let memorySurveys: any[] | null = null;
+let memoryResponses: any[] | null = null;
 
 function ensureDataDir() {
   const dir = path.dirname(LP_DATA_FILE);
@@ -93,27 +27,41 @@ function ensureDataDir() {
   }
 }
 
+function scheduleBackgroundWrite(filePath: string, data: any) {
+  setImmediate(async () => {
+    try {
+      ensureDataDir();
+      const tmpPath = `${filePath}.tmp.${Date.now()}`;
+      await fs.promises.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+      await fs.promises.rename(tmpPath, filePath);
+    } catch (err) {
+      console.warn(`Background safe write notice for ${filePath}:`, err);
+    }
+  });
+}
+
 function readStoredLeads(): any[] {
+  if (memoryLeads) return memoryLeads;
   try {
     ensureDataDir();
     if (fs.existsSync(LEADS_DATA_FILE)) {
       const raw = fs.readFileSync(LEADS_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        memoryLeads = parsed;
+        return memoryLeads;
+      }
     }
   } catch (e) {
     console.error("Failed to read stored leads submissions:", e);
   }
-  return [];
+  memoryLeads = [];
+  return memoryLeads;
 }
 
 function writeStoredLeads(leads: any[]) {
-  try {
-    ensureDataDir();
-    fs.writeFileSync(LEADS_DATA_FILE, JSON.stringify(leads, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to write stored leads submissions:", e);
-  }
+  memoryLeads = leads;
+  scheduleBackgroundWrite(LEADS_DATA_FILE, leads);
 }
 
 function normalizeSlugServer(str?: string): string {
@@ -360,164 +308,85 @@ const DEFAULT_INITIAL_LANDING_PAGES: any[] = [
 ];
 
 function readStoredLandingPages(): any[] {
+  if (memoryLps && memoryLps.length > 0) return memoryLps;
   try {
     ensureDataDir();
     if (fs.existsSync(LP_DATA_FILE)) {
       const raw = fs.readFileSync(LP_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memoryLps = parsed;
+        return memoryLps;
+      }
     }
-    // Salva a lista padrão inicial no disco físico do servidor se estiver ausente
     writeStoredLandingPages(DEFAULT_INITIAL_LANDING_PAGES);
-    return DEFAULT_INITIAL_LANDING_PAGES;
+    memoryLps = DEFAULT_INITIAL_LANDING_PAGES;
+    return memoryLps;
   } catch (e) {
     console.error("Failed to read stored landing pages:", e);
   }
-  return DEFAULT_INITIAL_LANDING_PAGES;
+  memoryLps = DEFAULT_INITIAL_LANDING_PAGES;
+  return memoryLps;
 }
 
 function writeStoredLandingPages(pages: any[]) {
-  try {
-    ensureDataDir();
-    fs.writeFileSync(LP_DATA_FILE, JSON.stringify(pages, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to write stored landing pages:", e);
-  }
+  memoryLps = pages;
+  scheduleBackgroundWrite(LP_DATA_FILE, pages);
 }
 
 function readStoredSurveys(): any[] {
+  if (memorySurveys) return memorySurveys;
   try {
     ensureDataDir();
     if (fs.existsSync(SURVEYS_DATA_FILE)) {
       const raw = fs.readFileSync(SURVEYS_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        memorySurveys = parsed;
+        return memorySurveys;
+      }
     }
   } catch (e) {
     console.error("Failed to read stored surveys:", e);
   }
-  return [];
+  memorySurveys = [];
+  return memorySurveys;
 }
 
 function writeStoredSurveys(surveys: any[]) {
-  try {
-    ensureDataDir();
-    fs.writeFileSync(SURVEYS_DATA_FILE, JSON.stringify(surveys, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to write stored surveys:", e);
-  }
+  memorySurveys = surveys;
+  scheduleBackgroundWrite(SURVEYS_DATA_FILE, surveys);
 }
 
 function readStoredSurveyResponses(): any[] {
+  if (memoryResponses) return memoryResponses;
   try {
     ensureDataDir();
     if (fs.existsSync(RESPONSES_DATA_FILE)) {
       const raw = fs.readFileSync(RESPONSES_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        memoryResponses = parsed;
+        return memoryResponses;
+      }
     }
   } catch (e) {
     console.error("Failed to read stored survey responses:", e);
   }
-  return [];
+  memoryResponses = [];
+  return memoryResponses;
 }
 
 function writeStoredSurveyResponses(resps: any[]) {
-  try {
-    ensureDataDir();
-    fs.writeFileSync(RESPONSES_DATA_FILE, JSON.stringify(resps, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to write stored survey responses:", e);
-  }
+  memoryResponses = resps;
+  scheduleBackgroundWrite(RESPONSES_DATA_FILE, resps);
 }
 
 // In-memory preview pages store for cross-device & cross-tab real-time sync
 const previewPagesStore = new Map<string, any>();
 let lastSavedPreviewPage: any = null;
 
-async function getPageFromSupabase(tokenOrId: string) {
-  try {
-    if (isUUID(tokenOrId)) {
-      const { data, error } = await supabase.from("landing_pages").select("*").eq("id", tokenOrId).maybeSingle();
-      if (data && !error) {
-        return {
-          id: data.id,
-          name: data.name,
-          title: data.name,
-          template: data.template,
-          status: data.status,
-          ...(typeof data.config === "object" ? data.config : {}),
-          surveyId: data.config?.surveyId || data.survey_id || undefined,
-          externalUrl: data.config?.externalUrl || data.external_url || undefined,
-        };
-      }
-    }
-
-    // Busca por slug, client_id ou name
-    const { data: byQuery } = await supabase
-      .from("landing_pages")
-      .select("*")
-      .or(`config->>slug.eq.${tokenOrId},config->>client_id.eq.${tokenOrId},name.eq.${tokenOrId}`)
-      .limit(1);
-
-    if (byQuery && byQuery.length > 0) {
-      const row = byQuery[0];
-      return {
-        id: row.id,
-        name: row.name,
-        title: row.name,
-        template: row.template,
-        status: row.status,
-        ...(typeof row.config === "object" ? row.config : {}),
-        surveyId: row.config?.surveyId || row.survey_id || undefined,
-        externalUrl: row.config?.externalUrl || row.external_url || undefined,
-      };
-    }
-
-    // Fallback: lista recente para correspondência flexível
-    const { data: allLps } = await supabase.from("landing_pages").select("*").limit(50);
-    if (allLps && allLps.length > 0) {
-      const lower = tokenOrId.toLowerCase();
-      const found = allLps.find(
-        (p) =>
-          p.id === tokenOrId ||
-          p.config?.slug === tokenOrId ||
-          p.config?.client_id === tokenOrId ||
-          (p.config?.slug && p.config.slug.toLowerCase() === lower) ||
-          (p.name && p.name.toLowerCase() === lower) ||
-          p.name?.toLowerCase().includes(lower)
-      );
-      if (found) {
-        return {
-          id: found.id,
-          name: found.name,
-          title: found.name,
-          template: found.template,
-          status: found.status,
-          ...(typeof found.config === "object" ? found.config : {}),
-          surveyId: found.config?.surveyId || found.survey_id || undefined,
-          externalUrl: found.config?.externalUrl || found.external_url || undefined,
-        };
-      }
-      // 4. Se não encontrou no Supabase, tenta buscar na lista de Landing Pages salvas no disco/memória por correspondência de UUID ou ID
-      const diskList = readStoredLandingPages();
-      const matchDisk = diskList.find(
-        (p) =>
-          p.id === tokenOrId ||
-          p.slug === tokenOrId ||
-          p.previewToken === tokenOrId ||
-          p.config?.client_id === tokenOrId ||
-          p.config?.id === tokenOrId
-      );
-      if (matchDisk) return matchDisk;
-    }
-  } catch (e) {
-    console.error("Error fetching page from Supabase in cometRoutes:", e);
-  }
-  return null;
-}
-
-// Unified resolver: busca no armazenamento persistente do disco, memória, Supabase, Google Drive e presets
+// Unified resolver: busca no armazenamento persistente do disco, memória e presets (sem dependências externas)
 export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | null> {
   if (!tokenOrId) return null;
   const rawId = tokenOrId.trim();
@@ -537,14 +406,14 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
     return false;
   };
 
-  // 1. Memória (preview store)
+  // 1. Memória ultra-rápida (preview store)
   let page = previewPagesStore.get(rawId) ||
     previewPagesStore.get(normId) ||
     previewPagesStore.get(slugId) ||
     Array.from(previewPagesStore.values()).find(matches);
   if (page) return page;
 
-  // 2. Disco persistente do servidor
+  // 2. Disco persistente do servidor (cache em memória)
   const diskPages = readStoredLandingPages();
   const fromDisk = diskPages.find(matches);
   if (fromDisk) {
@@ -553,48 +422,7 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
     return fromDisk;
   }
 
-  // 3. Fallback no Google Drive (se configurado WebApp URL)
-  const driveUrl = getSystemDriveUrl();
-  if (driveUrl && driveUrl.startsWith("http")) {
-    try {
-      const resp = await fetch(driveUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ action: "GET_DATABASE" }),
-        redirect: "follow",
-      });
-      if (resp.ok) {
-        const driveData = await resp.json();
-        const driveLps = Array.isArray(driveData?.landingPages) 
-          ? driveData.landingPages 
-          : (Array.isArray(driveData?.landing_pages) 
-            ? driveData.landing_pages 
-            : (Array.isArray(driveData?.data?.landingPages) ? driveData.data.landingPages : []));
-        if (Array.isArray(driveLps) && driveLps.length > 0) {
-          const fromDrive = driveLps.find(matches);
-          if (fromDrive) {
-            // Sincroniza no disco local do servidor para próximas requisições instantâneas
-            const currentDisk = readStoredLandingPages();
-            writeStoredLandingPages([fromDrive, ...currentDisk.filter(p => p.id !== fromDrive.id)]);
-            previewPagesStore.set(fromDrive.id, fromDrive);
-            if (fromDrive.slug) previewPagesStore.set(fromDrive.slug, fromDrive);
-            return fromDrive;
-          }
-        }
-      }
-    } catch (dErr) {
-      console.warn("Notice: Drive fetch fallback in findLandingPageAnywhere:", dErr);
-    }
-  }
-
-  // 4. Supabase com service role key
-  const fromSb = await getPageFromSupabase(tokenOrId);
-  if (fromSb) {
-    previewPagesStore.set(fromSb.id, fromSb);
-    return fromSb;
-  }
-
-  // 5. Presets e LPs de inicialização padrão
+  // 3. Presets e templates locais (instantâneo, zero latência)
   const fromPreset = PRESET_TEMPLATES.find(matches) || DEFAULT_INITIAL_LANDING_PAGES.find(matches);
   if (fromPreset) {
     previewPagesStore.set(fromPreset.id, fromPreset);
@@ -625,7 +453,7 @@ function normalizePhoneServer(raw?: string): string {
   return raw.trim();
 }
 
-async function saveLeadToSupabase(leadData: {
+async function saveLeadLocally(leadData: {
   pageId: string;
   pageTitle: string;
   name: string;
@@ -671,14 +499,40 @@ async function saveLeadToSupabase(leadData: {
       },
     };
 
-    const { error } = await supabase.from("leads").insert([leadRecord]);
-    if (error) {
-      console.error("Error inserting lead into Supabase in Express:", error);
-    } else {
-      console.log(`Lead ${cleanName} saved to Supabase successfully via Express.`);
+    // Garante que o lead esteja salvo na base de leads persistente local do servidor
+    const storedLeads = readStoredLeads();
+    const alreadyPresent = storedLeads.some(
+      (l) => (cleanWhatsapp && l.whatsapp === cleanWhatsapp) || (cleanEmail && l.email === cleanEmail)
+    );
+    if (!alreadyPresent) {
+      const fullLeadItem = {
+        id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        pageId,
+        pageTitle,
+        name: cleanName,
+        whatsapp: cleanWhatsapp,
+        email: cleanEmail,
+        company: leadRecord.company,
+        quizAnswers: quizAnswers || {},
+        utms: utms || {},
+        source: effectiveSource,
+        stage: "Leads",
+        classification: isTest ? "Lead Teste" : "Lead",
+        temperature: "Quente",
+        type: "Inbound",
+        tags,
+        score: 85,
+        submittedAt: new Date().toISOString(),
+        webhookStatus: "pending",
+        isTest: Boolean(isTest),
+        metadata: leadRecord.metadata,
+      };
+      storedLeads.unshift(fullLeadItem);
+      writeStoredLeads(storedLeads);
+      leadSubmissions.unshift(fullLeadItem);
     }
 
-    // Atualiza contagem de leads na Landing Page persistente (disco, memória e Supabase)
+    // Atualiza contagem de leads na Landing Page persistente (disco e memória)
     try {
       const diskList = readStoredLandingPages();
       let foundLP: any = null;
@@ -713,24 +567,11 @@ async function saveLeadToSupabase(leadData: {
           if (updatedLP.slug) previewPagesStore.set(updatedLP.slug, updatedLP);
         }
       }
-
-      // Supabase update
-      if (pageId && isUUID(pageId)) {
-        const { data: lpData } = await supabase.from("landing_pages").select("leads_count").eq("id", pageId).maybeSingle();
-        const currentCount = Number(lpData?.leads_count) || 0;
-        await supabase.from("landing_pages").update({ leads_count: currentCount + 1 }).eq("id", pageId);
-      } else if (pageTitle) {
-        const { data: lpData } = await supabase.from("landing_pages").select("id, leads_count").eq("name", pageTitle).maybeSingle();
-        if (lpData) {
-          const currentCount = Number(lpData?.leads_count) || 0;
-          await supabase.from("landing_pages").update({ leads_count: currentCount + 1 }).eq("id", lpData.id);
-        }
-      }
     } catch (e) {
       console.warn("Failed to update landing page lead count:", e);
     }
   } catch (err) {
-    console.error("Failed to run saveLeadToSupabase:", err);
+    console.error("Failed to run saveLeadLocally:", err);
   }
 }
 
@@ -804,47 +645,6 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
       console.warn("Notice: server disk write failed in preview sync:", diskErr);
     }
 
-    // 3. Salva no banco de dados Supabase ignorando RLS usando chave de serviço
-    try {
-      const { id, name, template, status, visits, leads, leads_count, created_at, updated_at, conv, ...config } = page;
-      
-      const payload: Record<string, any> = {
-        name: name || page.title || "Nova Landing Page",
-        template: template || "Modern",
-        status: status || "Ativa",
-        visits: visits !== undefined ? Number(visits) : 0,
-        leads_count: (leads_count ?? leads) !== undefined ? Number(leads_count ?? leads) : 0,
-        config: {
-          ...(config || {}),
-          client_id: id || (config && config.id) || (config && config.client_id),
-          slug: page.slug || (config && config.slug) || (page.title || name ? (page.title || name).toLowerCase().replace(/[^a-z0-9]+/g, "-") : undefined),
-          surveyId: page.surveyId || (config && config.surveyId),
-          externalUrl: page.externalUrl || (config && config.externalUrl)
-        }
-      };
-
-      if (id && isUUID(id)) {
-        payload.id = id;
-        await supabase.from("landing_pages").upsert([payload]);
-      } else {
-        const pageName = name || page.title || "Nova Landing Page";
-        const { data: existing } = await supabase
-          .from("landing_pages")
-          .select("id")
-          .eq("name", pageName)
-          .limit(1)
-          .maybeSingle();
-
-        if (existing?.id) {
-          await supabase.from("landing_pages").update(payload).eq("id", existing.id);
-        } else {
-          await supabase.from("landing_pages").insert([payload]);
-        }
-      }
-    } catch (dbErr) {
-      console.warn("Express server database save skipped or failed:", dbErr);
-    }
-
     return res.json({ success: true, id: page.id, previewToken: page.previewToken });
   } catch (err: any) {
     console.error("Error saving preview page:", err);
@@ -902,192 +702,111 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
   return res.status(404).json({ error: "Landing page not found" });
 });
 
-// Função auxiliar robusta para incrementar visitas em memória, disco e Supabase de forma sincronizada
+// Função auxiliar robusta para incrementar visitas em memória e disco de forma sincronizada
 async function incrementLPVisits(id: string, body: any): Promise<{ success: boolean; visits: number }> {
   let updatedVisits = 1;
   const bodyLpId = body?.lpId || body?.id || body?.slug;
 
-  // 1. Resolve a página de todas as formas (id, uuid no body, ou slug)
-  let page = await findLandingPageAnywhere(id);
-  if (!page && bodyLpId) {
-    page = await findLandingPageAnywhere(bodyLpId);
-  }
-  if (!page && body?.slug) {
-    page = await findLandingPageAnywhere(body.slug);
-  }
+  const diskList = readStoredLandingPages();
+  const matchIndex = diskList.findIndex(
+    (p) => p.id === id || p.slug === id || (bodyLpId && (p.id === bodyLpId || p.slug === bodyLpId))
+  );
 
-  if (page) {
-    const currentVisits = Number(page.visits || page.viewsCount || page.views_count) || 0;
+  let target: any = null;
+  if (matchIndex !== -1) {
+    target = diskList[matchIndex];
+    const currentVisits = Number(target.visits || target.viewsCount || target.views_count) || 0;
     updatedVisits = currentVisits + 1;
-    page.visits = updatedVisits;
-    page.viewsCount = updatedVisits;
-    page.views_count = updatedVisits;
-    const leads = Number(page.leads || page.leads_count) || 0;
-    page.conv = Math.round((leads / updatedVisits) * 100);
-    
-    previewPagesStore.set(page.id, page);
-    if (page.slug) previewPagesStore.set(page.slug, page);
+    const leads = Number(target.leads || target.leads_count) || 0;
+    diskList[matchIndex] = {
+      ...target,
+      visits: updatedVisits,
+      viewsCount: updatedVisits,
+      views_count: updatedVisits,
+      conv: Math.round((leads / updatedVisits) * 100),
+      updated_at: new Date().toISOString(),
+    };
+    writeStoredLandingPages(diskList);
+    target = diskList[matchIndex];
+  } else {
+    let page = previewPagesStore.get(id) || (bodyLpId ? previewPagesStore.get(bodyLpId) : null);
+    if (!page) {
+      page = await findLandingPageAnywhere(id);
+    }
+    if (page) {
+      const currentVisits = Number(page.visits || page.viewsCount || page.views_count) || 0;
+      updatedVisits = currentVisits + 1;
+      page.visits = updatedVisits;
+      page.viewsCount = updatedVisits;
+      page.views_count = updatedVisits;
+      const leads = Number(page.leads || page.leads_count) || 0;
+      page.conv = Math.round((leads / updatedVisits) * 100);
+      writeStoredLandingPages([page, ...diskList.filter((p) => p.id !== page.id)]);
+      target = page;
+    }
   }
 
-  // 2. Atualiza no arquivo de disco do servidor
-  try {
-    const diskList = readStoredLandingPages();
-    const matchIndex = diskList.findIndex(p => p.id === id || p.slug === id || (page && (p.id === page.id || p.slug === page.slug)));
-    if (matchIndex !== -1) {
-      const target = diskList[matchIndex];
-      const v = (Number(target.visits || target.viewsCount || target.views_count) || 0) + 1;
-      updatedVisits = v;
-      const leads = Number(target.leads || target.leads_count) || 0;
-      diskList[matchIndex] = {
-        ...target,
-        visits: v,
-        viewsCount: v,
-        views_count: v,
-        conv: Math.round((leads / v) * 100),
-        updated_at: new Date().toISOString()
-      };
-      writeStoredLandingPages(diskList);
-    } else if (page) {
-      writeStoredLandingPages([page, ...diskList]);
-    }
-  } catch (diskErr) {
-    console.warn("Express disk visit increment notice:", diskErr);
-  }
-
-  // 3. Sincroniza e atualiza no Supabase de forma segura e garantida usando service_role
-  try {
-    const resolvedUuid = page?.id || (isUUID(id) ? id : (isUUID(bodyLpId) ? bodyLpId : null));
-    if (resolvedUuid) {
-      const { data: dbData } = await supabase.from("landing_pages").select("visits, config").eq("id", resolvedUuid).maybeSingle();
-      const currentV = dbData ? (Number(dbData.visits) || 0) : 0;
-      const finalV = Math.max(currentV + 1, updatedVisits);
-      
-      const updatePayload: Record<string, any> = { visits: finalV };
-      if (dbData?.config && typeof dbData.config === "object") {
-        updatePayload.config = {
-          ...dbData.config,
-          visits: finalV,
-          viewsCount: finalV,
-          views_count: finalV
-        };
-      }
-      await supabase.from("landing_pages").update(updatePayload).eq("id", resolvedUuid);
-    } else {
-      const searchName = page?.name || page?.title || id;
-      if (searchName) {
-        const { data: dbData } = await supabase.from("landing_pages").select("id, visits, config").eq("name", searchName).maybeSingle();
-        if (dbData?.id) {
-          const currentV = Number(dbData.visits) || 0;
-          const finalV = Math.max(currentV + 1, updatedVisits);
-          const updatePayload: Record<string, any> = { visits: finalV };
-          if (dbData.config && typeof dbData.config === "object") {
-            updatePayload.config = {
-              ...dbData.config,
-              visits: finalV,
-              viewsCount: finalV,
-              views_count: finalV
-            };
-          }
-          await supabase.from("landing_pages").update(updatePayload).eq("id", dbData.id);
-        }
-      }
-    }
-  } catch (sbErr) {
-    console.warn("Supabase visit increment notice:", sbErr);
+  if (target) {
+    previewPagesStore.set(target.id, target);
+    if (target.slug) previewPagesStore.set(target.slug, target);
   }
 
   return { success: true, visits: updatedVisits };
 }
 
-// Função para incrementar conversões/leads de Landing Pages no servidor, disco e banco
+// Função para incrementar conversões/leads de Landing Pages no servidor e disco
 async function incrementLPConversion(id: string, body?: any): Promise<{ success: boolean; leads: number; conv: number }> {
   let updatedLeads = 1;
   let updatedConv = 100;
   const bodyLpId = body?.lpId || body?.id || body?.slug;
 
-  let page = await findLandingPageAnywhere(id);
-  if (!page && bodyLpId) {
-    page = await findLandingPageAnywhere(bodyLpId);
-  }
+  const diskList = readStoredLandingPages();
+  const matchIndex = diskList.findIndex(
+    (p) => p.id === id || p.slug === id || (bodyLpId && (p.id === bodyLpId || p.slug === bodyLpId))
+  );
 
-  if (page) {
-    const currentLeads = Number(page.leads || page.leads_count) || 0;
+  let target: any = null;
+  if (matchIndex !== -1) {
+    target = diskList[matchIndex];
+    const currentLeads = Number(target.leads || target.leads_count) || 0;
     updatedLeads = currentLeads + 1;
-    page.leads = updatedLeads;
-    page.leads_count = updatedLeads;
-
-    const currentVisits = Math.max(Number(page.visits || page.viewsCount || page.views_count) || 0, updatedLeads);
-    page.visits = currentVisits;
-    page.viewsCount = currentVisits;
-    page.views_count = currentVisits;
-
+    const currentVisits = Math.max(Number(target.visits || target.viewsCount || target.views_count) || 0, updatedLeads);
     updatedConv = Math.min(100, Math.round((updatedLeads / currentVisits) * 100));
-    page.conv = updatedConv;
-
-    previewPagesStore.set(page.id, page);
-    if (page.slug) previewPagesStore.set(page.slug, page);
+    diskList[matchIndex] = {
+      ...target,
+      leads: updatedLeads,
+      leads_count: updatedLeads,
+      visits: currentVisits,
+      viewsCount: currentVisits,
+      views_count: currentVisits,
+      conv: updatedConv,
+      updated_at: new Date().toISOString(),
+    };
+    writeStoredLandingPages(diskList);
+    target = diskList[matchIndex];
+  } else {
+    let page = previewPagesStore.get(id) || (bodyLpId ? previewPagesStore.get(bodyLpId) : null);
+    if (!page) {
+      page = await findLandingPageAnywhere(id);
+    }
+    if (page) {
+      const currentLeads = Number(page.leads || page.leads_count) || 0;
+      updatedLeads = currentLeads + 1;
+      const currentVisits = Math.max(Number(page.visits || page.viewsCount || page.views_count) || 0, updatedLeads);
+      updatedConv = Math.min(100, Math.round((updatedLeads / currentVisits) * 100));
+      page.leads = updatedLeads;
+      page.leads_count = updatedLeads;
+      page.visits = currentVisits;
+      page.viewsCount = currentVisits;
+      page.conv = updatedConv;
+      writeStoredLandingPages([page, ...diskList.filter((p) => p.id !== page.id)]);
+      target = page;
+    }
   }
 
-  try {
-    const diskList = readStoredLandingPages();
-    const matchIndex = diskList.findIndex(
-      (p) => p.id === id || p.slug === id || (page && (p.id === page.id || p.slug === page.slug))
-    );
-    if (matchIndex !== -1) {
-      const target = diskList[matchIndex];
-      const newLeads = (Number(target.leads || target.leads_count) || 0) + 1;
-      const currentVisits = Math.max(
-        Number(target.visits || target.viewsCount || target.views_count) || 0,
-        newLeads
-      );
-      const conv = Math.min(100, Math.round((newLeads / currentVisits) * 100));
-      diskList[matchIndex] = {
-        ...target,
-        leads: newLeads,
-        leads_count: newLeads,
-        visits: currentVisits,
-        viewsCount: currentVisits,
-        views_count: currentVisits,
-        conv,
-        updated_at: new Date().toISOString(),
-      };
-      updatedLeads = newLeads;
-      updatedConv = conv;
-      writeStoredLandingPages(diskList);
-    } else if (page) {
-      writeStoredLandingPages([page, ...diskList]);
-    }
-  } catch (diskErr) {
-    console.warn("Express disk conversion increment notice:", diskErr);
-  }
-
-  try {
-    const resolvedUuid = page?.id || (isUUID(id) ? id : (isUUID(bodyLpId) ? bodyLpId : null));
-    if (resolvedUuid) {
-      const { data: dbData } = await supabase
-        .from("landing_pages")
-        .select("leads_count, visits, config")
-        .eq("id", resolvedUuid)
-        .maybeSingle();
-
-      const currentL = dbData ? Number(dbData.leads_count) || 0 : 0;
-      const finalL = Math.max(currentL + 1, updatedLeads);
-      const currentV = dbData ? Math.max(Number(dbData.visits) || 0, finalL) : finalL;
-
-      const updatePayload: Record<string, any> = { leads_count: finalL, visits: currentV };
-      if (dbData?.config && typeof dbData.config === "object") {
-        updatePayload.config = {
-          ...dbData.config,
-          leads: finalL,
-          leads_count: finalL,
-          visits: currentV,
-          conv: Math.min(100, Math.round((finalL / currentV) * 100)),
-        };
-      }
-      await supabase.from("landing_pages").update(updatePayload).eq("id", resolvedUuid);
-    }
-  } catch (sbErr) {
-    console.warn("Supabase conversion increment notice:", sbErr);
+  if (target) {
+    previewPagesStore.set(target.id, target);
+    if (target.slug) previewPagesStore.set(target.slug, target);
   }
 
   return { success: true, leads: updatedLeads, conv: updatedConv };
@@ -1157,7 +876,7 @@ cometLpRouter.delete("/api/pages/preview/:tokenOrId", (req, res) => {
   return res.json({ success: true });
 });
 
-// Get leads submissions (disco local persistente + cache + Google Drive sincronizado em background)
+// Get leads submissions (disco local persistente + cache em memória instantâneo)
 cometLpRouter.get("/api/leads", async (req, res) => {
   try {
     const pageId = req.query.pageId as string;
@@ -1171,118 +890,33 @@ cometLpRouter.get("/api/leads", async (req, res) => {
 
     // Responde instantaneamente com a lista local de leads
     if (pageId) {
-      res.json({ leads: list.filter((l) => l.pageId === pageId) });
+      return res.json({ leads: list.filter((l) => l.pageId === pageId) });
     } else {
-      res.json({ leads: list });
-    }
-
-    // Busca rápida em background do Google Drive se configurado
-    const driveUrl = getSystemDriveUrl();
-    if (driveUrl && driveUrl.startsWith("http")) {
-      (async () => {
-        try {
-          const controller = new AbortController();
-          const tId = setTimeout(() => controller.abort(), 3000);
-          const driveRes = await fetch(driveUrl + (driveUrl.includes("?") ? "&" : "?") + "action=get", {
-            redirect: "follow",
-            headers: { "Content-Type": "application/json" },
-            signal: controller.signal
-          }).finally(() => clearTimeout(tId));
-
-          if (driveRes.ok) {
-            const driveData = await driveRes.json();
-            const rawDLeads = Array.isArray(driveData.leads) 
-              ? driveData.leads 
-              : (Array.isArray(driveData.data?.leads) ? driveData.data.leads : []);
-            const rawDLpLeads = Array.isArray(driveData.leads_landing_pages) 
-              ? driveData.leads_landing_pages 
-              : (Array.isArray(driveData.data?.leads_landing_pages) ? driveData.data.leads_landing_pages : []);
-            
-            const driveMapped = [...rawDLeads, ...rawDLpLeads].map((dl: any) => {
-              const name = dl.name || dl.Nome || dl["Nome"] || "Lead Capturado";
-              const email = dl.email || dl.Email || dl["Email"] || "";
-              const whatsapp = dl.whatsapp || dl.WhatsApp || dl["WhatsApp"] || "";
-              const pageTitle = dl.landingPageTitle || dl["Landing Page (Título)"] || dl.landingPage || dl.pageTitle || "Campanha: venda...";
-              const pageId = dl.landingPageId || dl["ID Landing Page"] || dl.pageId || "b8995c0f-7f94-4767-b683-93a2116c71f3";
-              const source = dl.source || dl.Origem || "instagram";
-
-              return {
-                id: dl.id || dl["ID Lead"] || dl["ID"] || `drive_${Math.random().toString(36).substring(2, 7)}`,
-                pageId,
-                pageTitle,
-                name,
-                company: dl.company || dl.Empresa || dl["Empresa"] || `${name} (LP: ${pageTitle})`,
-                email,
-                whatsapp,
-                source,
-                stage: dl.stage || dl["Fase / Etapa"] || "Leads",
-                temperature: dl.temperature || dl.Temperatura || "Quente",
-                score: Number(dl.score || dl.Score) || 85,
-                tags: Array.isArray(dl.tags) ? dl.tags : (typeof dl.Tags === "string" ? dl.Tags.split(",").map((t: string) => t.trim()) : ["LP", "Campanha", "instagram"]),
-                submittedAt: dl.createdAt || dl.created_at || dl["Data Cadastro"] || dl["Data / Hora"] || new Date().toISOString(),
-                webhookStatus: "skipped" as const,
-                quizAnswers: dl.quizAnswers || {},
-                utms: dl.utms || { utm_source: source }
-              };
-            });
-
-            // Mescla sem duplicar
-            const currentList = readStoredLeads();
-            const seen = new Set<string>();
-            currentList.forEach(l => {
-              if (l.id) seen.add(String(l.id));
-              if (l.email) seen.add(l.email.toLowerCase().trim());
-              if (l.whatsapp) seen.add(l.whatsapp.replace(/\D/g, ""));
-            });
-
-            let addedNew = false;
-            for (const dLead of driveMapped) {
-              const cleanE = dLead.email ? dLead.email.toLowerCase().trim() : "";
-              const cleanW = dLead.whatsapp ? dLead.whatsapp.replace(/\D/g, "") : "";
-              if (!seen.has(String(dLead.id)) && (!cleanE || !seen.has(cleanE)) && (!cleanW || !seen.has(cleanW))) {
-                currentList.push(dLead as any);
-                addedNew = true;
-                if (dLead.id) seen.add(String(dLead.id));
-                if (cleanE) seen.add(cleanE);
-                if (cleanW) seen.add(cleanW);
-              }
-            }
-
-            if (addedNew) {
-              writeStoredLeads(currentList);
-            }
-          }
-        } catch {}
-      })().catch(() => {});
+      return res.json({ leads: list });
     }
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Error fetching leads" });
   }
 });
 
-// Update lead submission (e.g. stage change, notes, owner)
+// Update lead submission (e.g. stage change, notes, owner, survey qualification)
 cometLpRouter.patch("/api/leads/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
-    const index = leadSubmissions.findIndex((l) => l.id === id);
+    const leadsList = readStoredLeads();
+    const index = leadsList.findIndex((l) => l.id === id);
     if (index !== -1) {
-      leadSubmissions[index] = {
-        ...leadSubmissions[index],
+      leadsList[index] = {
+        ...leadsList[index],
         ...updates,
-        stage: updates.stage !== undefined ? updates.stage : (leadSubmissions[index] as any).stage,
+        stage: updates.stage !== undefined ? updates.stage : leadsList[index].stage,
       };
-      writeStoredLeads(leadSubmissions);
+      writeStoredLeads(leadsList);
+      leadSubmissions = leadsList;
+      return res.json({ success: true, lead: leadsList[index] });
     }
-    // Also try to update in Supabase if valid id
-    if (isUUID(id)) {
-      try {
-        await supabase.from("leads").update(updates).eq("id", id);
-      } catch (err) {
-        console.warn("Supabase lead update fallback in Express:", err);
-      }
-    }
-    return res.json({ success: true, lead: index !== -1 ? leadSubmissions[index] : null });
+    return res.json({ success: true, lead: null });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
@@ -1292,19 +926,15 @@ cometLpRouter.put("/api/leads/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
-    const index = leadSubmissions.findIndex((l) => l.id === id);
+    const leadsList = readStoredLeads();
+    const index = leadsList.findIndex((l) => l.id === id);
     if (index !== -1) {
-      leadSubmissions[index] = { ...leadSubmissions[index], ...updates };
-      writeStoredLeads(leadSubmissions);
+      leadsList[index] = { ...leadsList[index], ...updates };
+      writeStoredLeads(leadsList);
+      leadSubmissions = leadsList;
+      return res.json({ success: true, lead: leadsList[index] });
     }
-    if (isUUID(id)) {
-      try {
-        await supabase.from("leads").update(updates).eq("id", id);
-      } catch (err) {
-        console.warn("Supabase lead put fallback in Express:", err);
-      }
-    }
-    return res.json({ success: true, lead: index !== -1 ? leadSubmissions[index] : null });
+    return res.json({ success: true, lead: null });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
@@ -1314,17 +944,12 @@ cometLpRouter.put("/api/leads/:id", async (req, res) => {
 cometLpRouter.delete("/api/leads/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const index = leadSubmissions.findIndex((l) => l.id === id);
+    const leadsList = readStoredLeads();
+    const index = leadsList.findIndex((l) => l.id === id);
     if (index !== -1) {
-      leadSubmissions.splice(index, 1);
-      writeStoredLeads(leadSubmissions);
-    }
-    if (isUUID(id)) {
-      try {
-        await supabase.from("leads").delete().eq("id", id);
-      } catch (err) {
-        console.warn("Supabase lead delete fallback in Express:", err);
-      }
+      leadsList.splice(index, 1);
+      writeStoredLeads(leadsList);
+      leadSubmissions = leadsList;
     }
     return res.json({ success: true });
   } catch (e: any) {
@@ -1393,23 +1018,18 @@ cometLpRouter.post("/api/webhook/submit-lead", async (req, res) => {
       }
     }
 
-    // Persist permanently in the database bypassing RLS
-    try {
-      await saveLeadToSupabase({
-        pageId: lead.pageId,
-        pageTitle: lead.pageTitle,
-        name: lead.name,
-        whatsapp: lead.whatsapp,
-        email: lead.email,
-        quizAnswers: lead.quizAnswers,
-        utms: lead.utms,
-      });
-    } catch (saveErr) {
-      console.error("Error in automatic Supabase background save:", saveErr);
-    }
+    // Persist locally
+    await saveLeadLocally({
+      pageId: lead.pageId,
+      pageTitle: lead.pageTitle,
+      name: lead.name,
+      whatsapp: lead.whatsapp,
+      email: lead.email,
+      quizAnswers: lead.quizAnswers,
+      utms: lead.utms,
+    });
 
     leadSubmissions.unshift(lead);
-    // Keep max 200 leads in memory
     if (leadSubmissions.length > 200) {
       leadSubmissions.pop();
     }
@@ -1430,63 +1050,95 @@ cometLpRouter.post("/api/webhook/submit-lead", async (req, res) => {
 // Alias POST endpoint for /api/submit-lead
 cometLpRouter.post("/api/submit-lead", async (req, res) => {
   try {
-    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, webhookUrl, source } = req.body || {};
+    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, webhookUrl, source, company } = req.body || {};
 
     const pageIdStr = pageId || "unknown";
-    const lp = await findLandingPageAnywhere(pageIdStr);
+    const diskPages = readStoredLandingPages();
+    const lp = previewPagesStore.get(pageIdStr) || diskPages.find((p) => p.id === pageIdStr || p.slug === pageIdStr);
     const isTestMode = req.body.isTest === true || (lp && lp.status === "Teste") || false;
 
-    const lead: LeadSubmission = {
-      id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    const leadId = `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const nowIso = new Date().toISOString();
+    const cleanPhone = whatsapp ? String(whatsapp).trim() : "";
+    const cleanEmail = email ? String(email).trim().toLowerCase() : "";
+    const cleanName = name ? String(name).trim() : "Lead Capturado";
+    const effectivePageTitle = pageTitle || (lp && (lp.name || lp.title)) || "Landing Page";
+    const effectiveSource = source || utms?.utm_source || "Landing Page";
+
+    const lead: any = {
+      id: leadId,
       pageId: pageIdStr,
-      pageTitle: pageTitle || (lp && (lp.name || lp.title)) || "Landing Page",
-      name: name || "",
-      whatsapp: whatsapp || "",
-      email: email || "",
+      pageTitle: effectivePageTitle,
+      landingPage: effectivePageTitle,
+      landingPageId: pageIdStr,
+      name: cleanName,
+      whatsapp: cleanPhone,
+      email: cleanEmail,
+      company: company || `${cleanName} (LP: ${effectivePageTitle})`,
       quizAnswers: quizAnswers || {},
       utms: utms || {},
-      submittedAt: new Date().toISOString(),
+      source: effectiveSource,
+      stage: "Leads",
+      classification: isTestMode ? "Lead Teste" : "Lead",
+      temperature: "Quente",
+      type: "Inbound",
+      tags: [
+        effectiveSource,
+        utms?.utm_campaign ? `campanha:${utms.utm_campaign}` : null,
+        "comet-lp",
+        isTestMode ? "leadtest" : null,
+        isTestMode ? "modo-teste" : null,
+      ].filter(Boolean),
+      score: Number(req.body.score) || 85,
+      submittedAt: nowIso,
+      createdAt: nowIso,
       webhookStatus: "pending",
+      isTest: isTestMode,
+      metadata: {
+        ...req.body,
+        pageId: pageIdStr,
+        pageTitle: effectivePageTitle,
+        submittedAt: nowIso,
+        isTest: isTestMode,
+      },
     };
 
-    // 1. Grava instantaneamente no arquivo de disco local e memória (para refletir na hora na Base de Leads e no CRM)
+    // 1. Grava instantaneamente no arquivo de disco local e memória
     const currentLeads = readStoredLeads();
     currentLeads.unshift(lead);
-    if (currentLeads.length > 300) {
+    if (currentLeads.length > 500) {
       currentLeads.pop();
     }
     writeStoredLeads(currentLeads);
 
-    // Mantém sincronizado no array em memória
     leadSubmissions.unshift(lead);
-    if (leadSubmissions.length > 300) {
+    if (leadSubmissions.length > 500) {
       leadSubmissions.pop();
     }
 
     // 2. Incrementa métricas da Landing Page no disco instantaneamente
     try {
-      const diskList = readStoredLandingPages();
-      const matchIndex = diskList.findIndex(
+      const matchIndex = diskPages.findIndex(
         (p) =>
           p.id === pageIdStr ||
           p.slug === pageIdStr ||
           (lp && (p.id === lp.id || p.slug === lp.slug))
       );
       if (matchIndex !== -1) {
-        const target = diskList[matchIndex];
+        const target = diskPages[matchIndex];
         const newLeads = (Number(target.leads || target.leads_count) || 0) + 1;
         const currentVisits = Math.max(
           Number(target.visits || target.viewsCount || target.views_count) || 0,
           newLeads
         );
-        diskList[matchIndex] = {
+        diskPages[matchIndex] = {
           ...target,
           leads: newLeads,
           leads_count: newLeads,
           conv: Math.round((newLeads / currentVisits) * 100),
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         };
-        writeStoredLandingPages(diskList);
+        writeStoredLandingPages(diskPages);
         if (lp) {
           lp.leads = newLeads;
           lp.leads_count = newLeads;
@@ -1499,7 +1151,7 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       console.warn("Express disk lead increment notice:", lpErr);
     }
 
-    // 3. Responde IMEDIATAMENTE ao navegador para que o botão não fique carregando/girando
+    // 3. Responde IMEDIATAMENTE ao navegador
     res.json({
       success: true,
       leadId: lead.id,
@@ -1508,14 +1160,13 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       message: "Lead capturado e processado com sucesso!",
     });
 
-    // 4. Dispara sincronizações externas em background de forma assíncrona (não-bloqueante)
-    (async () => {
-      // 4A. Notificação de Webhook externa
-      const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
-      if (targetWebhook && targetWebhook.trim().length > 0) {
+    // 4. Webhook externa opcional em background se configurado
+    const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
+    if (targetWebhook && targetWebhook.trim().length > 0) {
+      setImmediate(async () => {
         try {
           const controller = new AbortController();
-          const tId = setTimeout(() => controller.abort(), 4000);
+          const tId = setTimeout(() => controller.abort(), 2000);
           const payload = {
             event: "lead_converted",
             timestamp: lead.submittedAt,
@@ -1528,7 +1179,7 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
             tracking: {
               page_id: lead.pageId,
               page_title: lead.pageTitle,
-              source: source || utms?.utm_source || "direct",
+              source: effectiveSource,
               ...(utms || {}),
             },
           };
@@ -1544,46 +1195,8 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
         } catch (wErr) {
           console.warn("Background webhook delivery notice:", wErr);
         }
-      }
-
-      // 4B. Sincronização em background com a Planilha do Google Drive
-      const driveUrl = getSystemDriveUrl();
-      if (driveUrl && driveUrl.startsWith("http")) {
-        try {
-          const controller = new AbortController();
-          const tId = setTimeout(() => controller.abort(), 4000);
-          await fetch(driveUrl, {
-            method: "POST",
-            headers: { "Content-Type": "text/plain;charset=utf-8" },
-            body: JSON.stringify({
-              action: "SUBMIT_LP_LEAD",
-              lead: {
-                id: lead.id,
-                name: lead.name,
-                company: `${lead.name} (LP: ${lead.pageTitle || lead.pageId || "Landing Page"})`,
-                email: lead.email,
-                whatsapp: lead.whatsapp,
-                pageId: lead.pageId,
-                pageTitle: lead.pageTitle,
-                landingPageId: lead.pageId,
-                landingPageTitle: lead.pageTitle,
-                quizAnswers: lead.quizAnswers || {},
-                utms: lead.utms || {},
-                source: source || lead.utms?.utm_source || "Landing Page",
-                submittedAt: lead.submittedAt,
-                isTest: isTestMode
-              },
-              isTest: isTestMode,
-              timestamp: new Date().toISOString()
-            }),
-            redirect: "follow",
-            signal: controller.signal
-          }).finally(() => clearTimeout(tId));
-        } catch (dErr) {
-          console.warn("Drive sync background notice:", dErr);
-        }
-      }
-    })().catch(() => {});
+      });
+    }
   } catch (error: any) {
     console.error("Error in /api/submit-lead:", error);
     return res.status(500).json({ error: error.message || "Failed to process lead" });
@@ -2219,32 +1832,6 @@ cometLpRouter.get("/api/landing-pages", async (_req, res) => {
   try {
     let pages = readStoredLandingPages();
 
-    // Se estiver vazio no arquivo local do servidor, busca no Supabase
-    if (pages.length === 0) {
-      try {
-        const { data, error } = await supabase.from("landing_pages").select("*").order("created_at", { ascending: false });
-        if (!error && data && data.length > 0) {
-          pages = data.map((row) => ({
-            id: row.id,
-            name: row.name,
-            title: row.name,
-            template: row.template,
-            status: row.status,
-            visits: Number(row.visits) || 0,
-            leads: Number(row.leads_count) || 0,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            ...(typeof row.config === "object" ? row.config : {}),
-            surveyId: row.config?.surveyId || row.survey_id || undefined,
-            externalUrl: row.config?.externalUrl || row.external_url || undefined,
-          }));
-          writeStoredLandingPages(pages);
-        }
-      } catch (err) {
-        console.warn("Could not query Supabase for initial landing pages:", err);
-      }
-    }
-
     // Recalcula dinamicamente estatísticas garantindo consistência com os leads gravados
     const storedLeads = readStoredLeads();
     pages = pages.map((p) => {
@@ -2341,24 +1928,6 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
     if (newPage.slug) previewPagesStore.set(newPage.slug, newPage);
     if (newPage.previewToken) previewPagesStore.set(newPage.previewToken, newPage);
 
-    // 3. Tenta salvar no Supabase de forma resiliente
-    try {
-      const dbPayload = {
-        name: newPage.name,
-        template: newPage.template,
-        status: newPage.status,
-        visits: newPage.visits,
-        leads_count: newPage.leads,
-        config: newPage,
-      };
-      if (isUUID(newPage.id)) {
-        (dbPayload as any).id = newPage.id;
-      }
-      await supabase.from("landing_pages").insert([dbPayload]);
-    } catch (sbErr) {
-      console.info("Supabase sync notice (LP saved in server DB):", sbErr);
-    }
-
     res.json({ success: true, landingPage: newPage });
   } catch (err: any) {
     console.error("Error creating landing page:", err);
@@ -2429,32 +1998,6 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     if (updatedPage.slug) previewPagesStore.set(updatedPage.slug, updatedPage);
     if (updatedPage.previewToken) previewPagesStore.set(updatedPage.previewToken, updatedPage);
 
-    // Tenta Supabase
-    try {
-      const dbPayload = {
-        name: updatedPage.name || updatedPage.title,
-        template: updatedPage.template,
-        status: updatedPage.status,
-        visits: Number(updatedPage.visits) || 0,
-        leads_count: Number(updatedPage.leads ?? updatedPage.leads_count) || 0,
-        config: updatedPage,
-      };
-      if (isUUID(updatedPage.id)) {
-        await supabase.from("landing_pages").update(dbPayload).eq("id", updatedPage.id);
-      } else if (updatedPage.name) {
-        await supabase.from("landing_pages").update(dbPayload).eq("name", updatedPage.name);
-      }
-
-      if (isExitingTestMode) {
-        const targetTitle = existing?.name || existing?.title || updatedPage.name || updatedPage.title;
-        if (targetTitle) {
-          await supabase.from("leads").delete().match({ classification: "Lead Teste" }).ilike("source", `%${targetTitle}%`);
-        }
-      }
-    } catch (sbErr) {
-      console.info("Supabase update notice (LP updated in server DB):", sbErr);
-    }
-
     res.json({ success: true, landingPage: updatedPage });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Internal server error" });
@@ -2484,17 +2027,6 @@ cometLpRouter.post("/api/landing-pages/:id/clear-test-leads", async (req, res) =
     writeStoredLeads(cleanedLeads);
     leadSubmissions = cleanedLeads;
 
-    try {
-      if (isUUID(id)) {
-        await supabase.from("leads").delete().eq("landing_page_id", id);
-      }
-      if (pageTitle) {
-        await supabase.from("leads").delete().match({ classification: "Lead Teste" }).ilike("source", `%${pageTitle}%`);
-      }
-    } catch (sbErr) {
-      console.warn("Supabase clear test leads notice:", sbErr);
-    }
-
     return res.json({ success: true, message: "Leads de teste excluídos com sucesso" });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || "Failed to clear test leads" });
@@ -2510,12 +2042,6 @@ cometLpRouter.delete("/api/landing-pages/:id", async (req, res) => {
     writeStoredLandingPages(filtered);
 
     previewPagesStore.delete(id);
-
-    try {
-      if (isUUID(id)) {
-        await supabase.from("landing_pages").delete().eq("id", id);
-      }
-    } catch {}
 
     res.json({ success: true });
   } catch (err: any) {
@@ -2537,13 +2063,6 @@ cometLpRouter.post("/api/landing-pages/bulk-delete", async (req, res) => {
     writeStoredLandingPages(filtered);
 
     ids.forEach((i) => previewPagesStore.delete(i));
-
-    try {
-      const uuidIds = ids.filter((i) => isUUID(i));
-      if (uuidIds.length > 0) {
-        await supabase.from("landing_pages").delete().in("id", uuidIds);
-      }
-    } catch {}
 
     res.json({ success: true, count: ids.length });
   } catch (err: any) {
@@ -2572,105 +2091,24 @@ cometLpRouter.post("/api/landing-pages/clean-keep-one", async (req, res) => {
 });
 
 // ============================================================================
-// TRACKING ENDPOINTS (VISITS & CONVERSIONS ATÔMICOS)
+// SURVEYS & DIAGNOSTICS REST API (SERVER PERSISTENCE)
 // ============================================================================
 
-// POST increment LP visit
-cometLpRouter.post("/api/landing-pages/:id/visit", async (req, res) => {
+// GET all survey responses (MUST be declared BEFORE /api/surveys/:id)
+cometLpRouter.get("/api/surveys/responses", async (_req, res) => {
   try {
-    const { id } = req.params;
-    if (!id) return res.status(400).json({ error: "Missing landing page id" });
-    const result = await incrementLPVisits(id, req.body);
-    return res.json(result);
+    const list = readStoredSurveyResponses();
+    res.json(list);
   } catch (err: any) {
-    console.error("Error incrementing LP visit:", err);
     res.status(500).json({ error: err?.message || "Internal server error" });
   }
 });
-
-// POST increment LP conversion
-cometLpRouter.post("/api/landing-pages/:id/conversion", async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!id) return res.status(400).json({ error: "Missing landing page id" });
-
-    const current = readStoredLandingPages();
-    let updatedLP: any = null;
-
-    const updatedList = current.map((p) => {
-      if (
-        p.id === id ||
-        p.slug === id ||
-        (p.config && (p.config.slug === id || p.config.client_id === id)) ||
-        (p.name && p.name.toLowerCase() === id.toLowerCase()) ||
-        (p.title && p.title.toLowerCase() === id.toLowerCase())
-      ) {
-        const newLeads = (Number(p.leads || p.leads_count) || 0) + 1;
-        const visits = Number(p.visits) || 1;
-        const conv = Math.round((newLeads / visits) * 100);
-        updatedLP = {
-          ...p,
-          leads: newLeads,
-          leads_count: newLeads,
-          conv,
-          updated_at: new Date().toISOString(),
-        };
-        return updatedLP;
-      }
-      return p;
-    });
-
-    if (updatedLP) {
-      writeStoredLandingPages(updatedList);
-      previewPagesStore.set(updatedLP.id, updatedLP);
-      if (updatedLP.slug) previewPagesStore.set(updatedLP.slug, updatedLP);
-
-      try {
-        if (isUUID(updatedLP.id)) {
-          const { data: lpData } = await supabase.from("landing_pages").select("leads_count").eq("id", updatedLP.id).maybeSingle();
-          const currentCount = Number(lpData?.leads_count) || 0;
-          await supabase.from("landing_pages").update({ leads_count: currentCount + 1 }).eq("id", updatedLP.id);
-        }
-      } catch (sbErr) {
-        console.info("Notice: Supabase conversion sync:", sbErr);
-      }
-
-      return res.json({ success: true, leads: updatedLP.leads, conv: updatedLP.conv, landingPage: updatedLP });
-    }
-
-    res.json({ success: true, tracked: true });
-  } catch (err: any) {
-    console.error("Error incrementing LP conversion:", err);
-    res.status(500).json({ error: err?.message || "Internal server error" });
-  }
-});
-
-// ============================================================================
-// SURVEYS & DIAGNOSTICS REST API (SERVER PERSISTENCE + SUPABASE SYNC)
-// ============================================================================
 
 // GET all surveys
 cometLpRouter.get("/api/surveys", async (_req, res) => {
   try {
     const diskSurveys = readStoredSurveys();
-    let dbSurveys: any[] = [];
-    try {
-      const { data, error } = await supabase.from("surveys").select("*").order("created_at", { ascending: false });
-      if (!error && data) dbSurveys = data;
-    } catch {}
-
-    const map = new Map<string, any>();
-    for (const s of diskSurveys) {
-      if (s.id) map.set(s.id, s);
-    }
-    for (const s of dbSurveys) {
-      if (s.id) {
-        const prev = map.get(s.id);
-        map.set(s.id, { ...(prev || {}), ...s });
-      }
-    }
-
-    res.json({ success: true, surveys: Array.from(map.values()) });
+    res.json({ success: true, surveys: diskSurveys });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Internal server error" });
   }
@@ -2682,22 +2120,61 @@ cometLpRouter.get("/api/surveys/:id", async (req, res) => {
     const { id } = req.params;
     if (!id) return res.status(400).json({ error: "Missing survey ID" });
 
-    // 1. Disco
+    // 1. Disco / Memória
     const diskSurveys = readStoredSurveys();
     const foundDisk = diskSurveys.find((s) => s.id === id || s.slug === id || (s.name && s.name.toLowerCase() === id.toLowerCase()));
     if (foundDisk) {
       return res.json({ success: true, survey: foundDisk });
     }
 
-    // 2. Supabase
-    try {
-      const { data, error } = await supabase.from("surveys").select("*").eq("id", id).maybeSingle();
-      if (!error && data) {
-        return res.json({ success: true, survey: data });
-      }
-    } catch {}
-
     res.status(404).json({ error: "Survey not found" });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// POST create survey
+cometLpRouter.post("/api/surveys", async (req, res) => {
+  try {
+    const survey = req.body;
+    if (!survey || !survey.id) return res.status(400).json({ error: "Missing survey id" });
+    const current = readStoredSurveys();
+    const updated = [survey, ...current.filter((s) => s.id !== survey.id)];
+    writeStoredSurveys(updated);
+    res.json({ success: true, survey });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// PUT update survey
+cometLpRouter.put("/api/surveys/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const current = readStoredSurveys();
+    const existing = current.find((s) => s.id === id);
+    const updatedSurvey = {
+      ...(existing || {}),
+      ...body,
+      id,
+      updated_at: new Date().toISOString(),
+    };
+    const updated = [updatedSurvey, ...current.filter((s) => s.id !== id)];
+    writeStoredSurveys(updated);
+    res.json({ success: true, survey: updatedSurvey });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// DELETE survey
+cometLpRouter.delete("/api/surveys/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const current = readStoredSurveys();
+    writeStoredSurveys(current.filter((s) => s.id !== id));
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Internal server error" });
   }
@@ -2714,104 +2191,220 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
 
     const responseRecord = {
       id: responseId,
-      surveyId,
-      survey_id: surveyId,
+      surveyId: surveyId || "pesquisa_custom",
+      survey_id: surveyId || "pesquisa_custom",
       leadId: leadForm?.id || extraPayload?.leadId || null,
       landingPageId: extraPayload?.landingPageId || extraPayload?.pageId || null,
       answers: answers || {},
       completedAt: nowIso,
       created_at: nowIso,
       durationSeconds: Number(duration) || 0,
+      duration_seconds: Number(duration) || 0,
       leadName: leadForm?.name || extraPayload?.leadName || "Participante",
       leadWhatsapp: leadForm?.whatsapp || extraPayload?.leadWhatsapp || "",
       leadEmail: leadForm?.email || extraPayload?.leadEmail || "",
+      leadCompany: leadForm?.company || extraPayload?.leadCompany || "",
+      score: extraPayload?.score || body.score || null,
+      temperature: extraPayload?.temperature || body.temperature || null,
       tracking: tracking || {},
     };
 
-    // 1. Salva em disco
+    // 1. Salva resposta instantaneamente na memória e disco
     const currentResponses = readStoredSurveyResponses();
     writeStoredSurveyResponses([responseRecord, ...currentResponses.slice(0, 500)]);
 
-    // 2. Salva Lead completo no Supabase e atualiza CRM
-    if (leadForm?.name || leadForm?.whatsapp || leadForm?.email) {
-      await saveLeadToSupabase({
-        pageId: responseRecord.landingPageId || "survey",
-        pageTitle: extraPayload?.pageTitle || extraPayload?.landingPage || "Pesquisa de Qualificação",
-        name: leadForm.name || "Lead Participante",
-        whatsapp: leadForm.whatsapp || "",
-        email: leadForm.email || "",
-        quizAnswers: answers || {},
-        utms: tracking?.utm || {},
-        source: tracking?.source || "Pesquisa Interativa",
-      });
-    }
-
-    // 3. Tenta salvar na tabela survey_responses no Supabase
-    try {
-      await supabase.from("survey_responses").insert([{
-        id: isUUID(responseId) ? responseId : undefined,
-        survey_id: surveyId,
-        lead_id: isUUID(responseRecord.leadId) ? responseRecord.leadId : null,
-        landing_page_id: isUUID(responseRecord.landingPageId) ? responseRecord.landingPageId : null,
-        answers: answers || {},
-        duration_seconds: Number(duration) || 0,
-      }]);
-    } catch (sbErr) {
-      console.info("Supabase survey response sync notice:", sbErr);
-    }
-
-    // 3b. Sincroniza resposta da pesquisa diretamente com o Google Drive / Sheets
-    const driveUrl = getSystemDriveUrl();
-    if (driveUrl && driveUrl.startsWith("http")) {
+    // 2. Incrementa completions na pesquisa instantaneamente
+    if (surveyId) {
       try {
-        await fetch(driveUrl, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            action: "SUBMIT_SURVEY_RESPONSE",
-            surveyResponse: {
-              surveyId,
-              surveyName: extraPayload?.pageTitle || "Pesquisa de Qualificação",
-              leadName: leadForm?.name || extraPayload?.leadName || "Participante",
-              leadWhatsapp: leadForm?.whatsapp || extraPayload?.leadWhatsapp || "",
-              leadEmail: leadForm?.email || extraPayload?.leadEmail || "",
-              answers: answers || {},
-              timestamp: new Date().toISOString()
-            }
-          }),
-          redirect: "follow"
-        });
-      } catch (dErr) {
-        console.warn("Survey response Drive sync notice:", dErr);
-      }
-    }
-
-    // 4. Se havia uma Landing Page vinculada, incrementa suas conversões
-    if (responseRecord.landingPageId) {
-      try {
-        const diskLps = readStoredLandingPages();
-        const updatedLps = diskLps.map((p) => {
-          if (p.id === responseRecord.landingPageId || p.slug === responseRecord.landingPageId) {
-            const newLeads = (Number(p.leads || p.leads_count) || 0) + 1;
-            const visits = Number(p.visits) || 1;
-            return {
-              ...p,
-              leads: newLeads,
-              leads_count: newLeads,
-              conv: Math.round((newLeads / visits) * 100),
-              updated_at: new Date().toISOString(),
-            };
-          }
-          return p;
-        });
-        writeStoredLandingPages(updatedLps);
+        const diskSurveys = readStoredSurveys();
+        const sIndex = diskSurveys.findIndex((s) => s.id === surveyId || s.slug === surveyId);
+        if (sIndex !== -1) {
+          diskSurveys[sIndex] = {
+            ...diskSurveys[sIndex],
+            completions: (Number(diskSurveys[sIndex].completions) || 0) + 1,
+            updatedAt: nowIso,
+            updated_at: nowIso,
+          };
+          writeStoredSurveys(diskSurveys);
+        }
       } catch {}
     }
 
-    res.json({ success: true, responseId, response: responseRecord });
+    // 3. Cadastra ou atualiza o lead na Base de Leads do CRM com qualificação MIN
+    let leadRecord: any = null;
+    if (leadForm?.name || leadForm?.whatsapp || leadForm?.email || extraPayload?.leadName) {
+      const lName = (leadForm?.name || extraPayload?.leadName || "Lead Participante").trim();
+      const lPhone = normalizePhoneServer(leadForm?.whatsapp || extraPayload?.leadWhatsapp || "");
+      const lEmail = (leadForm?.email || extraPayload?.leadEmail || "").trim().toLowerCase();
+      const pTitle = extraPayload?.surveyName || extraPayload?.pageTitle || "Pesquisa Interativa";
+
+      // Calcula ou extrai parâmetros de pontuação e qualificação MIN
+      let calculatedScore = Number(extraPayload?.score || body.score) || 75;
+      let calculatedTemp: "Quente" | "Morno" | "Frio" = (extraPayload?.temperature || body.temperature || "Morno") as any;
+      let minM: 0 | 1 = 0;
+      let minI: 0 | 1 = 0;
+      let minN: 0 | 1 = 0;
+
+      // Análise heurística das respostas caso não venha predeterminado
+      const allAnsValues = Object.values(answers || {}).map(v => String(v).toLowerCase());
+      const hotKeywords = ["sim, frequentemente", "compromete o crescimento", "sim, com alta prioridade", "imediato (esta semana)", "sim, prontos para investir", "crítico e urgente", "tomador de decisão", "sim, verba já aprovada", "excelente", "superou as expectativas", "vendas", "imediato", "urgente"];
+      const coldKeywords = ["não enfrento", "pouco impacto", "talvez em outro momento", "sem pressa", "ainda não temos orçamento", "impacto baixo", "apenas pesquisando", "não temos verba", "péssimo", "não atendeu", "planejamento"];
+
+      let hotCount = 0;
+      let coldCount = 0;
+      allAnsValues.forEach(val => {
+        if (hotKeywords.some(hk => val.includes(hk))) hotCount++;
+        if (coldKeywords.some(ck => val.includes(ck))) coldCount++;
+      });
+
+      if (hotCount >= 2 || calculatedTemp === "Quente") {
+        calculatedTemp = "Quente";
+        calculatedScore = Math.max(calculatedScore, 90);
+        minM = 1; minI = 1; minN = 1;
+      } else if (coldCount >= 2 || calculatedTemp === "Frio") {
+        calculatedTemp = "Frio";
+        calculatedScore = Math.min(calculatedScore, 35);
+        minM = 0; minI = 0; minN = 0;
+      } else {
+        calculatedTemp = "Morno";
+        calculatedScore = 65;
+        minM = 1; minI = 1; minN = 0;
+      }
+
+      const minTotal = minM + minI + minN;
+      const minClassification = calculatedTemp.toUpperCase() as "QUENTE" | "MORNO" | "FRIO" | "DESCARTE";
+      const minScoreCode = minTotal === 3 ? "MIN" : (minTotal === 2 ? "MI" : (minTotal === 1 ? "M" : "Nenhum"));
+
+      const minQualification = {
+        m: minM,
+        i: minI,
+        n: minN,
+        total: minTotal,
+        classification: minClassification,
+      };
+
+      const curLeads = readStoredLeads();
+      const rawTargetLeadId = leadForm?.id || extraPayload?.leadId;
+
+      const existingIndex = curLeads.findIndex(
+        (l) => (rawTargetLeadId && l.id === rawTargetLeadId) ||
+               (lPhone && l.whatsapp && (l.whatsapp === lPhone || l.whatsapp.replace(/\D/g, "") === lPhone.replace(/\D/g, ""))) ||
+               (lEmail && l.email && l.email.toLowerCase() === lEmail)
+      );
+
+      if (existingIndex !== -1) {
+        // Atualiza o lead existente com as respostas da pesquisa e qualificação MIN
+        const existing = curLeads[existingIndex];
+        const combinedTags = Array.from(new Set([
+          ...(existing.tags || []),
+          "pesquisa-respondida",
+          "min-qualificado",
+          `temp-${calculatedTemp.toLowerCase()}`,
+        ]));
+
+        leadRecord = {
+          ...existing,
+          score: Math.max(existing.score || 0, calculatedScore),
+          temperature: calculatedTemp,
+          minScore: minScoreCode,
+          minQualification,
+          quizAnswers: { ...(existing.quizAnswers || {}), ...(answers || {}) },
+          surveyAnswers: answers || {},
+          tags: combinedTags,
+          metadata: {
+            ...(existing.metadata || {}),
+            surveyId,
+            surveyName: pTitle,
+            surveyScore: calculatedScore,
+            surveyTemperature: calculatedTemp,
+            minQualification,
+            surveyAnswers: answers || {},
+            surveyAnsweredAt: nowIso,
+          },
+        };
+        curLeads[existingIndex] = leadRecord;
+      } else {
+        // Cria novo lead com qualificação MIN completa
+        leadRecord = {
+          id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          pageId: responseRecord.landingPageId || surveyId || "survey",
+          pageTitle: pTitle,
+          landingPage: pTitle,
+          landingPageId: responseRecord.landingPageId || surveyId,
+          name: lName,
+          whatsapp: lPhone,
+          email: lEmail,
+          company: leadForm?.company || `${lName} (Pesquisa: ${pTitle})`,
+          quizAnswers: answers || {},
+          surveyAnswers: answers || {},
+          utms: tracking?.utm || {},
+          source: tracking?.source || `Pesquisa: ${pTitle}`,
+          stage: calculatedTemp === "Quente" ? "Oportunidade" : "Leads",
+          classification: "Lead",
+          temperature: calculatedTemp,
+          minScore: minScoreCode,
+          minQualification,
+          type: "Inbound",
+          tags: ["pesquisa", "deepfind", "comet-lp", "min-qualificado", `temp-${calculatedTemp.toLowerCase()}`],
+          score: calculatedScore,
+          submittedAt: nowIso,
+          createdAt: nowIso,
+          webhookStatus: "pending",
+          isTest: false,
+          metadata: {
+            surveyId,
+            surveyName: pTitle,
+            answers,
+            duration,
+            tracking,
+            leadForm,
+            score: calculatedScore,
+            temperature: calculatedTemp,
+            minQualification,
+          },
+        };
+        curLeads.unshift(leadRecord);
+      }
+
+      if (curLeads.length > 500) curLeads.pop();
+      writeStoredLeads(curLeads);
+      leadSubmissions = curLeads;
+    }
+
+    // 4. Se havia uma Landing Page vinculada, incrementa suas conversões instantaneamente
+    if (responseRecord.landingPageId) {
+      try {
+        const diskLps = readStoredLandingPages();
+        const lpIdx = diskLps.findIndex((p) => p.id === responseRecord.landingPageId || p.slug === responseRecord.landingPageId);
+        if (lpIdx !== -1) {
+          const target = diskLps[lpIdx];
+          const newLeads = (Number(target.leads || target.leads_count) || 0) + 1;
+          const visits = Math.max(Number(target.visits || target.viewsCount) || 0, newLeads);
+          diskLps[lpIdx] = {
+            ...target,
+            leads: newLeads,
+            leads_count: newLeads,
+            conv: Math.round((newLeads / visits) * 100),
+            updated_at: nowIso,
+          };
+          writeStoredLandingPages(diskLps);
+          previewPagesStore.set(target.id, diskLps[lpIdx]);
+          if (target.slug) previewPagesStore.set(target.slug, diskLps[lpIdx]);
+        }
+      } catch {}
+    }
+
+    // 5. Responde instantaneamente (< 2ms)
+    return res.json({
+      success: true,
+      responseId,
+      response: responseRecord,
+      leadId: leadRecord?.id || null,
+      message: "Resposta da pesquisa e lead processados com sucesso!",
+    });
   } catch (err: any) {
     console.error("Error submitting survey response:", err);
-    res.status(500).json({ error: err?.message || "Internal server error" });
+    return res.status(500).json({ error: err?.message || "Internal server error" });
   }
 });
 
