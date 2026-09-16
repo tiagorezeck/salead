@@ -1157,7 +1157,7 @@ cometLpRouter.delete("/api/pages/preview/:tokenOrId", (req, res) => {
   return res.json({ success: true });
 });
 
-// Get leads submissions (disco local persistente + cache + Google Drive sincronizado)
+// Get leads submissions (disco local persistente + cache + Google Drive sincronizado em background)
 cometLpRouter.get("/api/leads", async (req, res) => {
   try {
     const pageId = req.query.pageId as string;
@@ -1169,87 +1169,94 @@ cometLpRouter.get("/api/leads", async (req, res) => {
       writeStoredLeads(list);
     }
 
-    // Busca leads do Google Drive se configurado
+    // Responde instantaneamente com a lista local de leads
+    if (pageId) {
+      res.json({ leads: list.filter((l) => l.pageId === pageId) });
+    } else {
+      res.json({ leads: list });
+    }
+
+    // Busca rápida em background do Google Drive se configurado
     const driveUrl = getSystemDriveUrl();
     if (driveUrl && driveUrl.startsWith("http")) {
-      try {
-        const driveRes = await fetch(driveUrl + (driveUrl.includes("?") ? "&" : "?") + "action=get", {
-          redirect: "follow",
-          headers: { "Content-Type": "application/json" }
-        });
-        if (driveRes.ok) {
-          const driveData = await driveRes.json();
-          const rawDLeads = Array.isArray(driveData.leads) 
-            ? driveData.leads 
-            : (Array.isArray(driveData.data?.leads) ? driveData.data.leads : []);
-          const rawDLpLeads = Array.isArray(driveData.leads_landing_pages) 
-            ? driveData.leads_landing_pages 
-            : (Array.isArray(driveData.data?.leads_landing_pages) ? driveData.data.leads_landing_pages : []);
-          
-          const driveMapped = [...rawDLeads, ...rawDLpLeads].map((dl: any) => {
-            const name = dl.name || dl.Nome || dl["Nome"] || "Lead Capturado";
-            const email = dl.email || dl.Email || dl["Email"] || "";
-            const whatsapp = dl.whatsapp || dl.WhatsApp || dl["WhatsApp"] || "";
-            const pageTitle = dl.landingPageTitle || dl["Landing Page (Título)"] || dl.landingPage || dl.pageTitle || "Campanha: venda...";
-            const pageId = dl.landingPageId || dl["ID Landing Page"] || dl.pageId || "b8995c0f-7f94-4767-b683-93a2116c71f3";
-            const source = dl.source || dl.Origem || "instagram";
+      (async () => {
+        try {
+          const controller = new AbortController();
+          const tId = setTimeout(() => controller.abort(), 3000);
+          const driveRes = await fetch(driveUrl + (driveUrl.includes("?") ? "&" : "?") + "action=get", {
+            redirect: "follow",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal
+          }).finally(() => clearTimeout(tId));
 
-            return {
-              id: dl.id || dl["ID Lead"] || dl["ID"] || `drive_${Math.random().toString(36).substring(2, 7)}`,
-              pageId,
-              pageTitle,
-              name,
-              company: dl.company || dl.Empresa || dl["Empresa"] || `${name} (LP: ${pageTitle})`,
-              email,
-              whatsapp,
-              source,
-              stage: dl.stage || dl["Fase / Etapa"] || "Leads",
-              temperature: dl.temperature || dl.Temperatura || "Quente",
-              score: Number(dl.score || dl.Score) || 85,
-              tags: Array.isArray(dl.tags) ? dl.tags : (typeof dl.Tags === "string" ? dl.Tags.split(",").map((t: string) => t.trim()) : ["LP", "Campanha", "instagram"]),
-              submittedAt: dl.createdAt || dl.created_at || dl["Data Cadastro"] || dl["Data / Hora"] || new Date().toISOString(),
-              webhookStatus: "skipped" as const,
-              quizAnswers: dl.quizAnswers || {},
-              utms: dl.utms || { utm_source: source }
-            };
-          });
+          if (driveRes.ok) {
+            const driveData = await driveRes.json();
+            const rawDLeads = Array.isArray(driveData.leads) 
+              ? driveData.leads 
+              : (Array.isArray(driveData.data?.leads) ? driveData.data.leads : []);
+            const rawDLpLeads = Array.isArray(driveData.leads_landing_pages) 
+              ? driveData.leads_landing_pages 
+              : (Array.isArray(driveData.data?.leads_landing_pages) ? driveData.data.leads_landing_pages : []);
+            
+            const driveMapped = [...rawDLeads, ...rawDLpLeads].map((dl: any) => {
+              const name = dl.name || dl.Nome || dl["Nome"] || "Lead Capturado";
+              const email = dl.email || dl.Email || dl["Email"] || "";
+              const whatsapp = dl.whatsapp || dl.WhatsApp || dl["WhatsApp"] || "";
+              const pageTitle = dl.landingPageTitle || dl["Landing Page (Título)"] || dl.landingPage || dl.pageTitle || "Campanha: venda...";
+              const pageId = dl.landingPageId || dl["ID Landing Page"] || dl.pageId || "b8995c0f-7f94-4767-b683-93a2116c71f3";
+              const source = dl.source || dl.Origem || "instagram";
 
-          // Mescla sem duplicar
-          const seen = new Set<string>();
-          list.forEach(l => {
-            if (l.id) seen.add(String(l.id));
-            if (l.email) seen.add(l.email.toLowerCase().trim());
-            if (l.whatsapp) seen.add(l.whatsapp.replace(/\D/g, ""));
-          });
+              return {
+                id: dl.id || dl["ID Lead"] || dl["ID"] || `drive_${Math.random().toString(36).substring(2, 7)}`,
+                pageId,
+                pageTitle,
+                name,
+                company: dl.company || dl.Empresa || dl["Empresa"] || `${name} (LP: ${pageTitle})`,
+                email,
+                whatsapp,
+                source,
+                stage: dl.stage || dl["Fase / Etapa"] || "Leads",
+                temperature: dl.temperature || dl.Temperatura || "Quente",
+                score: Number(dl.score || dl.Score) || 85,
+                tags: Array.isArray(dl.tags) ? dl.tags : (typeof dl.Tags === "string" ? dl.Tags.split(",").map((t: string) => t.trim()) : ["LP", "Campanha", "instagram"]),
+                submittedAt: dl.createdAt || dl.created_at || dl["Data Cadastro"] || dl["Data / Hora"] || new Date().toISOString(),
+                webhookStatus: "skipped" as const,
+                quizAnswers: dl.quizAnswers || {},
+                utms: dl.utms || { utm_source: source }
+              };
+            });
 
-          let addedNew = false;
-          for (const dLead of driveMapped) {
-            const cleanE = dLead.email ? dLead.email.toLowerCase().trim() : "";
-            const cleanW = dLead.whatsapp ? dLead.whatsapp.replace(/\D/g, "") : "";
-            if (!seen.has(String(dLead.id)) && (!cleanE || !seen.has(cleanE)) && (!cleanW || !seen.has(cleanW))) {
-              list.push(dLead as any);
-              addedNew = true;
-              if (dLead.id) seen.add(String(dLead.id));
-              if (cleanE) seen.add(cleanE);
-              if (cleanW) seen.add(cleanW);
+            // Mescla sem duplicar
+            const currentList = readStoredLeads();
+            const seen = new Set<string>();
+            currentList.forEach(l => {
+              if (l.id) seen.add(String(l.id));
+              if (l.email) seen.add(l.email.toLowerCase().trim());
+              if (l.whatsapp) seen.add(l.whatsapp.replace(/\D/g, ""));
+            });
+
+            let addedNew = false;
+            for (const dLead of driveMapped) {
+              const cleanE = dLead.email ? dLead.email.toLowerCase().trim() : "";
+              const cleanW = dLead.whatsapp ? dLead.whatsapp.replace(/\D/g, "") : "";
+              if (!seen.has(String(dLead.id)) && (!cleanE || !seen.has(cleanE)) && (!cleanW || !seen.has(cleanW))) {
+                currentList.push(dLead as any);
+                addedNew = true;
+                if (dLead.id) seen.add(String(dLead.id));
+                if (cleanE) seen.add(cleanE);
+                if (cleanW) seen.add(cleanW);
+              }
+            }
+
+            if (addedNew) {
+              writeStoredLeads(currentList);
             }
           }
-
-          if (addedNew) {
-            writeStoredLeads(list);
-          }
-        }
-      } catch (dErr) {
-        // Silently continue with disk data
-      }
+        } catch {}
+      })().catch(() => {});
     }
-
-    if (pageId) {
-      return res.json({ leads: list.filter((l) => l.pageId === pageId) });
-    }
-    return res.json({ leads: list });
   } catch (err: any) {
-    return res.json({ leads: leadSubmissions });
+    res.status(500).json({ error: err?.message || "Error fetching leads" });
   }
 });
 
@@ -1422,7 +1429,6 @@ cometLpRouter.post("/api/webhook/submit-lead", async (req, res) => {
 
 // Alias POST endpoint for /api/submit-lead
 cometLpRouter.post("/api/submit-lead", async (req, res) => {
-  // Forward directly to submit lead logic
   try {
     const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, webhookUrl, source } = req.body || {};
 
@@ -1440,113 +1446,24 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       quizAnswers: quizAnswers || {},
       utms: utms || {},
       submittedAt: new Date().toISOString(),
-      webhookStatus: "skipped",
+      webhookStatus: "pending",
     };
 
-    const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
+    // 1. Grava instantaneamente no arquivo de disco local e memória (para refletir na hora na Base de Leads e no CRM)
+    const currentLeads = readStoredLeads();
+    currentLeads.unshift(lead);
+    if (currentLeads.length > 300) {
+      currentLeads.pop();
+    }
+    writeStoredLeads(currentLeads);
 
-    if (targetWebhook && targetWebhook.trim().length > 0) {
-      try {
-        const payload = {
-          event: "lead_converted",
-          timestamp: lead.submittedAt,
-          lead: {
-            name: lead.name,
-            whatsapp: lead.whatsapp,
-            email: lead.email,
-            quiz_diagnosis: lead.quizAnswers,
-          },
-          tracking: {
-            page_id: lead.pageId,
-            page_title: lead.pageTitle,
-            source: source || utms?.utm_source || "direct",
-            ...(utms || {}),
-          },
-        };
-
-        const response = await fetch(targetWebhook, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "User-Agent": "People-CRO-Builder/1.0",
-          },
-          body: JSON.stringify(payload),
-        });
-
-        if (response.ok) {
-          lead.webhookStatus = "success";
-          lead.webhookResponse = `Status ${response.status} OK`;
-        } else {
-          lead.webhookStatus = "failed";
-          lead.webhookResponse = `HTTP Error ${response.status}: ${response.statusText}`;
-        }
-      } catch (err: any) {
-        console.error("Webhook forwarding error:", err);
-        lead.webhookStatus = "failed";
-        lead.webhookResponse = err?.message || "Webhook delivery failed";
-      }
+    // Mantém sincronizado no array em memória
+    leadSubmissions.unshift(lead);
+    if (leadSubmissions.length > 300) {
+      leadSubmissions.pop();
     }
 
-    // Persist permanently in the database bypassing RLS
-    try {
-      await saveLeadToSupabase({
-        pageId: lead.pageId,
-        pageTitle: lead.pageTitle,
-        name: lead.name,
-        whatsapp: lead.whatsapp,
-        email: lead.email,
-        quizAnswers: lead.quizAnswers,
-        utms: lead.utms,
-        source: source,
-        isTest: isTestMode,
-      });
-    } catch (saveErr) {
-      console.error("Error in automatic Supabase background save:", saveErr);
-    }
-
-    // Incrementar contadores de conversão/leads para a Landing Page
-    try {
-      await incrementLPConversion(pageIdStr, req.body);
-    } catch (convErr) {
-      console.warn("Notice: incrementLPConversion background trigger notice:", convErr);
-    }
-
-    // Auto Drive sync if configured
-    const driveUrl = getSystemDriveUrl();
-    if (driveUrl && driveUrl.startsWith("http")) {
-      try {
-        await fetch(driveUrl, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            action: "SUBMIT_LP_LEAD",
-            lead: {
-              id: lead.id,
-              name: lead.name,
-              company: `${lead.name} (LP: ${lead.pageTitle || lead.pageId || "Landing Page"})`,
-              email: lead.email,
-              whatsapp: lead.whatsapp,
-              pageId: lead.pageId,
-              pageTitle: lead.pageTitle,
-              landingPageId: lead.pageId,
-              landingPageTitle: lead.pageTitle,
-              quizAnswers: lead.quizAnswers || {},
-              utms: lead.utms || {},
-              source: source || lead.utms?.utm_source || "Landing Page",
-              submittedAt: lead.submittedAt,
-              isTest: isTestMode
-            },
-            isTest: isTestMode,
-            timestamp: new Date().toISOString()
-          }),
-          redirect: "follow"
-        });
-      } catch (dErr) {
-        console.warn("Drive sync error in Express submit-lead:", dErr);
-      }
-    }
-
-    // Increment lead conversion on the landing page in disk and memory
+    // 2. Incrementa métricas da Landing Page no disco instantaneamente
     try {
       const diskList = readStoredLandingPages();
       const matchIndex = diskList.findIndex(
@@ -1582,19 +1499,91 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       console.warn("Express disk lead increment notice:", lpErr);
     }
 
-    leadSubmissions.unshift(lead);
-    if (leadSubmissions.length > 200) {
-      leadSubmissions.pop();
-    }
-    writeStoredLeads(leadSubmissions);
-
-    return res.json({
+    // 3. Responde IMEDIATAMENTE ao navegador para que o botão não fique carregando/girando
+    res.json({
       success: true,
       leadId: lead.id,
       webhookStatus: lead.webhookStatus,
       lead,
       message: "Lead capturado e processado com sucesso!",
     });
+
+    // 4. Dispara sincronizações externas em background de forma assíncrona (não-bloqueante)
+    (async () => {
+      // 4A. Notificação de Webhook externa
+      const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
+      if (targetWebhook && targetWebhook.trim().length > 0) {
+        try {
+          const controller = new AbortController();
+          const tId = setTimeout(() => controller.abort(), 4000);
+          const payload = {
+            event: "lead_converted",
+            timestamp: lead.submittedAt,
+            lead: {
+              name: lead.name,
+              whatsapp: lead.whatsapp,
+              email: lead.email,
+              quiz_diagnosis: lead.quizAnswers,
+            },
+            tracking: {
+              page_id: lead.pageId,
+              page_title: lead.pageTitle,
+              source: source || utms?.utm_source || "direct",
+              ...(utms || {}),
+            },
+          };
+          await fetch(targetWebhook, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "User-Agent": "People-CRO-Builder/1.0",
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          }).finally(() => clearTimeout(tId));
+        } catch (wErr) {
+          console.warn("Background webhook delivery notice:", wErr);
+        }
+      }
+
+      // 4B. Sincronização em background com a Planilha do Google Drive
+      const driveUrl = getSystemDriveUrl();
+      if (driveUrl && driveUrl.startsWith("http")) {
+        try {
+          const controller = new AbortController();
+          const tId = setTimeout(() => controller.abort(), 4000);
+          await fetch(driveUrl, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+              action: "SUBMIT_LP_LEAD",
+              lead: {
+                id: lead.id,
+                name: lead.name,
+                company: `${lead.name} (LP: ${lead.pageTitle || lead.pageId || "Landing Page"})`,
+                email: lead.email,
+                whatsapp: lead.whatsapp,
+                pageId: lead.pageId,
+                pageTitle: lead.pageTitle,
+                landingPageId: lead.pageId,
+                landingPageTitle: lead.pageTitle,
+                quizAnswers: lead.quizAnswers || {},
+                utms: lead.utms || {},
+                source: source || lead.utms?.utm_source || "Landing Page",
+                submittedAt: lead.submittedAt,
+                isTest: isTestMode
+              },
+              isTest: isTestMode,
+              timestamp: new Date().toISOString()
+            }),
+            redirect: "follow",
+            signal: controller.signal
+          }).finally(() => clearTimeout(tId));
+        } catch (dErr) {
+          console.warn("Drive sync background notice:", dErr);
+        }
+      }
+    })().catch(() => {});
   } catch (error: any) {
     console.error("Error in /api/submit-lead:", error);
     return res.status(500).json({ error: error.message || "Failed to process lead" });

@@ -918,38 +918,27 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
         payload.webhookStatus = "sent";
       }
 
-      // 1. Notifica callback da página para sincronização imediata
+      // 1. Notifica callback da página se disponível, ou executa submissão direta
       if (onLeadSubmit) {
         try {
           await onLeadSubmit(payload);
         } catch (e) {
-          console.warn("onLeadSubmit callback error:", e);
+          console.warn("onLeadSubmit callback notice:", e);
         }
-      }
+      } else {
+        // Submissão direta se a página for renderizada isoladamente
+        try {
+          await fetch("/api/submit-lead", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        } catch (apiErr) {
+          console.warn("Direct database API lead save notice:", apiErr);
+        }
 
-      // 2. Grava 100% direto no banco de dados do sistema (sem localStorage)
-      try {
-        await fetch("/api/submit-lead", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } catch (apiErr) {
-        console.warn("Direct database API lead save notice:", apiErr);
-      }
-
-      // 3. Computa conversão atômica da LP no banco de dados
-      try {
-        fetch(`/api/landing-pages/${encodeURIComponent(page.id)}/conversion`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pageId: page.id, title: page.title }),
-        }).catch(() => {});
-      } catch {}
-
-      // 4. Sincroniza diretamente com o banco de dados do Google Sheets / Drive
-      try {
-        await submitLpLeadToDrive({
+        // Sincronização em background com o Google Drive (não-bloqueante)
+        submitLpLeadToDrive({
           id: `lead_${Date.now()}`,
           name: leadName,
           whatsapp: leadPhone,
@@ -963,9 +952,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
           source: utms?.utm_source || "Landing Page Form",
           submittedAt: new Date().toISOString(),
           isTest,
-        });
-      } catch (dErr) {
-        console.warn("Google Drive direct sync notice:", dErr);
+        }).catch(() => {});
       }
 
       // Configura dados do lead para qualquer pesquisa ou brinde posterior

@@ -560,6 +560,8 @@ export const submitLpLeadToDrive = async (leadData: {
   if (!cleanUrl) return null;
 
   try {
+    const controller = new AbortController();
+    const tId = setTimeout(() => controller.abort(), 2500);
     const res = await fetch(cleanUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -572,8 +574,9 @@ export const submitLpLeadToDrive = async (leadData: {
         isTest: leadData.isTest || false,
         timestamp: new Date().toISOString()
       }),
-      redirect: 'follow'
-    }).then(r => r.json());
+      redirect: 'follow',
+      signal: controller.signal
+    }).then(r => r.json()).finally(() => clearTimeout(tId));
     return res;
   } catch (err) {
     console.warn("Aviso ao enviar lead para Google Drive:", err);

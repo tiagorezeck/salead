@@ -856,51 +856,27 @@ function PublicLPPage() {
                 isTest: lp.status === "Teste",
               }),
             });
-
-            await fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
-              method: "POST",
-            });
           } catch (dbErr) {
             console.warn("Direct database submit notice:", dbErr);
           }
 
-          // 2. Encaminha para o endpoint de webhook se configurado
-          try {
-            if ((cometPage as any).settings?.webhookUrl) {
-              fetch("/api/webhook/submit-lead", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  pageId: lp.id,
-                  pageTitle: lp.name || lp.title,
-                  name: lead.name,
-                  whatsapp: lead.whatsapp,
-                  email: lead.email,
-                  quizAnswers: lead.quizAnswers,
-                  utms: utm,
-                  webhookUrl: (cometPage as any).settings?.webhookUrl,
-                }),
-              }).catch(() => {});
-            }
-          } catch {}
+          // 2. Encaminha conversão e Google Drive de forma assíncrona (não-bloqueante)
+          fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
+            method: "POST",
+          }).catch(() => {});
 
-          // 3. Sincroniza diretamente com o banco de dados do Google Drive / Google Sheets em tempo real
-          try {
-            await submitLpLeadToDrive({
-              landingPageId: lp.id,
-              landingPageTitle: lp.name || lp.title || "Landing Page",
-              name: lead.name || "",
-              email: lead.email || "",
-              whatsapp: lead.whatsapp || "",
-              company: lead.company || `${lead.name || "Lead"} (LP: ${lp.name || lp.title})`,
-              source: effectiveSource,
-              utm,
-              answers: lead.quizAnswers || {},
-              isTest: lp.status === "Teste",
-            });
-          } catch (gErr) {
-            console.warn("Google Drive direct sync notice:", gErr);
-          }
+          submitLpLeadToDrive({
+            landingPageId: lp.id,
+            landingPageTitle: lp.name || lp.title || "Landing Page",
+            name: lead.name || "",
+            email: lead.email || "",
+            whatsapp: lead.whatsapp || "",
+            company: lead.company || `${lead.name || "Lead"} (LP: ${lp.name || lp.title})`,
+            source: effectiveSource,
+            utm,
+            answers: lead.quizAnswers || {},
+            isTest: lp.status === "Teste",
+          }).catch((gErr) => console.warn("Google Drive background sync notice:", gErr));
 
           // 5. Notifica Analytics de Conversão da LP
           try {
