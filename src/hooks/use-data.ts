@@ -25,7 +25,6 @@ import {
   DEFAULT_VISIBILITY,
   DEFAULT_ROLE_PERMISSIONS,
   DEFAULT_ROLE_MODULES,
-  DEFAULT_SYSTEM_LEADS,
   SYSTEM_MODULES,
   type SystemModule
 } from "@/data/mock";
@@ -1174,17 +1173,34 @@ export function useData() {
       }
 
       // Consolidação e desduplicação por Union-Find (e-mail, WhatsApp, nome/empresa e ID)
-      let allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads, ...crmDataLeads, ...driveLeads];
+      const isFictitiousLead = (l: any) => {
+        if (!l) return true;
+        const id = String(l.id || "");
+        const email = String(l.email || "").toLowerCase();
+        const name = String(l.name || "").toLowerCase();
+        if (id.startsWith("lead-00") || id === "lead-001" || id === "lead-002" || id === "lead-003" || id === "lead-004" || id === "lead-005" || id === "lead-006") return true;
+        if (email.includes("nexussolucoes.com.br") || email.includes("luminaestetica.med.br") || email.includes("vanguardlog.com") || email.includes("bloomarquitetura.com.br") || email.includes("alencardistribuidora.com.br") || email.includes("inovareodonto.com.br")) return true;
+        if (name.includes("carlos eduardo mendes") || name.includes("mariana vasconcelos") || name.includes("rodrigo silveira") || name.includes("beatriz nogueira") || name.includes("lucas alencar") || name.includes("fernanda costa ribeiro")) return true;
+        return false;
+      };
 
-      // Se a base estiver totalmente vazia (ex: nova instalação ou primeiro acesso na Vercel), carrega leads de demonstração
-      if (allRawLeads.length === 0 && DEFAULT_SYSTEM_LEADS.length > 0) {
-        allRawLeads = [...DEFAULT_SYSTEM_LEADS];
-        if (typeof window !== "undefined" && !localStorage.getItem("comet_local_leads")) {
-          try {
-            localStorage.setItem("comet_local_leads", JSON.stringify(DEFAULT_SYSTEM_LEADS));
-          } catch {}
-        }
+      // Limpeza de segurança no localStorage de leads fictícios
+      if (typeof window !== "undefined") {
+        try {
+          const rawLoc = localStorage.getItem("comet_local_leads");
+          if (rawLoc) {
+            const parsed = JSON.parse(rawLoc);
+            if (Array.isArray(parsed)) {
+              const cleaned = parsed.filter(l => !isFictitiousLead(l));
+              if (cleaned.length !== parsed.length) {
+                localStorage.setItem("comet_local_leads", JSON.stringify(cleaned));
+              }
+            }
+          }
+        } catch {}
       }
+
+      const allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads, ...crmDataLeads, ...driveLeads].filter(l => !isFictitiousLead(l));
 
       function mergeSourcesStr(...sources: (string | undefined)[]): string {
         const set = new Set<string>();
