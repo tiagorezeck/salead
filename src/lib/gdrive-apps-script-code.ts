@@ -113,14 +113,7 @@ function doGet(e) {
       if (lpSheet) {
         var lpValues = lpSheet.getDataRange().getValues();
         if (lpValues && lpValues.length > 1) {
-          if (!Array.isArray(dbData.landingPages)) dbData.landingPages = [];
-          var existingLpKeys = {};
-          dbData.landingPages.forEach(function(item) {
-            if (item && item.id) existingLpKeys[String(item.id)] = true;
-            if (item && item.slug) existingLpKeys[String(item.slug)] = true;
-            if (item && (item.title || item.name)) existingLpKeys[String(item.title || item.name).toLowerCase()] = true;
-          });
-
+          var sheetLps = [];
           for (var rowIdx = 1; rowIdx < lpValues.length; rowIdx++) {
             var r = lpValues[rowIdx];
             if (!r || (!r[0] && !r[1])) continue;
@@ -128,28 +121,23 @@ function doGet(e) {
             var rTitle = String(r[1] || "");
             var rSlug = String(r[2] || "");
 
-            var alreadyInJson = Boolean(
-              (rId && existingLpKeys[rId]) ||
-              (rSlug && existingLpKeys[rSlug]) ||
-              (rTitle && existingLpKeys[rTitle.toLowerCase()])
-            );
-
-            if (!alreadyInJson) {
-              dbData.landingPages.push({
-                id: rId || ("lp_sheet_" + rowIdx),
-                title: rTitle || "Landing Page",
-                name: rTitle || "Landing Page",
-                slug: rSlug || rTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-                status: String(r[3] || "Ativa"),
-                visits: Number(r[4] || 0),
-                leads: Number(r[5] || 0),
-                conv: Number(String(r[6] || "0").replace("%", "")) || 0,
-                type: String(r[7] || "COMET CRO"),
-                sector: String(r[8] || "Geral"),
-                created_at: String(r[9] || ""),
-                updated_at: String(r[10] || "")
-              });
-            }
+            sheetLps.push({
+              id: rId || ("lp_sheet_" + rowIdx),
+              title: rTitle || "Landing Page",
+              name: rTitle || "Landing Page",
+              slug: rSlug || rTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+              status: String(r[3] || "Ativa"),
+              visits: Number(r[4] || 0),
+              leads: Number(r[5] || 0),
+              conv: Number(String(r[6] || "0").replace("%", "")) || 0,
+              type: String(r[7] || "COMET CRO"),
+              sector: String(r[8] || "Geral"),
+              created_at: String(r[9] || ""),
+              updated_at: String(r[10] || "")
+            });
+          }
+          if (sheetLps.length > 0) {
+            dbData.landingPages = sheetLps;
           }
         }
       }
@@ -691,7 +679,33 @@ function doPost(e) {
 
       specificSheet.appendRow(answerRow);
 
-      // 3. Atualiza contador no JSON raiz
+      // 3. Grava também o participante na aba principal de Leads do Google Sheets
+      if (sr.leadName || sr.leadWhatsapp || sr.leadEmail) {
+        try {
+          var leadsSheet = getOrCreateSheet(spreadsheet, "Leads", [
+            "ID", "Nome", "Empresa", "Email", "WhatsApp", "Valor", "Fase / Etapa", "Responsável", "Temperatura", "Origem", "Score", "Tags", "Data Cadastro", "Última Interação"
+          ]);
+          var srvLeadId = "lead_srv_" + now.getTime() + "_" + Math.random().toString(36).substring(2, 6);
+          leadsSheet.appendRow([
+            srvLeadId,
+            sr.leadName || "",
+            sr.leadCompany || "",
+            sr.leadEmail || "",
+            sr.leadWhatsapp || "",
+            sr.temperature === "Quente" ? 8500 : 3500,
+            sr.temperature === "Quente" ? "Oportunidade" : "Leads",
+            "",
+            sr.temperature || "Morno",
+            "Pesquisa: " + surveyName,
+            sr.score || 0,
+            "Pesquisa, " + surveyName,
+            dateFormatted,
+            "Respondeu Pesquisa: " + surveyName + " (Score: " + (sr.score || 0) + ")"
+          ]);
+        } catch (eLd) {}
+      }
+
+      // 4. Atualiza contador no JSON raiz
       incrementSurveyCompletion(folder, surveyId);
 
       return jsonResponse({

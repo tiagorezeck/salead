@@ -28,6 +28,8 @@ import {
   SYSTEM_MODULES,
   type SystemModule
 } from "@/data/mock";
+import { calculateMinQualification, parseLegacyMinScore } from "@/lib/min-qualification";
+import { calculateLeadScore, calculateLeadTemperature } from "@/lib/scoring";
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { normalizePhone, validateEmail, parseCurrencyBR } from "@/lib/validators";
 import { 
@@ -978,6 +980,71 @@ export function useData() {
       let dbLeads: Lead[] = [];
 
       // 1b. Server in-memory submissions (capturados via /api/submit-lead ou /api/leads)
+      const parseLeadMinAndScore = (item: any) => {
+        let minQual = item.minQualification;
+        if (!minQual) {
+          const rawMin = item.minScore || item.MinScore || item["Matriz MIN"] || item["MIN"] || item["Score MIN"] || "";
+          if (typeof rawMin === "string") {
+            const lower = rawMin.toLowerCase().trim();
+            if (lower.includes("descarte") || lower.includes("nenhum") || lower === "0/3" || lower === "0" || lower === "desqualificado") {
+              minQual = calculateMinQualification(0, 0, 0);
+            } else {
+              minQual = parseLegacyMinScore(rawMin);
+            }
+          } else if (item.M !== undefined || item.m !== undefined || item.I !== undefined || item.i !== undefined || item.N !== undefined || item.n !== undefined) {
+            minQual = calculateMinQualification(
+              item.M ?? item.m,
+              item.I ?? item.i,
+              item.N ?? item.n
+            );
+          }
+        }
+
+        const isDescarte = minQual?.classification === "DESCARTE" || item.classification === "Lead Desqualificado" || item.minScore === "Descarte" || item.minScore === "Nenhum";
+
+        let minScore = item.minScore || item["Matriz MIN"] || item["MIN"] || (
+          minQual?.classification === "QUENTE" ? "MIN" : 
+          minQual?.classification === "MORNO" ? "MI" : 
+          minQual?.classification === "FRIO" ? "M" : 
+          "Nenhum"
+        );
+        if (isDescarte && minScore !== "Descarte") {
+          minScore = "Descarte";
+        }
+
+        let temperature: any = item.temperature || item.Temperatura;
+        if (isDescarte) {
+          temperature = "Frio";
+        } else if (!temperature) {
+          temperature = minQual?.classification === "QUENTE" ? "Quente" : minQual?.classification === "MORNO" ? "Morno" : "Frio";
+        }
+
+        let finalScore: number;
+        if (isDescarte) {
+          const rawScore = Number(item.score ?? item.Score);
+          finalScore = (!isNaN(rawScore) && rawScore <= 25 && rawScore >= 0) ? rawScore : (minQual?.total === 0 ? 0 : 15);
+        } else {
+          const rawScore = Number(item.score ?? item.Score);
+          if (!isNaN(rawScore) && rawScore > 0 && rawScore !== 85) {
+            finalScore = rawScore;
+          } else {
+            finalScore = calculateLeadScore({
+              ...item,
+              minScore,
+              minQualification: minQual,
+              temperature
+            });
+          }
+        }
+
+        return {
+          minQual,
+          minScore,
+          temperature,
+          score: finalScore
+        };
+      };
+
       let apiLeads: Lead[] = [];
       try {
         const res = await fetch("/api/leads");
@@ -985,41 +1052,44 @@ export function useData() {
           const resJson = await res.json();
           const rawList = Array.isArray(resJson) ? resJson : (Array.isArray(resJson?.leads) ? resJson.leads : []);
           if (rawList.length > 0) {
-            apiLeads = rawList.map((item: any) => ({
-              id: item.id || `api_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-              name: item.name || "Lead Capturado",
-              company: item.company || (item.name ? `${item.name} (LP: ${item.pageTitle || item.pageId || item.landingPage || "Landing Page"})` : "Empresa"),
-              email: item.email || "",
-              whatsapp: item.whatsapp || "",
-              value: Number(item.value) || 0,
-              stage: item.stage || "Leads",
-              owner: item.owner || "Inbound LP",
-              source: item.source || (item.pageTitle || item.pageId ? `LP: ${item.pageTitle || item.pageId}` : "Inbound"),
-              classification: item.classification || "Lead",
-              temperature: item.temperature || "Quente",
-              type: item.type || "Inbound",
-              strategy: item.strategy || "CRO Auto",
-              decisionRole: item.decisionRole || "Decisor",
-              minScore: item.minScore || "Aprovado",
-              minQualification: item.minQualification,
-              landingPage: item.landingPage || item.pageTitle || item.pageId,
-              tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
-              score: Number(item.score) || 85,
-              sla: item.sla || "ok",
-              lastInteraction: item.lastInteraction || "Formulário enviado na LP",
-              createdAt: item.submittedAt || item.createdAt || new Date().toISOString(),
-              activities: Array.isArray(item.activities) ? item.activities : [],
-              completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
-              status: item.status || "Ativo",
-              personType: item.personType || "PJ",
-              role: item.role || "",
-              revenue: item.revenue || "",
-              capag: item.capag || "",
-              lpVisits: Number(item.lpVisits) || 1,
-              isCustomer: Boolean(item.isCustomer || item.classification === "Cliente" || item.stage === "Ganho"),
-              isRecurring: Boolean(item.isRecurring || item.type === "Recorrente"),
-              metadata: item.metadata || item
-            }));
+            apiLeads = rawList.map((item: any) => {
+              const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
+              return {
+                id: item.id || `api_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                name: item.name || "Lead Capturado",
+                company: item.company || (item.name ? `${item.name} (LP: ${item.pageTitle || item.pageId || item.landingPage || "Landing Page"})` : "Empresa"),
+                email: item.email || "",
+                whatsapp: item.whatsapp || "",
+                value: Number(item.value) || 0,
+                stage: item.stage || "Leads",
+                owner: item.owner || "Inbound LP",
+                source: item.source || (item.pageTitle || item.pageId ? `LP: ${item.pageTitle || item.pageId}` : "Inbound"),
+                classification: item.classification || "Lead",
+                temperature,
+                type: item.type || "Inbound",
+                strategy: item.strategy || "CRO Auto",
+                decisionRole: item.decisionRole || "Decisor",
+                minScore,
+                minQualification: minQual,
+                landingPage: item.landingPage || item.pageTitle || item.pageId,
+                tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
+                score,
+                sla: item.sla || "ok",
+                lastInteraction: item.lastInteraction || "Formulário enviado na LP",
+                createdAt: item.submittedAt || item.createdAt || new Date().toISOString(),
+                activities: Array.isArray(item.activities) ? item.activities : [],
+                completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
+                status: item.status || "Ativo",
+                personType: item.personType || "PJ",
+                role: item.role || "",
+                revenue: item.revenue || "",
+                capag: item.capag || "",
+                lpVisits: Number(item.lpVisits) || 1,
+                isCustomer: Boolean(item.isCustomer || item.classification === "Cliente" || item.stage === "Ganho"),
+                isRecurring: Boolean(item.isRecurring || item.type === "Recorrente"),
+                metadata: item.metadata || item
+              };
+            });
           }
         }
       } catch {}
@@ -1043,6 +1113,7 @@ export function useData() {
               const whatsapp = raw.whatsapp || item.whatsapp || "";
               const pageTitle = item.pageTitle || item.landingPage || raw.landingPage || "Landing Page";
               const source = item.source || raw.source || "Landing Page";
+              const { minQual, minScore, temperature, score } = parseLeadMinAndScore({ ...item, ...raw });
 
               return {
                 id: item.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1055,15 +1126,15 @@ export function useData() {
                 owner: item.owner || "Inbound LP",
                 source: item.source || `LP: ${pageTitle} [${source}]`,
                 classification: item.classification || "Lead",
-                temperature: item.temperature || "Quente",
+                temperature,
                 type: item.type || "Inbound",
                 strategy: item.strategy || "CRO Auto",
                 decisionRole: item.decisionRole || "Decisor",
-                minScore: item.minScore || "Aprovado",
-                minQualification: item.minQualification || raw.minQualification,
+                minScore,
+                minQualification: minQual,
                 landingPage: pageTitle,
                 tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
-                score: Number(item.score) || 80,
+                score,
                 sla: item.sla || "ok",
                 lastInteraction: item.lastInteraction || "Capturado via LP",
                 createdAt: item.capturedAt || item.createdAt || item.submittedAt || new Date().toISOString(),
@@ -1091,7 +1162,18 @@ export function useData() {
           const rawLoc = localStorage.getItem("comet_local_leads");
           if (rawLoc) {
             const parsed = JSON.parse(rawLoc);
-            if (Array.isArray(parsed)) localLeads = parsed;
+            if (Array.isArray(parsed)) {
+              localLeads = parsed.map((item: any) => {
+                const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
+                return {
+                  ...item,
+                  minQualification: minQual,
+                  minScore,
+                  temperature,
+                  score
+                };
+              });
+            }
           }
         } catch {}
       }
@@ -1104,7 +1186,16 @@ export function useData() {
           if (rawCrm) {
             const parsed = JSON.parse(rawCrm);
             if (Array.isArray(parsed.leads)) {
-              crmDataLeads = parsed.leads;
+              crmDataLeads = parsed.leads.map((item: any) => {
+                const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
+                return {
+                  ...item,
+                  minQualification: minQual,
+                  minScore,
+                  temperature,
+                  score
+                };
+              });
             }
           }
         } catch {}
@@ -1131,6 +1222,7 @@ export function useData() {
               const pageTitle = item.landingPageTitle || item["Landing Page (Título)"] || item.landingPage || item.landing_page || item.pageTitle || "Landing Page";
               const pageId = item.landingPageId || item["ID Landing Page"] || item.pageId || item.landing_page_id || "";
               const source = item.source || item.Origem || `LP: ${pageTitle}`;
+              const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
 
               return {
                 id: item.id || item["ID Lead"] || item["ID"] || `drive_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1142,16 +1234,17 @@ export function useData() {
                 stage: item.stage || item["Fase / Etapa"] || "Leads",
                 owner: item.owner || item.Responsável || "Inbound LP",
                 source,
-                classification: item.classification || "Lead",
-                temperature: item.temperature || item.Temperatura || "Quente",
+                classification: item.classification || item.Classificação || "Lead",
+                temperature,
                 type: "Inbound",
                 strategy: "CRO Auto",
                 decisionRole: "Decisor",
-                minScore: "Aprovado",
+                minScore,
+                minQualification: minQual,
                 landingPage: pageTitle,
                 landingPageId: pageId,
                 tags: Array.isArray(item.tags) ? item.tags : (typeof item.Tags === "string" ? item.Tags.split(",") : ["inbound", "gdrive"]),
-                score: Number(item.score || item.Score) || 85,
+                score,
                 sla: "ok",
                 lastInteraction: item.lastInteraction || item["Última Interação"] || "Sincronizado via Google Sheets",
                 createdAt: item.createdAt || item.created_at || item["Data Cadastro"] || item["Data / Hora"] || new Date().toISOString(),
@@ -1638,8 +1731,14 @@ export function useData() {
 
       const mergedMap = new Map<string, LandingPage>();
 
+      // Se o Google Drive / Sheets já possui Landing Pages oficiais cadastradas,
+      // evitamos reintroduzir páginas de template/demo geradas no servidor
+      const filteredServerLps = (driveLps.length > 0)
+        ? serverLps.filter(s => driveLps.some(d => d.id === s.id || (d.slug && s.slug && d.slug.toLowerCase() === s.slug.toLowerCase())) || !s.id.startsWith("lp_adaptive_"))
+        : serverLps;
+
       // Insere primeiro dados locais/drive, e por último o servidor central
-      for (const lp of [...driveLps, ...localLps, ...serverLps]) {
+      for (const lp of [...driveLps, ...localLps, ...filteredServerLps]) {
         if (!lp || isDeleted(lp)) continue;
         const key = getLpKey(lp);
         if (!mergedMap.has(key)) {

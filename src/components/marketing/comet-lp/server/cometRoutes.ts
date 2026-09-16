@@ -382,6 +382,184 @@ function writeStoredSurveyResponses(resps: any[]) {
   scheduleBackgroundWrite(RESPONSES_DATA_FILE, resps);
 }
 
+// ============================================================================
+// GOOGLE SHEETS & DRIVE SERVER-SIDE BIDIRECTIONAL SYNC
+// ============================================================================
+export function getDriveWebAppUrlServer(): string {
+  try {
+    const driveCfgPath = path.join(process.cwd(), "drive_config.json");
+    if (fs.existsSync(driveCfgPath)) {
+      const raw = JSON.parse(fs.readFileSync(driveCfgPath, "utf-8"));
+      return raw.webappUrl || "";
+    }
+  } catch {}
+  return "";
+}
+
+export function syncDriveDataToDisk(driveData: any): { leadsCount: number; pagesCount: number } {
+  if (!driveData || typeof driveData !== "object") return { leadsCount: 0, pagesCount: 0 };
+
+  const rawLeads = Array.isArray(driveData.leads) ? driveData.leads : (Array.isArray(driveData.data?.leads) ? driveData.data.leads : []);
+  const rawLpLeads = Array.isArray(driveData.leads_landing_pages) ? driveData.leads_landing_pages : (Array.isArray(driveData.data?.leads_landing_pages) ? driveData.data.leads_landing_pages : []);
+  const rawLps = Array.isArray(driveData.landingPages) ? driveData.landingPages : (Array.isArray(driveData.data?.landingPages) ? driveData.data.landingPages : (Array.isArray(driveData.landing_pages) ? driveData.landing_pages : []));
+
+  let updatedLeadsCount = 0;
+  if (rawLeads.length > 0 || rawLpLeads.length > 0) {
+    const currentLeads = readStoredLeads();
+    const leadMap = new Map<string, any>();
+    
+    currentLeads.forEach(l => {
+      if (l.id) leadMap.set(String(l.id), l);
+    });
+
+    [...rawLeads, ...rawLpLeads].forEach(sl => {
+      if (!sl) return;
+      const id = String(sl.id || sl["ID Lead"] || sl.ID || `lead_sheet_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+      const existing = leadMap.get(id);
+      const name = sl.name || sl.Nome || sl["Nome"] || existing?.name || "Lead Planilha";
+      const email = sl.email || sl.Email || sl["Email"] || existing?.email || "";
+      const phone = sl.whatsapp || sl.WhatsApp || sl["WhatsApp"] || existing?.whatsapp || "";
+      const pageTitle = sl.landingPageTitle || sl["Landing Page (Título)"] || sl.pageTitle || sl.landingPage || existing?.pageTitle || "";
+      const score = Number(sl.score || sl.Score || sl["Score"]) || (existing?.score ?? 85);
+      const temp = sl.temperature || sl.Temperatura || sl["Temperatura"] || existing?.temperature || "Quente";
+
+      const mergedLead = {
+        ...(existing || {}),
+        ...sl,
+        id,
+        name,
+        email,
+        whatsapp: phone,
+        pageTitle: pageTitle || existing?.pageTitle,
+        company: sl.company || sl.Empresa || sl["Empresa"] || existing?.company || (name ? `${name} (Planilha)` : "Empresa"),
+        score,
+        temperature: temp,
+        stage: sl.stage || sl["Fase / Etapa"] || existing?.stage || "Leads",
+        source: sl.source || sl.Origem || sl["Origem"] || existing?.source || "Google Sheets",
+        createdAt: sl.createdAt || sl["Data Cadastro"] || sl["Data / Hora"] || existing?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      leadMap.set(id, mergedLead);
+    });
+
+    const mergedList = Array.from(leadMap.values());
+    writeStoredLeads(mergedList);
+    updatedLeadsCount = mergedList.length;
+  }
+
+  let updatedPagesCount = 0;
+  if (rawLps.length > 0) {
+    const currentPages = readStoredLandingPages();
+    const pageMap = new Map<string, any>();
+    currentPages.forEach(p => {
+      if (p.id) pageMap.set(String(p.id), p);
+      if (p.slug) pageMap.set(`slug:${p.slug}`, p);
+    });
+
+    rawLps.forEach(sp => {
+      if (!sp) return;
+      const id = String(sp.id || sp.ID || `lp_${Date.now()}`);
+      const slug = String(sp.slug || sp.Slug || "");
+      const existing = pageMap.get(id) || (slug ? pageMap.get(`slug:${slug}`) : null);
+
+      const mergedPage = {
+        ...(existing || {}),
+        ...sp,
+        id: existing?.id || id,
+        name: sp.name || sp.title || sp["Título"] || existing?.name || "Landing Page",
+        title: sp.title || sp.name || sp["Título"] || existing?.title || "Landing Page",
+        slug: slug || existing?.slug || "",
+        visits: Number(sp.visits || sp["Visitas"]) || existing?.visits || 0,
+        leads: Number(sp.leads || sp["Leads"]) || existing?.leads || 0,
+        conv: Number(sp.conv || sp["Conversão %"]) || existing?.conv || 0,
+        status: sp.status || sp["Status"] || existing?.status || "Ativa",
+        updated_at: new Date().toISOString(),
+      };
+      pageMap.set(mergedPage.id, mergedPage);
+      if (mergedPage.slug) pageMap.set(`slug:${mergedPage.slug}`, mergedPage);
+    });
+
+    const uniquePages = Array.from(new Set(Array.from(pageMap.values())));
+    writeStoredLandingPages(uniquePages);
+    updatedPagesCount = uniquePages.length;
+  }
+
+  return { leadsCount: updatedLeadsCount, pagesCount: updatedPagesCount };
+}
+
+export async function forwardLeadToGoogleSheetsServer(lead: any): Promise<boolean> {
+  const webappUrl = getDriveWebAppUrlServer();
+  if (!webappUrl) return false;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    const payload = {
+      action: "SUBMIT_LP_LEAD",
+      lead: {
+        id: lead.id,
+        landingPageId: lead.pageId || lead.landingPageId || "",
+        landingPageTitle: lead.pageTitle || lead.landingPage || "Landing Page",
+        name: lead.name || "",
+        whatsapp: lead.whatsapp || "",
+        email: lead.email || "",
+        company: lead.company || "",
+        source: lead.source || "Landing Page",
+        answers: lead.quizAnswers || lead.metadata?.answers || {},
+        utm: lead.utms || {},
+        score: lead.score || 85,
+        minScore: lead.minScore || "",
+        minQualification: lead.minQualification || null,
+        temperature: lead.temperature || "Quente",
+      },
+      isTest: Boolean(lead.isTest)
+    };
+
+    const res = await fetch(webappUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch (err) {
+    console.warn("[Server Drive Sync] Aviso ao enviar lead para Google Sheets:", err);
+    return false;
+  }
+}
+
+export async function forwardSurveyResponseToGoogleSheetsServer(responsePayload: any): Promise<boolean> {
+  const webappUrl = getDriveWebAppUrlServer();
+  if (!webappUrl) return false;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    const payload = {
+      action: "SUBMIT_SURVEY_RESPONSE",
+      response: responsePayload,
+      isTest: Boolean(responsePayload.isTest)
+    };
+
+    const res = await fetch(webappUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch (err) {
+    console.warn("[Server Drive Sync] Aviso ao enviar pesquisa para Google Sheets:", err);
+    return false;
+  }
+}
+
 // In-memory preview pages store for cross-device & cross-tab real-time sync
 const previewPagesStore = new Map<string, any>();
 let lastSavedPreviewPage: any = null;
@@ -463,17 +641,26 @@ async function saveLeadLocally(leadData: {
   utms: any;
   source?: string;
   isTest?: boolean;
+  score?: number;
+  minScore?: string;
+  minQualification?: any;
+  temperature?: string;
 }) {
   try {
-    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, source, isTest } = leadData;
+    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, source, isTest, minScore, minQualification, temperature } = leadData;
     const cleanName = (name || "Lead Capturado").trim();
     const cleanWhatsapp = normalizePhoneServer(whatsapp);
     const cleanEmail = (email || "").trim().toLowerCase();
     const effectiveSource = source || utms?.utm_source || utms?.src || "direct";
+    const parsedScore = leadData.score !== undefined && !isNaN(Number(leadData.score)) ? Number(leadData.score) : 85;
+    const effectiveTemp = temperature || (minQualification?.classification === "QUENTE" ? "Quente" : minQualification?.classification === "DESCARTE" ? "Frio" : "Morno");
 
     const tags = [effectiveSource, utms?.utm_campaign || "inbound", "comet-lp"].filter(Boolean);
     if (isTest) {
       tags.push("leadtest", "modo-teste");
+    }
+    if (minScore) {
+      tags.push(`min-${minScore.toLowerCase()}`);
     }
 
     const leadRecord = {
@@ -482,9 +669,11 @@ async function saveLeadLocally(leadData: {
       whatsapp: cleanWhatsapp,
       company: `${cleanName} (LP: ${pageTitle || pageId || "Landing Page"})`,
       source: `LP: ${pageTitle || pageId} [${effectiveSource}]`,
-      stage: "Leads",
-      classification: isTest ? "Lead Teste" : "Lead",
-      temperature: "Quente",
+      stage: effectiveTemp === "Quente" ? "Oportunidade" : "Leads",
+      classification: isTest ? "Lead Teste" : (effectiveTemp === "Quente" ? "Lead Qualificado" : "Lead"),
+      temperature: effectiveTemp,
+      minScore,
+      minQualification,
       tags,
       metadata: {
         capturedVia: "COMET Public Landing Page Engine (Express)",
@@ -494,6 +683,9 @@ async function saveLeadLocally(leadData: {
         utms: utms || {},
         answers: quizAnswers || {},
         isTest: Boolean(isTest),
+        minScore,
+        minQualification,
+        score: parsedScore,
         extra: {},
         capturedAt: new Date().toISOString(),
       },
@@ -501,10 +693,30 @@ async function saveLeadLocally(leadData: {
 
     // Garante que o lead esteja salvo na base de leads persistente local do servidor
     const storedLeads = readStoredLeads();
-    const alreadyPresent = storedLeads.some(
-      (l) => (cleanWhatsapp && l.whatsapp === cleanWhatsapp) || (cleanEmail && l.email === cleanEmail)
+    const existingIndex = storedLeads.findIndex(
+      (l) => (cleanWhatsapp && l.whatsapp === cleanWhatsapp) || (cleanEmail && l.email && l.email.toLowerCase() === cleanEmail)
     );
-    if (!alreadyPresent) {
+    if (existingIndex !== -1) {
+      const prev = storedLeads[existingIndex];
+      storedLeads[existingIndex] = {
+        ...prev,
+        score: parsedScore,
+        minScore: minScore || prev.minScore,
+        minQualification: minQualification || prev.minQualification,
+        temperature: effectiveTemp,
+        stage: effectiveTemp === "Quente" ? "Oportunidade" : prev.stage,
+        classification: isTest ? "Lead Teste" : (effectiveTemp === "Quente" ? "Lead Qualificado" : prev.classification),
+        quizAnswers: { ...(prev.quizAnswers || {}), ...(quizAnswers || {}) },
+        tags: Array.from(new Set([...(prev.tags || []), ...tags])),
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          ...(prev.metadata || {}),
+          ...leadRecord.metadata,
+          answers: { ...(prev.metadata?.answers || {}), ...(quizAnswers || {}) }
+        }
+      };
+      writeStoredLeads(storedLeads);
+    } else {
       const fullLeadItem = {
         id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         pageId,
@@ -516,12 +728,14 @@ async function saveLeadLocally(leadData: {
         quizAnswers: quizAnswers || {},
         utms: utms || {},
         source: effectiveSource,
-        stage: "Leads",
-        classification: isTest ? "Lead Teste" : "Lead",
-        temperature: "Quente",
+        stage: effectiveTemp === "Quente" ? "Oportunidade" : "Leads",
+        classification: isTest ? "Lead Teste" : (effectiveTemp === "Quente" ? "Lead Qualificado" : "Lead"),
+        temperature: effectiveTemp,
+        minScore,
+        minQualification,
         type: "Inbound",
         tags,
-        score: 85,
+        score: parsedScore,
         submittedAt: new Date().toISOString(),
         webhookStatus: "pending",
         isTest: Boolean(isTest),
@@ -569,6 +783,14 @@ async function saveLeadLocally(leadData: {
       }
     } catch (e) {
       console.warn("Failed to update landing page lead count:", e);
+    }
+
+    // Encaminha lead para o Google Sheets em background
+    const latestSaved = storedLeads.find((l) => (cleanEmail && l.email === cleanEmail) || (cleanWhatsapp && l.whatsapp === cleanWhatsapp));
+    if (latestSaved) {
+      setImmediate(() => {
+        forwardLeadToGoogleSheetsServer(latestSaved);
+      });
     }
   } catch (err) {
     console.error("Failed to run saveLeadLocally:", err);
@@ -1050,7 +1272,7 @@ cometLpRouter.post("/api/webhook/submit-lead", async (req, res) => {
 // Alias POST endpoint for /api/submit-lead
 cometLpRouter.post("/api/submit-lead", async (req, res) => {
   try {
-    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, webhookUrl, source, company } = req.body || {};
+    const { pageId, pageTitle, name, whatsapp, email, quizAnswers, utms, webhookUrl, source, company, score, minScore, minQualification, temperature } = req.body || {};
 
     const pageIdStr = pageId || "unknown";
     const diskPages = readStoredLandingPages();
@@ -1065,6 +1287,9 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
     const effectivePageTitle = pageTitle || (lp && (lp.name || lp.title)) || "Landing Page";
     const effectiveSource = source || utms?.utm_source || "Landing Page";
 
+    const parsedScore = score !== undefined && !isNaN(Number(score)) ? Number(score) : 85;
+    const effectiveTemp = temperature || (minQualification?.classification === "QUENTE" ? "Quente" : minQualification?.classification === "DESCARTE" ? "Frio" : "Morno");
+
     const lead: any = {
       id: leadId,
       pageId: pageIdStr,
@@ -1078,18 +1303,21 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       quizAnswers: quizAnswers || {},
       utms: utms || {},
       source: effectiveSource,
-      stage: "Leads",
-      classification: isTestMode ? "Lead Teste" : "Lead",
-      temperature: "Quente",
+      stage: effectiveTemp === "Quente" ? "Oportunidade" : "Leads",
+      classification: isTestMode ? "Lead Teste" : (effectiveTemp === "Quente" ? "Lead Qualificado" : "Lead"),
+      temperature: effectiveTemp,
+      minScore,
+      minQualification,
       type: "Inbound",
       tags: [
         effectiveSource,
         utms?.utm_campaign ? `campanha:${utms.utm_campaign}` : null,
         "comet-lp",
+        minScore ? `min-${minScore.toLowerCase()}` : null,
         isTestMode ? "leadtest" : null,
         isTestMode ? "modo-teste" : null,
       ].filter(Boolean),
-      score: Number(req.body.score) || 85,
+      score: parsedScore,
       submittedAt: nowIso,
       createdAt: nowIso,
       webhookStatus: "pending",
@@ -1098,6 +1326,10 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
         ...req.body,
         pageId: pageIdStr,
         pageTitle: effectivePageTitle,
+        score: parsedScore,
+        minScore,
+        minQualification,
+        temperature: effectiveTemp,
         submittedAt: nowIso,
         isTest: isTestMode,
       },
@@ -1105,15 +1337,39 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
 
     // 1. Grava instantaneamente no arquivo de disco local e memória
     const currentLeads = readStoredLeads();
-    currentLeads.unshift(lead);
-    if (currentLeads.length > 500) {
-      currentLeads.pop();
+    const existingIndex = currentLeads.findIndex(
+      (l) => (cleanPhone && l.whatsapp === cleanPhone) || (cleanEmail && l.email && l.email.toLowerCase() === cleanEmail)
+    );
+    if (existingIndex !== -1) {
+      currentLeads[existingIndex] = {
+        ...currentLeads[existingIndex],
+        ...lead,
+        id: currentLeads[existingIndex].id,
+        createdAt: currentLeads[existingIndex].createdAt || nowIso,
+        updatedAt: nowIso,
+      };
+    } else {
+      currentLeads.unshift(lead);
+      if (currentLeads.length > 500) {
+        currentLeads.pop();
+      }
     }
     writeStoredLeads(currentLeads);
 
-    leadSubmissions.unshift(lead);
-    if (leadSubmissions.length > 500) {
-      leadSubmissions.pop();
+    const submissionIndex = leadSubmissions.findIndex(
+      (l) => (cleanPhone && l.whatsapp === cleanPhone) || (cleanEmail && l.email && l.email.toLowerCase() === cleanEmail)
+    );
+    if (submissionIndex !== -1) {
+      leadSubmissions[submissionIndex] = {
+        ...leadSubmissions[submissionIndex],
+        ...lead,
+        id: leadSubmissions[submissionIndex].id,
+      };
+    } else {
+      leadSubmissions.unshift(lead);
+      if (leadSubmissions.length > 500) {
+        leadSubmissions.pop();
+      }
     }
 
     // 2. Incrementa métricas da Landing Page no disco instantaneamente
@@ -1146,6 +1402,22 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
           previewPagesStore.set(lp.id, lp);
           if (lp.slug) previewPagesStore.set(lp.slug, lp);
         }
+      } else if (pageIdStr && pageIdStr !== "unknown" && pageIdStr !== "survey_page") {
+        const newEntry = {
+          id: pageIdStr,
+          title: effectivePageTitle,
+          name: effectivePageTitle,
+          visits: 1,
+          leads: 1,
+          conv: 100,
+          status: "Ativa",
+          type: "COMET CRO",
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+        diskPages.push(newEntry);
+        writeStoredLandingPages(diskPages);
+        previewPagesStore.set(pageIdStr, newEntry);
       }
     } catch (lpErr) {
       console.warn("Express disk lead increment notice:", lpErr);
@@ -2395,16 +2667,73 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
     }
 
     // 5. Responde instantaneamente (< 2ms)
-    return res.json({
+    res.json({
       success: true,
       responseId,
       response: responseRecord,
       leadId: leadRecord?.id || null,
       message: "Resposta da pesquisa e lead processados com sucesso!",
     });
+
+    // 6. Sincroniza em background com o Google Sheets se configurado
+    setImmediate(() => {
+      forwardSurveyResponseToGoogleSheetsServer(responseRecord);
+      if (leadRecord) {
+        forwardLeadToGoogleSheetsServer(leadRecord);
+      }
+    });
   } catch (err: any) {
     console.error("Error submitting survey response:", err);
     return res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// ============================================================================
+// GOOGLE SHEETS & DRIVE SERVER-SIDE SYNC ENDPOINT
+// ============================================================================
+cometLpRouter.all("/api/drive/sync", async (req, res) => {
+  try {
+    const webappUrl = getDriveWebAppUrlServer();
+    const clientData = req.body?.data || req.body;
+
+    // Se o cliente enviou um payload para sincronizar
+    if (clientData && (Array.isArray(clientData.leads) || Array.isArray(clientData.landingPages))) {
+      const counts = syncDriveDataToDisk(clientData);
+      return res.json({ success: true, synced: true, source: "client-push", ...counts });
+    }
+
+    if (!webappUrl) {
+      return res.json({ success: true, synced: false, message: "Nenhuma URL de Google Apps Script configurada no servidor." });
+    }
+
+    // Leitura remota ativa do Google Sheets
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    const fetchRes = await fetch(webappUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "FORCE_READ_SHEETS" }),
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    clearTimeout(timeout);
+
+    const raw = await fetchRes.text();
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {}
+
+    if (parsed) {
+      const content = parsed.data || parsed.content || parsed;
+      const counts = syncDriveDataToDisk(content);
+      return res.json({ success: true, synced: true, source: "sheets-pull", ...counts, data: content });
+    }
+
+    return res.json({ success: true, synced: false, message: "Resposta não pôde ser analisada como JSON." });
+  } catch (err: any) {
+    return res.json({ success: false, error: err.message });
   }
 });
 

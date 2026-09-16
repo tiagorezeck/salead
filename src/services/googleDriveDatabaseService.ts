@@ -560,23 +560,23 @@ export const submitLpLeadToDrive = async (leadData: {
   if (!cleanUrl) return null;
 
   try {
-    const controller = new AbortController();
-    const tId = setTimeout(() => controller.abort(), 2500);
-    const res = await fetch(cleanUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'SUBMIT_LP_LEAD',
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'SUBMIT_LP_LEAD',
+      lead: {
+        ...leadData,
+        isTest: leadData.isTest || false,
+      },
+      data: {
         lead: {
           ...leadData,
-          isTest: leadData.isTest || false
+          isTest: leadData.isTest || false,
         },
         isTest: leadData.isTest || false,
-        timestamp: new Date().toISOString()
-      }),
-      redirect: 'follow',
-      signal: controller.signal
-    }).then(r => r.json()).finally(() => clearTimeout(tId));
+        timestamp: new Date().toISOString(),
+      },
+      isTest: leadData.isTest || false,
+    });
     return res;
   } catch (err) {
     console.warn("Aviso ao enviar lead para Google Drive:", err);
@@ -605,16 +605,15 @@ export const submitSurveyResponseToDrive = async (surveyData: {
   if (!cleanUrl) return null;
 
   try {
-    const res = await fetch(cleanUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'SUBMIT_SURVEY_RESPONSE',
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'SUBMIT_SURVEY_RESPONSE',
+      surveyResponse: surveyData,
+      data: {
         surveyResponse: surveyData,
-        timestamp: new Date().toISOString()
-      }),
-      redirect: 'follow'
-    }).then(r => r.json());
+        timestamp: new Date().toISOString(),
+      },
+    });
     return res;
   } catch (err) {
     console.warn("Aviso ao enviar resposta de pesquisa para Google Drive:", err);

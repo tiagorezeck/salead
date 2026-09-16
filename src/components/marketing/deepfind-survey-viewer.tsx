@@ -11,7 +11,7 @@ import { type Survey, type SurveyQuestion } from "@/hooks/use-data";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AutomationEngine } from "@/lib/automation-engine";
-import { submitSurveyResponseToDrive } from "@/services/googleDriveDatabaseService";
+import { submitSurveyResponseToDrive, submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 
 interface DeepFindSurveyViewerProps {
   survey: Partial<Survey>;
@@ -21,6 +21,14 @@ interface DeepFindSurveyViewerProps {
     email?: string;
     whatsapp?: string;
     company?: string;
+    landingPageId?: string;
+    landingPageTitle?: string;
+    pageId?: string;
+    pageTitle?: string;
+    landingPage?: string;
+    source?: string;
+    utm?: any;
+    [key: string]: any;
   };
   onComplete?: (answers: Record<string, any>, calculatedScore?: number, leadData?: any) => void;
   isStandalone?: boolean;
@@ -236,13 +244,18 @@ export function DeepFindSurveyViewer({
       let targetLead: any = null;
       const companyFinal = contactInfo.hasCompany === "yes" ? (contactInfo.company || "Empresa Respondente") : "Pessoa Física";
 
+      // Identifica Landing Page vinculada (se houver)
+      const targetLpId = (leadData as any)?.landingPageId || (leadData as any)?.pageId || (survey as any)?.landingPageId || (survey as any)?.pageId || "";
+      const targetLpTitle = (leadData as any)?.landingPageTitle || (leadData as any)?.pageTitle || (leadData as any)?.landingPage || "";
+      const effectiveSource = (leadData as any)?.source || (targetLpTitle ? `LP: ${targetLpTitle} [Pesquisa]` : `Pesquisa: ${survey.name || "Questionário Interativo"}`);
+
       // 2. Se já existe leadId, atualiza
       if (leadId && Array.isArray(crmData.leads)) {
         crmData.leads = crmData.leads.map((l: any) => {
           if (l.id === leadId) {
             targetLead = {
               ...l,
-              score: Math.max(l.score || 0, score),
+              score: score,
               temperature: minProfile.temperatura,
               minScore: minScoreCode,
               minQualification: minQualificationObj,
@@ -256,26 +269,95 @@ export function DeepFindSurveyViewer({
       } else if (contactInfo.name || contactInfo.whatsapp || contactInfo.email) {
         // Cria novo lead no CRM
         targetLead = {
-          id: `lead_${Date.now()}`,
+          id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           name: contactInfo.name || "Participante Pesquisa",
           company: companyFinal,
           whatsapp: contactInfo.whatsapp || "",
           email: contactInfo.email || "",
+          landing_page: targetLpTitle || "Landing Page",
+          landingPage: targetLpTitle || "Landing Page",
+          landingPageId: targetLpId,
           score: score,
           temperature: minProfile.temperatura,
           minScore: minScoreCode,
           minQualification: minQualificationObj,
-          source: `Pesquisa: ${survey.name || "Questionário Interativo"}`,
+          source: effectiveSource,
           stage: minProfile.temperatura === "Quente" ? "Oportunidade" : "Leads",
-          tags: ["pesquisa-interativa", "min-qualificado", `temp-${minProfile.temperatura.toLowerCase()}`],
+          classification: minProfile.temperatura === "Quente" ? "Lead Qualificado" : "Lead",
+          tags: ["pesquisa-interativa", "min-qualificado", "comet-lp", `temp-${minProfile.temperatura.toLowerCase()}`, minScoreCode ? `min-${minScoreCode.toLowerCase()}` : ""].filter(Boolean),
           value: minProfile.temperatura === "Quente" ? 8500 : 3500,
-          created_at: new Date().toISOString()
+          quizAnswers: finalAnswers,
+          surveyAnswers: finalAnswers,
+          created_at: new Date().toISOString(),
+          lastInteraction: `Pesquisa: ${survey.name} (Score: ${score}/100, MIN: ${minScoreCode})`,
         };
         if (!Array.isArray(crmData.leads)) crmData.leads = [];
         crmData.leads.unshift(targetLead);
       }
 
       localStorage.setItem("comet_crm_data", JSON.stringify(crmData));
+
+      // 2.1 Grava imediatamente na fila e base de leads local do sistema (comet_local_leads)
+      const fullLeadRecord = {
+        id: targetLead?.id || leadId || `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: contactInfo.name || targetLead?.name || "Lead Qualificado",
+        company: companyFinal,
+        whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+        email: contactInfo.email || targetLead?.email || "",
+        source: effectiveSource,
+        landing_page: targetLpTitle || "Landing Page",
+        landingPage: targetLpTitle || "Landing Page",
+        landingPageId: targetLpId,
+        stage: minProfile.temperatura === "Quente" ? "Oportunidade" : "Leads",
+        classification: minProfile.temperatura === "Quente" ? "Lead Qualificado" : "Lead",
+        temperature: minProfile.temperatura,
+        minScore: minScoreCode,
+        minQualification: minQualificationObj,
+        score: score,
+        value: minProfile.temperatura === "Quente" ? 8500 : 3500,
+        type: "Inbound",
+        tags: Array.from(new Set(["pesquisa", "inbound", "comet-lp", `temp-${minProfile.temperatura.toLowerCase()}`, minScoreCode ? `min-${minScoreCode.toLowerCase()}` : ""])).filter(Boolean),
+        quizAnswers: finalAnswers,
+        surveyAnswers: finalAnswers,
+        createdAt: new Date().toISOString(),
+        lastInteraction: `Respondeu Pesquisa: ${survey.name || "Diagnóstico"} (Score: ${score}/100, MIN: ${minScoreCode})`,
+        activities: [
+          {
+            id: `act_${Date.now()}`,
+            type: "survey_completion",
+            description: `Pesquisa "${survey.name || "Diagnóstico"}" concluída - Score ${score}/100, Classificação MIN: ${minScoreCode} (${minProfile.temperatura})`,
+            timestamp: new Date().toISOString()
+          }
+        ],
+        metadata: {
+          surveyId: survey.id,
+          surveyName: survey.name,
+          surveyScore: score,
+          surveyTemperature: minProfile.temperatura,
+          minQualification: minQualificationObj,
+          minScore: minScoreCode,
+          answers: finalAnswers,
+          landingPageId: targetLpId,
+          landingPageTitle: targetLpTitle,
+          utm: (leadData as any)?.utm || {},
+          capturedAt: new Date().toISOString()
+        }
+      };
+
+      try {
+        const rawLoc = localStorage.getItem("comet_local_leads");
+        const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
+        localStorage.setItem("comet_local_leads", JSON.stringify([fullLeadRecord, ...curLoc.filter((x: any) => x.id !== fullLeadRecord.id && x.email !== fullLeadRecord.email)]));
+
+        const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
+        const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
+        localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([fullLeadRecord, ...curQueue.filter((x: any) => x.id !== fullLeadRecord.id)]));
+
+        window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
+        window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
+      } catch (eStorage) {
+        console.warn("Storage notice:", eStorage);
+      }
 
       // 3. Dispara evento no motor de automação (AutomationEngine)
       if (targetLead) {
@@ -330,7 +412,7 @@ export function DeepFindSurveyViewer({
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              score: Math.max(targetLead?.score || 0, score),
+              score: score,
               temperature: minProfile.temperatura,
               minScore: minScoreCode,
               minQualification: minQualificationObj,
@@ -353,7 +435,30 @@ export function DeepFindSurveyViewer({
         console.warn("Aviso ao processar respostas da pesquisa:", saveErr);
       }
 
-      // 5. Envia para o endpoint do servidor Express /api/surveys/responses
+      // 5. Envia para o endpoint do servidor Express /api/submit-lead para registrar na base central
+      try {
+        fetch("/api/submit-lead", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pageId: targetLpId || survey.id || "survey_page",
+            pageTitle: targetLpTitle || survey.name || "Pesquisa",
+            name: contactInfo.name || targetLead?.name || "",
+            whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+            email: contactInfo.email || targetLead?.email || "",
+            company: companyFinal,
+            score: score,
+            minScore: minScoreCode,
+            minQualification: minQualificationObj,
+            temperature: minProfile.temperatura,
+            quizAnswers: finalAnswers,
+            source: effectiveSource,
+            utms: (leadData as any)?.utm || {},
+          })
+        }).catch(() => {});
+      } catch {}
+
+      // 5.1 Envia para o endpoint do servidor Express /api/surveys/responses
       try {
         fetch("/api/surveys/responses", {
           method: "POST",
@@ -382,7 +487,16 @@ export function DeepFindSurveyViewer({
         }).catch(() => {});
       } catch {}
 
-      // 6. Envia resposta para o Google Drive / Google Sheets (em tabela separada da Pesquisa)
+      // 5.2 Se tiver LP vinculada, incrementa métricas de conversão da LP no Express
+      if (targetLpId) {
+        try {
+          fetch(`/api/landing-pages/${encodeURIComponent(targetLpId)}/conversion`, {
+            method: "POST"
+          }).catch(() => {});
+        } catch {}
+      }
+
+      // 6. Envia resposta para o Google Drive / Google Sheets
       try {
         submitSurveyResponseToDrive({
           surveyId: survey.id || "pesquisa_custom",
@@ -396,6 +510,19 @@ export function DeepFindSurveyViewer({
           answers: finalAnswers,
           questions: questions.map(q => ({ id: q.id, question: q.question }))
         }).catch(() => {});
+
+        if (targetLpId || targetLpTitle) {
+          submitLpLeadToDrive({
+            landingPageId: targetLpId,
+            landingPageTitle: targetLpTitle || "Landing Page",
+            name: contactInfo.name || targetLead?.name || "",
+            email: contactInfo.email || targetLead?.email || "",
+            whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+            company: companyFinal,
+            source: effectiveSource,
+            answers: finalAnswers,
+          }).catch(() => {});
+        }
       } catch {}
 
       setIsSubmitted(true);

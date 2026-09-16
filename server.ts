@@ -4,7 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { generateHighConversionLP, detectArchetype, type LPGenerationParams } from "./src/modules/landing-pages/services/high-conversion-engine";
-import { cometLpRouter } from "./src/components/marketing/comet-lp/server/cometRoutes";
+import { cometLpRouter, syncDriveDataToDisk } from "./src/components/marketing/comet-lp/server/cometRoutes";
 
 const app = express();
 const PORT = 3000;
@@ -191,6 +191,15 @@ app.all("/api/drive-proxy", async (req, res) => {
 
     try {
       const parsed = JSON.parse(rawText);
+      // Sincroniza dados com o disco/banco de dados do servidor se a resposta contiver registros
+      const payloadContent = parsed?.data || parsed?.content || parsed;
+      if (payloadContent && (Array.isArray(payloadContent.leads) || Array.isArray(payloadContent.landingPages))) {
+        try {
+          syncDriveDataToDisk(payloadContent);
+        } catch (syncErr) {
+          console.warn("Aviso ao sincronizar dados do Google Sheets para o disco do servidor:", syncErr);
+        }
+      }
       return res.json(parsed);
     } catch {
       return res.json({

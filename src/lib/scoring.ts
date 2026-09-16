@@ -5,12 +5,13 @@ export function calculateLeadScore(lead: Partial<Lead>): number {
     return 100;
   }
 
+  const min = lead.minScore || "Nenhum";
+  const minQual = lead.minQualification;
+  const isDescarte = minQual?.classification === "DESCARTE" || min === "Nenhum" || min === "Descarte" || lead.classification === "Lead Desqualificado";
+
   let score = 0;
 
   // 1 - Matriz MIN (50 pontos)
-  const min = lead.minScore || "Nenhum";
-  const minQual = lead.minQualification;
-  
   if (min === "MIN" || min === "Aprovado" || minQual?.classification === "QUENTE") {
     score += 50;
   } else if (["MI", "MN", "IN"].includes(min) || minQual?.classification === "MORNO") {
@@ -38,25 +39,33 @@ export function calculateLeadScore(lead: Partial<Lead>): number {
   else if (strategy === "Down Sell") score += 2;
   else if (strategy === "Free") score += 1;
 
+  // Se o lead for descarte no MIN, garante score baixo coerente (máximo 20)
+  if (isDescarte) {
+    return Math.min(20, score);
+  }
+
   // Ajusta a pontuação com base na temperatura ativa do lead para evitar inconsistências visuais
-  const temp = lead.temperature || "Frio";
+  const temp = lead.temperature;
   if (temp === "Quente" && score < 70) {
     score = 70 + (score % 20); // Garante score compatível com Quente (70-89)
   } else if (temp === "Morno" && score < 50) {
     score = 50 + (score % 15); // Garante score compatível com Morno (50-64)
   }
 
-  // Se o lead já possui um score válido salvo no banco/objeto, e não foi reduzido ativamente, use o maior valor
-  if (lead.score && lead.score > score) {
-    if (min === "Nenhum" || min === "Aprovado" || min === "MIN") {
+  // Se o lead já possui um score válido salvo no banco/objeto, e não é descarte
+  if (typeof lead.score === "number" && !isNaN(lead.score) && lead.score > score) {
+    if (min === "Aprovado" || min === "MIN" || minQual?.classification === "QUENTE") {
       score = lead.score;
     }
   }
 
-  return Math.min(100, score);
+  return Math.min(100, Math.max(0, score));
 }
 
 export function calculateLeadTemperature(score: number, lead?: Partial<Lead>): Temperature {
+  if (lead?.minQualification?.classification === 'DESCARTE' || lead?.minScore === 'Descarte') {
+    return "Frio";
+  }
   if (lead?.temperature) {
     return lead.temperature;
   }
