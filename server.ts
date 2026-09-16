@@ -100,9 +100,10 @@ function normalizeGoogleScriptUrl(rawUrl: string): { url: string; error?: string
   return { url: clean };
 }
 
-app.post("/api/drive-proxy", async (req, res) => {
+app.all("/api/drive-proxy", async (req, res) => {
   try {
-    const { targetUrl, action, data, fileName, base64Data, folderCategory, mimeType } = req.body || {};
+    const params = { ...(req.query || {}), ...(req.body || {}) };
+    const { targetUrl, action, data, fileName, base64Data, folderCategory, mimeType } = params;
 
     const { url: cleanUrl, error: urlError } = normalizeGoogleScriptUrl(targetUrl);
     if (urlError) {

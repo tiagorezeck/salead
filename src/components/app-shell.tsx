@@ -10,9 +10,8 @@ import {
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useData } from "@/hooks/use-data";
-import { approveUserAccess } from "@/lib/auth-service";
+import { approveUserAccess, getCurrentUser } from "@/lib/auth-service";
 import { useTheme } from "@/hooks/use-theme";
-import { supabase } from "@/integrations/supabase/client";
 import { CommandPalette } from "./command-palette";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./brand-logo";
@@ -181,45 +180,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const local = typeof window !== "undefined" ? localStorage.getItem("comet_local_session") : null;
     
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-        setIsLoading(false);
-      } else if (local) {
-        try {
-          setSession(JSON.parse(local));
-        } catch {
-          setSession({ user: { email: localStorage.getItem("comet_user_email") || "tiagorezeck@hotmail.com" } });
-        }
+    if (local) {
+      try {
+        setSession(JSON.parse(local));
+      } catch {
+        setSession({ user: { email: localStorage.getItem("comet_user_email") || "tiagorezeck@hotmail.com" } });
+      }
+      setIsLoading(false);
+    } else {
+      const user = getCurrentUser();
+      if (user) {
+        setSession({ user: { email: user.email, name: user.name, role: user.role } });
         setIsLoading(false);
       } else {
         navigate({ to: "/login" });
         setIsLoading(false);
       }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setSession(session);
-      } else {
-        const checkLocal = localStorage.getItem("comet_local_session");
-        if (checkLocal) {
-          try { setSession(JSON.parse(checkLocal)); } catch {}
-        } else {
-          navigate({ to: "/login" });
-        }
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    }
   }, [navigate]);
 
   const handleLogout = async () => {
     localStorage.removeItem("comet_local_session");
     localStorage.removeItem("comet_user_email");
-    try {
-      await supabase.auth.signOut();
-    } catch {}
     toast.success("Sessão encerrada.");
     setShowLogoutDialog(false);
     navigate({ to: "/login" });

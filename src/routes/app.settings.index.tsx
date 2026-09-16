@@ -345,7 +345,7 @@ function SettingsIndexPage() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="font-display text-lg font-bold text-foreground">LAN — Agente de IA</h3>
+                      <h3 className="font-display text-lg font-bold text-foreground">LANAI — Agente de IA</h3>
                       <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                         {isAIConfigured ? "Ativo" : "Pendente"}
                       </span>
@@ -377,7 +377,7 @@ function SettingsIndexPage() {
 
             <div className="mt-5 pt-4 border-t border-border/50 flex items-center justify-between">
               <span className="text-[11px] font-semibold text-primary group-hover:underline flex items-center gap-1">
-                Configurar Chaves & Modelos do LAN
+                Configurar Chaves & Modelos do LANAI
               </span>
               <span className="text-[10px] text-muted-foreground font-mono">
                 {aiConfig.customModels[aiConfig.activeProvider]?.length || 0} modelos

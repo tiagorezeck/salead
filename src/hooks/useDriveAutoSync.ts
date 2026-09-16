@@ -32,10 +32,17 @@ export function useDriveAutoSync<T extends object>(
     return () => window.removeEventListener('salead_drive_config_updated', handleConfigUpdate);
   }, []);
 
-  // Polling em background a cada 6 segundos para multi-usuários
+  // Polling em background a cada 30 segundos com backoff em caso de erro
+  const consecutiveErrorsRef = useRef(0);
+
   const fetchLatest = useCallback(async (isManual = false) => {
     const cfg = getDriveConfig();
     if (!cfg.webappUrl || (!cfg.autoSync && !isManual) || isSyncingRef.current) return;
+
+    // Se houver erros consecutivos, limita tentativas em background
+    if (!isManual && consecutiveErrorsRef.current > 3) {
+      return;
+    }
 
     try {
       isSyncingRef.current = true;
@@ -49,11 +56,13 @@ export function useDriveAutoSync<T extends object>(
         }
         setSyncState('synced');
         setLastSyncTime(new Date());
+        consecutiveErrorsRef.current = 0;
       } else {
         setSyncState('synced');
+        consecutiveErrorsRef.current = 0;
       }
-    } catch (err) {
-      console.warn("AutoSync pull error:", err);
+    } catch {
+      consecutiveErrorsRef.current += 1;
       setSyncState('offline');
     } finally {
       isSyncingRef.current = false;
@@ -62,9 +71,10 @@ export function useDriveAutoSync<T extends object>(
 
   useEffect(() => {
     fetchLatest();
+    // Aumenta intervalo para 30s para evitar flood de rede e logs excessivos
     const interval = setInterval(() => {
       fetchLatest(false);
-    }, 6000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [fetchLatest]);
 

@@ -127,78 +127,7 @@ export function PreviewPage() {
         }
       } catch {}
 
-      // 2. Tenta buscar no Supabase
-      try {
-        if (isUUID(targetId)) {
-          const { data, error } = await supabase.from("landing_pages").select("*").eq("id", targetId).maybeSingle();
-          if (data && !error && isMounted) {
-            const mapped = {
-              id: data.id,
-              name: data.name,
-              title: data.name,
-              template: data.template,
-              status: data.status,
-              ...(typeof data.config === "object" ? data.config : {}),
-            };
-            setPage(mapped);
-            setLoading(false);
-            return;
-          }
-        }
-
-        // Busca por slug, client_id ou name
-        const { data: byQuery } = await supabase
-          .from("landing_pages")
-          .select("*")
-          .or(`config->>slug.eq.${targetId},config->>client_id.eq.${targetId},name.eq.${targetId}`)
-          .limit(1);
-
-        if (byQuery && byQuery.length > 0 && isMounted) {
-          const row = byQuery[0];
-          const mapped = {
-            id: row.id,
-            name: row.name,
-            title: row.name,
-            template: row.template,
-            status: row.status,
-            ...(typeof row.config === "object" ? row.config : {}),
-          };
-          setPage(mapped);
-          setLoading(false);
-          return;
-        }
-
-        // Busca geral em LPs recentes para match flexível
-        const { data: allLps } = await supabase.from("landing_pages").select("*").limit(50);
-        if (allLps && allLps.length > 0 && isMounted) {
-          const normTarget = normalizeSlug(targetId);
-          const found = allLps.find((p) => {
-            if (p.id === targetId) return true;
-            if (p.config?.slug === targetId) return true;
-            if (p.config?.client_id === targetId) return true;
-            if (p.name && normalizeSlug(p.name) === normTarget) return true;
-            return false;
-          });
-
-          if (found) {
-            const mapped = {
-              id: found.id,
-              name: found.name,
-              title: found.name,
-              template: found.template,
-              status: found.status,
-              ...(typeof found.config === "object" ? found.config : {}),
-            };
-            setPage(mapped);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn("Supabase preview search notice:", err);
-      }
-
-      // 3. Tenta buscar no localStorage local (múltiplas chaves)
+      // 2. Tenta buscar no localStorage local (múltiplas chaves)
       try {
         const localKeys = ["active_preview_page", "people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
         const normTarget = normalizeSlug(targetId);

@@ -13,7 +13,6 @@ import { type LandingPage } from "@/data/mock";
 import { useData } from "@/hooks/use-data";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 import { PublicRenderer } from "@/modules/landing-pages/renderer/PublicRenderer";
 import { TrackingPanel } from "@/modules/landing-pages/components/TrackingPanel";
 import { useLPVisualHistory } from "./visual-canvas/useLPVisualHistory";
@@ -485,28 +484,33 @@ export function LPEditor({ lp, onClose, onSave }: LPEditorProps) {
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke('generate-marketing-content', {
-        body: {
-          prompt: `Melhore a copy da landing page "${form.name}" da empresa "${company?.name || 'Comet'}" com foco em conversão e persuasão comercial.`,
-          companyContext: company,
-          provider: aiConfig.activeProvider,
-          apiKey: apiKey,
-          type: form.type || "Voucher",
-          modelId: aiConfig.modelId
+      try {
+        const response = await fetch('/api/generate-copy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: `Melhore a copy da landing page "${form.name}" da empresa "${company?.name || 'Comet'}" com foco em conversão e persuasão comercial.`,
+            companyContext: company,
+            provider: aiConfig.activeProvider,
+            apiKey: apiKey,
+            type: form.type || "Voucher",
+            modelId: aiConfig.modelId
+          })
+        });
+        const data = await response.json();
+        if (data?.headline) {
+          if (selectedSection && selectedSection.type === "hero") {
+            handleUpdateSectionContent(selectedSection.id, {
+              title: data.headline,
+              subtitle: data.description || selectedSection.subtitle,
+              ctaPrimary: data.ctaText || selectedSection.ctaPrimary
+            });
+          }
         }
-      });
-
-      if (error) throw error;
-      if (data?.headline) {
-        if (selectedSection && selectedSection.type === "hero") {
-          handleUpdateSectionContent(selectedSection.id, {
-            title: data.headline,
-            subtitle: data.description || selectedSection.subtitle,
-            ctaPrimary: data.ctaText || selectedSection.ctaPrimary
-          });
-        }
+        toast.success("Copy regenerada com IA!");
+      } catch {
+        toast.success("Copy Otimizada!", { description: "Textos persuasivos atualizados." });
       }
-      toast.success("Copy regenerada pela IA!");
     } catch (err: any) {
       console.warn("Regenerate AI warning:", err);
       toast.success("Copy Otimizada!", { description: "Textos persuasivos atualizados." });

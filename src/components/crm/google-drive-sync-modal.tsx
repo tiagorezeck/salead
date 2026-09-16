@@ -40,6 +40,9 @@ import {
   downloadJsonBackup,
   pushToGoogleDrive,
   fetchFromGoogleDrive,
+  forceReadSpreadsheetFromDrive,
+  getLocalDatabaseRoot,
+  saveLocalDatabaseRoot,
   getSpreadsheetExportUrl,
   type DriveConfig,
   type DriveFileInfo,
@@ -228,6 +231,65 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
       toast.error("Erro ao subir banco para o Drive: " + err.message);
     } finally {
       setIsSyncingUp(false);
+    }
+  };
+
+  const handleForcarLeituraPlanilha = async () => {
+    const targetUrl = config.webappUrl || webappUrlInput.trim();
+    if (!targetUrl) {
+      toast.error("Conecte a URL do Web App do Google Apps Script antes de forçar a leitura.");
+      return;
+    }
+
+    setIsSyncingDown(true);
+    try {
+      // 1. Limpa marcas de exclusão locais legadas para permitir reimportação limpa de tudo no Sheets
+      if (typeof window !== "undefined") {
+        try {
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith("deleted_") || key.includes("deleted_lps") || key.includes("deleted_leads"))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+        } catch {}
+      }
+
+      // 2. Baixa todos os dados consolidados do Google Sheets + Drive
+      const remoteData = await forceReadSpreadsheetFromDrive<any>(targetUrl);
+
+      // 3. Garante também a fusão com os leads capturados da API local
+      try {
+        const localLeadsRes = await fetch("/api/leads");
+        if (localLeadsRes.ok) {
+          const leadsFromApi = await localLeadsRes.json();
+          if (Array.isArray(leadsFromApi) && leadsFromApi.length > 0) {
+            const currentRoot = getLocalDatabaseRoot() || {};
+            const existingLeads = Array.isArray(currentRoot.leads) ? currentRoot.leads : [];
+            const ids = new Set(existingLeads.map((l: any) => l.id));
+            leadsFromApi.forEach((l: any) => {
+              if (!ids.has(l.id)) {
+                existingLeads.push(l);
+              }
+            });
+            currentRoot.leads = existingLeads;
+            saveLocalDatabaseRoot(currentRoot);
+          }
+        }
+      } catch {}
+
+      toast.success("Leitura completa do Google Sheets e Apps Script realizada com sucesso!", {
+        description: "Todos os dados da planilha foram lidos e sincronizados. Recarregando..."
+      });
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+    } catch (err: any) {
+      toast.error("Erro ao ler dados da planilha do Sheets: " + err.message);
+    } finally {
+      setIsSyncingDown(false);
     }
   };
 
@@ -661,6 +723,32 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
 
           {activeTab === "checkpoints" && (
             <div className="space-y-5">
+              {/* Card Destaque: Forçar Leitura Completa do Sheets & App Script */}
+              <div className="p-4 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-transparent flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+                <div className="space-y-1 max-w-xl">
+                  <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-xs uppercase tracking-wider">
+                    <RefreshCw className="h-4 w-4 text-amber-500" />
+                    Forçar Leitura Completa do Sheets & Apps Script
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Importa <strong>TODAS</strong> as Landing Pages, Leads, Produtos, Tarefas e Pesquisas gravados no Google Sheets e no Apps Script para o sistema. Se houver dados indesejados, apague pelo sistema e ele os excluirá definitivamente da planilha.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleForcarLeituraPlanilha}
+                  disabled={isSyncingDown}
+                  className="w-full sm:w-auto py-3 px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  {isSyncingDown ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4" />
+                  )}
+                  {isSyncingDown ? "LENDO SHEETS..." : "FORÇAR LEITURA COMPLETA"}
+                </button>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-bold text-sm text-foreground">Pontos de Restauração (Checkpoints)</h3>

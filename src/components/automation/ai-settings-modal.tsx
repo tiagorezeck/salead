@@ -209,7 +209,7 @@ export function AISettingsModal({ onClose }: AISettingsModalProps) {
             </div>
             <div>
               <h2 className="text-xl sm:text-2xl font-black tracking-tight text-[#111827] dark:text-white">
-                Configurações de IA do LAN
+                Configurações de IA do LANAI
               </h2>
               <div className="flex items-center gap-2 mt-0.5">
                 <span

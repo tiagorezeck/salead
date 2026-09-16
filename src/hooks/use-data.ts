@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { startOfMonth, endOfMonth } from "date-fns";
 import { toast } from "sonner";
 import { downloadDataFile } from "@/lib/data-portability";
@@ -48,7 +47,7 @@ import {
   saveSystemCheckpoint,
   formatCheckpointName
 } from "@/services/googleDriveDatabaseService";
-import { getCurrentUser, getRegisteredUsers, removeRegisteredUser } from "@/lib/auth-service";
+import { getCurrentUser, getRegisteredUsers, removeRegisteredUser, DEFAULT_REGISTERED_ADMIN, SYSTEM_STANDBY_ADMIN } from "@/lib/auth-service";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -720,21 +719,31 @@ export const getInitialAILandingPages = (): LandingPage[] => [
 ];
 
 export const mapLPFromDb = (row: any): LandingPage => {
+  if (!row || typeof row !== 'object') return { id: '', title: 'Landing Page', name: 'Landing Page' } as any;
   const config = typeof row.config === 'object' && row.config !== null ? row.config : {};
+  const lpId = row.id || config.id || config.client_id || row.client_id || row.slug;
+  const lpTitle = row.title || row.name || config.title || config.name || "Landing Page";
+  const lpName = row.name || row.title || config.name || config.title || "Landing Page";
+  const lpSlug = row.slug || config.slug || (lpTitle ? lpTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "");
+
   return {
     ...config,
-    id: row.id,
-    originalId: config.client_id || config.id || row.id,
-    name: row.name || config.name || config.title || "Landing Page",
-    title: row.name || config.title || config.name || "Landing Page",
+    ...row,
+    id: lpId,
+    originalId: config.client_id || config.id || row.originalId || lpId,
+    name: lpName,
+    title: lpTitle,
+    slug: lpSlug,
     template: row.template || config.template || "Modern",
     status: row.status || config.status || "Ativa",
-    visits: Number(row.visits) || 0,
-    leads: Number(row.leads_count) || 0,
-    conv: (row.visits > 0 && row.leads_count > 0) ? Math.round((row.leads_count / row.visits) * 100) : 0,
-    type: config.type || "COMET CRO",
-    surveyId: config.surveyId || row.survey_id || undefined,
-    externalUrl: config.externalUrl || row.external_url || undefined,
+    visits: Number(row.visits) || Number(config.visits) || 0,
+    leads: Number(row.leads_count ?? row.leads ?? config.leads) || 0,
+    conv: (Number(row.visits) > 0 && Number(row.leads_count ?? row.leads) > 0) 
+      ? Math.round((Number(row.leads_count ?? row.leads) / Number(row.visits)) * 100) 
+      : 0,
+    type: row.type || config.type || "COMET CRO",
+    surveyId: row.surveyId || config.surveyId || row.survey_id || undefined,
+    externalUrl: row.externalUrl || config.externalUrl || row.external_url || undefined,
   };
 };
 
@@ -865,8 +874,6 @@ export function useData() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    let isPolling = false;
-
     // Sincroniza e recarrega dados quando a configuração do Google Drive é alterada
     const handleDriveConfigUpdate = async () => {
       const cfg = getDriveConfig();
@@ -879,12 +886,6 @@ export function useData() {
             invalidate('tasks');
             invalidate('products');
             invalidate('surveys');
-            invalidate('pipelines');
-            invalidate('users');
-            invalidate('objections');
-            invalidate('playbooks');
-            invalidate('automations');
-            invalidate('marketing_investments');
           }
         } catch {}
       }
@@ -892,26 +893,8 @@ export function useData() {
 
     window.addEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
 
-    // Polling periódico em segundo plano para manter dados sincronizados com a planilha/Drive
-    const interval = setInterval(async () => {
-      const cfg = getDriveConfig();
-      if (cfg.webappUrl && cfg.autoSync !== false && !isPolling) {
-        try {
-          isPolling = true;
-          const remote = await fetchFromGoogleDrive(cfg.webappUrl);
-          if (remote) {
-            invalidate('leads');
-            invalidate('landing_pages');
-          }
-        } catch {} finally {
-          isPolling = false;
-        }
-      }
-    }, 15000);
-
     return () => {
       window.removeEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
-      clearInterval(interval);
     };
   }, []);
 
@@ -963,8 +946,6 @@ export function useData() {
   const { data: session } = useQuery({
     queryKey: ['session'],
     queryFn: async () => {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) return data.session;
       if (typeof window !== "undefined") {
         const local = localStorage.getItem("comet_local_session");
         if (local) {
@@ -984,14 +965,6 @@ export function useData() {
     refetchOnWindowFocus: true,
     queryFn: async () => { 
       let dbLeads: Lead[] = [];
-      try {
-        const { data, error } = await supabase.from('leads').select('*').order('created_at', { ascending: false }); 
-        if (!error && data) {
-          dbLeads = data.map(mapLeadFromDb);
-        }
-      } catch (err) {
-        console.warn("Aviso ao carregar leads do Supabase, fallback ativo:", err);
-      }
 
       // 1b. Server in-memory submissions (capturados via /api/submit-lead)
       let apiLeads: Lead[] = [];
@@ -1159,11 +1132,6 @@ export function useData() {
               };
             });
             driveLeads = mappedDriveLeads as any;
-          }
-
-          // Se tiver URL configurada do WebApp, busca atualizações no Drive em background se desconectado
-          if (driveConfig.webappUrl && driveConfig.webappUrl.startsWith("http")) {
-            fetchFromGoogleDrive(driveConfig.webappUrl).catch(() => {});
           }
         } catch (err) {
           console.warn("Aviso ao processar leads do Google Drive/Sheets:", err);
@@ -1355,20 +1323,6 @@ export function useData() {
 
       const consolidated = consolidateLeadsList(allRawLeads);
 
-      // Sincroniza em segundo plano leads capturados via fila ou localmente com o Supabase
-      if (consolidated.length > 0) {
-        const sbEmails = new Set(dbLeads.map(l => l.email ? l.email.toLowerCase() : "").filter(Boolean));
-        const unsyncedLeads = consolidated.filter(l => l.email && !sbEmails.has(l.email.toLowerCase()));
-        if (unsyncedLeads.length > 0) {
-          Promise.allSettled(
-            unsyncedLeads.map(l => {
-              const payload = mapLeadToDb(l);
-              return supabase.from('leads').insert([payload]);
-            })
-          ).catch(() => {});
-        }
-      }
-
       return consolidated.sort((a, b) => 
         new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
@@ -1380,22 +1334,14 @@ export function useData() {
     queryKey: ['tasks'], 
     queryFn: async () => { 
       let dbTasks: any[] = [];
+
       try {
-        const { data, error } = await supabase.from('tasks').select('*').order('created_at', { ascending: false }); 
-        if (!error && data && data.length > 0) {
-          dbTasks = data.map(mapTaskFromDb);
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveTasks = Array.isArray(driveRoot?.tasks) ? driveRoot.tasks : (Array.isArray(driveRoot?.data?.tasks) ? driveRoot.data.tasks : []);
+        if (driveTasks.length > 0) {
+          dbTasks = driveTasks.map(mapTaskFromDb);
         }
       } catch {}
-
-      if (dbTasks.length === 0) {
-        try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          const driveTasks = Array.isArray(driveRoot?.tasks) ? driveRoot.tasks : (Array.isArray(driveRoot?.data?.tasks) ? driveRoot.data.tasks : []);
-          if (driveTasks.length > 0) {
-            dbTasks = driveTasks.map(mapTaskFromDb);
-          }
-        } catch {}
-      }
 
       if (dbTasks.length === 0 && typeof window !== "undefined") {
         try {
@@ -1412,97 +1358,110 @@ export function useData() {
   const usersRaw = asArray(useQuery({ 
     queryKey: ['users'], 
     queryFn: async () => { 
-      let sbUsers: any[] = [];
-      try {
-        const { data, error } = await supabase.from('profiles').select('*').order('name'); 
-        if (!error && data) sbUsers = data;
-      } catch {}
-
       const localAuthUsers = getRegisteredUsers();
-      if (sbUsers.length === 0 && localAuthUsers.length > 0) {
-        sbUsers = localAuthUsers.map(u => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role: u.role,
-          contact: u.contact || "",
-          avatar_url: u.avatarUrl || "",
-          status: u.status
-        }));
-      } else if (localAuthUsers.length > 0) {
-        const sbEmailSet = new Set(sbUsers.map(u => u.email ? u.email.toLowerCase() : ""));
-        const missingLocal = localAuthUsers.filter(u => u.email && !sbEmailSet.has(u.email.toLowerCase()));
-        if (missingLocal.length > 0) {
-          sbUsers = [...sbUsers, ...missingLocal.map(u => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            role: u.role,
-            contact: u.contact || "",
-            avatar_url: u.avatarUrl || "",
-            status: u.status
-          }))];
-        }
-      }
-
-      return sbUsers; 
+      return localAuthUsers.map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        contact: u.contact || "",
+        avatar_url: u.avatarUrl || "",
+        status: u.status
+      }));
     } 
   }).data);
   
   const mappedUsers = usersRaw.map(mapUserFromDb);
 
-  // Garantia Rígida: APENAS 1 ADMIN NO SISTEMA (o admin principal do ambiente)
-  const sessionUser = getCurrentUser();
-  const mainAdminEmail = (sessionUser?.email || "sistemascomet@gmail.com").toLowerCase();
+  const GHOST_NAMES = [
+    "comet public",
+    "cometleads2026",
+    "comet_app_worl",
+    "comet_sync_wo",
+    "admin-sistemas",
+    "615483b3",
+    "d6132ce0",
+    "bc70c5d1"
+  ];
 
-  let mainAdminAssigned = false;
-  const users = mappedUsers.map(u => {
-    const isMainAdmin = u.email?.toLowerCase() === mainAdminEmail;
-    if (isMainAdmin) {
-      mainAdminAssigned = true;
+  // 1. Expurgar fantasmas e ocultar o standby admin da listagem de usuários do sistema
+  const cleanUsers = mappedUsers.filter(u => {
+    if (!u) return false;
+    // O Administrador Standby (ADMIN) nunca aparece nos usuários do sistema
+    if ((u as any).isStandbyAdmin || u.id === "system-standby-admin" || u.email?.toLowerCase() === "admin@comet.com") {
+      return false;
+    }
+    const nameLow = (u.name || "").toLowerCase();
+    const emailLow = (u.email || "").toLowerCase();
+    const idLow = (u.id || "").toLowerCase();
+
+    for (const g of GHOST_NAMES) {
+      if (nameLow.includes(g) || emailLow.includes(g) || idLow.includes(g)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // 2. Garante a presença do Admin Titular cadastrado (Tiago Rezeck)
+  const tiagoIdx = cleanUsers.findIndex(u => 
+    u.email?.toLowerCase() === "tiagorezeck@hotmail.com" || 
+    u.name?.toLowerCase().includes("tiago rezeck") ||
+    u.id === "327399fb-3511-41a4-bd01-cf3b803aa859"
+  );
+
+  if (tiagoIdx === -1) {
+    cleanUsers.unshift({
+      id: DEFAULT_REGISTERED_ADMIN.id,
+      name: DEFAULT_REGISTERED_ADMIN.name,
+      email: DEFAULT_REGISTERED_ADMIN.email,
+      role: "Admin Geral",
+      contact: DEFAULT_REGISTERED_ADMIN.contact || "(11) 98888-7777",
+      avatarUrl: "",
+      avatar_url: "",
+      status: "Ativo",
+      goals: [],
+      operationalGoals: [],
+      allowedModules: SYSTEM_MODULES.map(m => m.id),
+      customPermissionsEnabled: false
+    });
+  } else {
+    cleanUsers[tiagoIdx] = {
+      ...cleanUsers[tiagoIdx],
+      name: cleanUsers[tiagoIdx].name || "Tiago Rezeck",
+      email: "tiagorezeck@hotmail.com",
+      role: "Admin Geral",
+      status: "Ativo"
+    };
+  }
+
+  // 3. Garantia Rígida: APENAS 1 ADMIN CADASTRADO NO SISTEMA (Tiago Rezeck)
+  // Os outros membros, para terem acesso amplo, assumem o perfil de Gestor (onde o admin pode liberar tudo ou partes)
+  const users = cleanUsers.map(u => {
+    const isTiago = u.email?.toLowerCase() === "tiagorezeck@hotmail.com" || u.id === "327399fb-3511-41a4-bd01-cf3b803aa859";
+    if (isTiago) {
       return u.role === "Admin Geral" ? u : { ...u, role: "Admin Geral" };
     }
-    // Qualquer outro usuário que estivesse como Admin Geral passa para Gestor
+    // Qualquer outro usuário cadastrado que estivesse como Admin Geral passa para Gestor
     if (u.role === "Admin Geral" || u.role === "Admin") {
       return { ...u, role: "Gestor" };
     }
     return u;
   });
 
-  if (!mainAdminAssigned && users.length > 0) {
-    let firstAdminSeen = false;
-    for (let i = 0; i < users.length; i++) {
-      if (users[i].role === "Admin Geral") {
-        if (!firstAdminSeen) {
-          firstAdminSeen = true;
-        } else {
-          users[i] = { ...users[i], role: "Gestor" };
-        }
-      }
-    }
-  }
-
   // 4. PRODUCTS
   const products = asArray(useQuery({ 
     queryKey: ['products'], 
     queryFn: async () => { 
       let dbProducts: any[] = [];
+
       try {
-        const { data, error } = await supabase.from('products').select('*').order('name'); 
-        if (!error && data && data.length > 0) {
-          dbProducts = data.map(mapProductFromDb);
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveProds = Array.isArray(driveRoot?.products) ? driveRoot.products : (Array.isArray(driveRoot?.data?.products) ? driveRoot.data.products : []);
+        if (driveProds.length > 0) {
+          dbProducts = driveProds.map(mapProductFromDb);
         }
       } catch {}
-
-      if (dbProducts.length === 0) {
-        try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          const driveProds = Array.isArray(driveRoot?.products) ? driveRoot.products : (Array.isArray(driveRoot?.data?.products) ? driveRoot.data.products : []);
-          if (driveProds.length > 0) {
-            dbProducts = driveProds.map(mapProductFromDb);
-          }
-        } catch {}
-      }
 
       if (dbProducts.length === 0 && typeof window !== "undefined") {
         try {
@@ -1520,22 +1479,14 @@ export function useData() {
     queryKey: ['objections'], 
     queryFn: async () => { 
       let dbObjections: any[] = [];
+
       try {
-        const { data, error } = await supabase.from('objections').select('*'); 
-        if (!error && data && data.length > 0) {
-          dbObjections = data as Objection[];
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveObjs = Array.isArray(driveRoot?.objections) ? driveRoot.objections : (Array.isArray(driveRoot?.data?.objections) ? driveRoot.data.objections : []);
+        if (driveObjs.length > 0) {
+          dbObjections = driveObjs;
         }
       } catch {}
-
-      if (dbObjections.length === 0) {
-        try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          const driveObjs = Array.isArray(driveRoot?.objections) ? driveRoot.objections : (Array.isArray(driveRoot?.data?.objections) ? driveRoot.data.objections : []);
-          if (driveObjs.length > 0) {
-            dbObjections = driveObjs;
-          }
-        } catch {}
-      }
 
       if (dbObjections.length === 0 && typeof window !== "undefined") {
         try {
@@ -1553,22 +1504,14 @@ export function useData() {
     queryKey: ['marketing_investments'], 
     queryFn: async () => { 
       let dbInvestments: any[] = [];
+
       try {
-        const { data, error } = await supabase.from('marketing_investments').select('*').order('start_date', { ascending: false }); 
-        if (!error && data && data.length > 0) {
-          dbInvestments = data;
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveInv = Array.isArray(driveRoot?.marketing_investments) ? driveRoot.marketing_investments : (Array.isArray(driveRoot?.marketingInvestments) ? driveRoot.marketingInvestments : (Array.isArray(driveRoot?.data?.marketing_investments) ? driveRoot.data.marketing_investments : []));
+        if (driveInv.length > 0) {
+          dbInvestments = driveInv;
         }
       } catch {}
-
-      if (dbInvestments.length === 0) {
-        try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          const driveInv = Array.isArray(driveRoot?.marketing_investments) ? driveRoot.marketing_investments : (Array.isArray(driveRoot?.data?.marketing_investments) ? driveRoot.data.marketing_investments : []);
-          if (driveInv.length > 0) {
-            dbInvestments = driveInv;
-          }
-        } catch {}
-      }
 
       if (dbInvestments.length === 0 && typeof window !== "undefined") {
         try {
@@ -1606,17 +1549,22 @@ export function useData() {
         console.warn("Erro ao buscar landing pages da API do servidor:", err);
       }
 
-      let dbLps: LandingPage[] = [];
-      try {
-        const { data, error } = await supabase.from('landing_pages').select('*').order('created_at', { ascending: false }); 
-        if (!error && data) {
-          dbLps = data.map(mapLPFromDb).filter(lp => !isDeleted(lp));
-        }
-      } catch (err) {
-        console.warn("Erro ao carregar landing pages do Supabase, usando local:", err);
-      }
-
       const localLps = getLocalLandingPages().filter(lp => !isDeleted(lp));
+
+      let driveLps: LandingPage[] = [];
+      try {
+        const driveRoot: any = getLocalDatabaseRoot();
+        const rawDriveLps = Array.isArray(driveRoot?.landingPages) 
+          ? driveRoot.landingPages 
+          : (Array.isArray(driveRoot?.landing_pages) 
+            ? driveRoot.landing_pages 
+            : (Array.isArray(driveRoot?.data?.landingPages) 
+              ? driveRoot.data.landingPages 
+              : (Array.isArray(driveRoot?.data?.landing_pages) ? driveRoot.data.landing_pages : [])));
+        if (Array.isArray(rawDriveLps) && rawDriveLps.length > 0) {
+          driveLps = rawDriveLps.map(mapLPFromDb).filter(lp => !isDeleted(lp));
+        }
+      } catch {}
 
       // Mescla todas as fontes mantendo autonomia total por id ou slug exclusivo
       const getLpKey = (lp: LandingPage) => {
@@ -1627,7 +1575,7 @@ export function useData() {
 
       const mergedMap = new Map<string, LandingPage>();
 
-      for (const lp of [...localLps, ...serverLps, ...dbLps]) {
+      for (const lp of [...driveLps, ...localLps, ...serverLps]) {
         if (!lp || isDeleted(lp)) continue;
         const key = getLpKey(lp);
         if (!mergedMap.has(key)) {
@@ -1672,16 +1620,6 @@ export function useData() {
               }
             }
 
-            // 2. Sincronização Client-Side -> Supabase (Garante persistência de LPs que só existem no localStorage)
-            for (const localLp of localLps) {
-              const matchedDb = dbLps.find(d => d.id === localLp.id || (localLp.slug && d.slug === localLp.slug));
-              if (!matchedDb && isUUID(localLp.id)) {
-                console.info(`[Self-Healing] Sincronizando LP local "${localLp.name || localLp.title}" com o Supabase...`);
-                const dbPayload = mapLPToDb(localLp);
-                dbPayload.id = localLp.id;
-                await supabase.from('landing_pages').upsert(dbPayload);
-              }
-            }
           } catch (syncErr) {
             console.warn("Erro ao executar self-healing de landing pages:", syncErr);
           }
@@ -1752,20 +1690,6 @@ export function useData() {
       // Mantém o cache local sincronizado
       saveLocalLandingPages(result);
 
-      // Sincroniza em segundo plano com o Supabase para persistência remota global
-      if (result.length > 0) {
-        const sbIds = new Set(dbLps.map(p => p.id));
-        const unsynced = result.filter(p => !sbIds.has(p.id));
-        if (unsynced.length > 0) {
-          Promise.allSettled(
-            unsynced.map(p => {
-              const dbPayload = mapLPToDb(p);
-              return supabase.from('landing_pages').upsert(dbPayload, { onConflict: 'id' });
-            })
-          ).catch(() => {});
-        }
-      }
-
       return result;
     } 
   }).data);
@@ -1774,15 +1698,12 @@ export function useData() {
   const pipelinesRaw = asArray(useQuery({ 
     queryKey: ['pipelines'], 
     queryFn: async () => { 
-      const { data, error } = await supabase
-        .from('pipelines')
-        .select('*, stages:pipeline_stages(*)')
-        .order('created_at', { ascending: false }); 
-      if (error) {
-        console.warn("Pipelines query:", error.message);
-        return [];
-      }
-      return data || []; 
+      try {
+        const driveRoot: any = getLocalDatabaseRoot();
+        const drivePipelines = Array.isArray(driveRoot?.pipelines) ? driveRoot.pipelines : (Array.isArray(driveRoot?.data?.pipelines) ? driveRoot.data.pipelines : []);
+        if (drivePipelines.length > 0) return drivePipelines;
+      } catch {}
+      return []; 
     } 
   }).data);
   
@@ -1799,12 +1720,12 @@ export function useData() {
   const stageWorkflows = asArray(useQuery({ 
     queryKey: ['stage_workflows'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('stage_workflows').select('*'); 
-      if (error) {
-        console.warn("Stage workflows query:", error.message);
-        return [];
-      }
-      return (data || []) as StageWorkflow[]; 
+      try {
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveWf = Array.isArray(driveRoot?.stage_workflows) ? driveRoot.stage_workflows : (Array.isArray(driveRoot?.data?.stage_workflows) ? driveRoot.data.stage_workflows : []);
+        if (driveWf.length > 0) return driveWf as StageWorkflow[];
+      } catch {}
+      return [] as StageWorkflow[]; 
     } 
   }).data);
 
@@ -1812,11 +1733,12 @@ export function useData() {
   const handoffRules = asArray(useQuery({ 
     queryKey: ['handoff_rules'], 
     queryFn: async () => { 
-      const { data, error } = await supabase.from('handoff_rules').select('*'); 
-      if (error) {
-        return [];
-      }
-      return (data || []) as HandoffRule[]; 
+      try {
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveRules = Array.isArray(driveRoot?.handoff_rules) ? driveRoot.handoff_rules : (Array.isArray(driveRoot?.data?.handoff_rules) ? driveRoot.data.handoff_rules : []);
+        if (driveRules.length > 0) return driveRules as HandoffRule[];
+      } catch {}
+      return [] as HandoffRule[]; 
     } 
   }).data);
 
@@ -1825,22 +1747,14 @@ export function useData() {
     queryKey: ['automations'], 
     queryFn: async () => { 
       let dbAutomations: any[] = [];
+
       try {
-        const { data, error } = await supabase.from('automations').select('*').order('created_at', { ascending: false }); 
-        if (!error && data && data.length > 0) {
-          dbAutomations = data.map(mapAutomationFromDb);
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveAutos = Array.isArray(driveRoot?.automations) ? driveRoot.automations : (Array.isArray(driveRoot?.data?.automations) ? driveRoot.data.automations : []);
+        if (driveAutos.length > 0) {
+          dbAutomations = driveAutos.map(mapAutomationFromDb);
         }
       } catch {}
-
-      if (dbAutomations.length === 0) {
-        try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          const driveAutos = Array.isArray(driveRoot?.automations) ? driveRoot.automations : (Array.isArray(driveRoot?.data?.automations) ? driveRoot.data.automations : []);
-          if (driveAutos.length > 0) {
-            dbAutomations = driveAutos.map(mapAutomationFromDb);
-          }
-        } catch {}
-      }
 
       if (dbAutomations.length === 0 && typeof window !== "undefined") {
         try {
@@ -1859,14 +1773,14 @@ export function useData() {
     queryFn: async () => { 
       const localSurveys = getLocalSurveys();
       let dbSurveys: Survey[] = [];
+
       try {
-        const { data, error } = await supabase.from('surveys').select('*').order('created_at', { ascending: false }); 
-        if (!error && data) {
-          dbSurveys = data as Survey[];
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveSurveys = Array.isArray(driveRoot?.surveys) ? driveRoot.surveys : (Array.isArray(driveRoot?.data?.surveys) ? driveRoot.data.surveys : []);
+        if (driveSurveys.length > 0) {
+          dbSurveys = driveSurveys;
         }
-      } catch (err) {
-        console.warn("Supabase surveys offline:", err);
-      }
+      } catch {}
 
       const map = new Map<string, Survey>();
       for (const s of DEFAULT_SURVEYS) {
@@ -1901,14 +1815,14 @@ export function useData() {
     queryFn: async () => { 
       const localResp = getLocalSurveyResponses();
       let dbResp: SurveyResponse[] = [];
+
       try {
-        const { data, error } = await supabase.from('survey_responses').select('*').order('created_at', { ascending: false }); 
-        if (!error && data) {
-          dbResp = data as SurveyResponse[];
+        const driveRoot: any = getLocalDatabaseRoot();
+        const driveResp = Array.isArray(driveRoot?.survey_responses) ? driveRoot.survey_responses : (Array.isArray(driveRoot?.data?.survey_responses) ? driveRoot.data.survey_responses : []);
+        if (driveResp.length > 0) {
+          dbResp = driveResp;
         }
-      } catch (err) {
-        console.warn("Supabase survey_responses offline:", err);
-      }
+      } catch {}
 
       // Tenta buscar também da rota local da API Express
       try {
@@ -1940,24 +1854,33 @@ export function useData() {
   const workingDays = asArray(useQuery({ 
     queryKey: ['working_days'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('working_days').select('*').maybeSingle(); 
-      return (data?.days as number[]) || [1,2,3,4,5]; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_working_days") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return [1,2,3,4,5]; 
     } 
   }).data) as number[];
 
   const holidays = asArray(useQuery({ 
     queryKey: ['holidays'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('holidays').select('*').maybeSingle(); 
-      return (data?.dates as string[]) || []; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_holidays") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return []; 
     } 
   }).data) as string[];
 
   const funnelTypes = asArray(useQuery({ 
     queryKey: ['funnel_types'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('funnel_types').select('*').maybeSingle(); 
-      return (data?.types as string[]) || ["Voucher", "Ebook", "Webinar", "Diagnóstico"]; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_funnel_types") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return ["Voucher", "Ebook", "Webinar", "Diagnóstico"]; 
     } 
   }).data) as string[];
 
@@ -1966,20 +1889,19 @@ export function useData() {
     queryKey: ['playbooks'], 
     queryFn: async () => { 
       let dbPbs: any[] = [];
+
       try {
-        const { data, error } = await supabase.from('playbooks').select('*'); 
-        if (!error && data && data.length > 0) {
-          dbPbs = data.map(mapPlaybookFromDb);
+        const driveRoot: any = getLocalDatabaseRoot();
+        const drivePbs = Array.isArray(driveRoot?.playbooks) ? driveRoot.playbooks : (Array.isArray(driveRoot?.data?.playbooks) ? driveRoot.data.playbooks : []);
+        if (drivePbs.length > 0) {
+          dbPbs = drivePbs.map(mapPlaybookFromDb);
         }
       } catch {}
 
-      if (dbPbs.length === 0) {
+      if (dbPbs.length === 0 && typeof window !== "undefined") {
         try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          const drivePbs = Array.isArray(driveRoot?.playbooks) ? driveRoot.playbooks : (Array.isArray(driveRoot?.data?.playbooks) ? driveRoot.data.playbooks : []);
-          if (drivePbs.length > 0) {
-            dbPbs = drivePbs.map(mapPlaybookFromDb);
-          }
+          const raw = localStorage.getItem("comet_local_playbooks");
+          if (raw) dbPbs = JSON.parse(raw);
         } catch {}
       }
 
@@ -1997,13 +1919,16 @@ export function useData() {
   const rolePermissionsRaw = useQuery({ 
     queryKey: ['role_permissions'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('role_permissions').select('*'); 
-      return data || []; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_role_stage_permissions") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return []; 
     } 
   }).data;
 
   const rolePermissions = useMemo(() => {
-    const dbPerms = (rolePermissionsRaw || []).reduce((acc: any, r) => { 
+    const dbPerms = (rolePermissionsRaw || []).reduce((acc: any, r: any) => { 
       acc[r.role] = r.stages; 
       return acc; 
     }, {});
@@ -2025,9 +1950,8 @@ export function useData() {
     setLocalRoleModules(next);
     try {
       localStorage.setItem("comet_role_module_permissions", JSON.stringify(next));
-      await supabase.from('role_permissions').upsert({ role: `modules_${role}`, stages: modules });
     } catch (err) {
-      console.warn("Aviso ao sincronizar permissões de módulos:", err);
+      console.warn("Aviso ao salvar permissões de módulos:", err);
     }
     toast.success(`Módulos liberados para ${role} atualizados!`);
   };
@@ -2050,32 +1974,44 @@ export function useData() {
   const visibility = useQuery({ 
     queryKey: ['visibility_settings'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('visibility_settings').select('*').maybeSingle(); 
-      return data || DEFAULT_VISIBILITY; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_visibility_settings") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return DEFAULT_VISIBILITY; 
     } 
   }).data ?? DEFAULT_VISIBILITY;
   
   const slaThresholds = useQuery({ 
     queryKey: ['sla_thresholds'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('sla_thresholds').select('*').maybeSingle(); 
-      return data || { alerta: 24, critico: 48, vencido: 72 }; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_sla_thresholds") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return { alerta: 24, critico: 48, vencido: 72 }; 
     } 
   }).data ?? { alerta: 24, critico: 48, vencido: 72 };
 
   const aiSettings = useQuery({ 
     queryKey: ['ai_settings'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('ai_settings').select('*').maybeSingle(); 
-      return data; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_ai_settings") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return null; 
     } 
   }).data;
 
   const company = useQuery({ 
     queryKey: ['company_settings'], 
     queryFn: async () => { 
-      const { data } = await supabase.from('company_settings').select('*').maybeSingle(); 
-      return (data || { id: '00000000-0000-0000-0000-000000000000', name: "Minha Empresa" }) as CompanySettings; 
+      try {
+        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_company_settings") : null;
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return { id: '00000000-0000-0000-0000-000000000000', name: "Minha Empresa" } as CompanySettings; 
     } 
   }).data;
 
@@ -2091,45 +2027,76 @@ export function useData() {
   }).data ?? { from: startOfMonth(new Date()), to: endOfMonth(new Date()), label: "Este mês", type: "thisMonth" };
 
   // ==========================================
-  // REALTIME SUBSCRIPTIONS (SUPABASE CHANNELS)
+  // REALTIME SYNCHRONIZATION (CROSS-TAB & STORAGE EVENTS)
   // ==========================================
   useEffect(() => {
-    // Usar identificador único por instância ou gerenciar canal com segurança
-    const channelId = `salead-rt-${Math.random().toString(36).substring(2, 9)}`;
-    const channel = supabase
-      .channel(channelId)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['leads'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pipelines' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['pipelines'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'company_settings' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['company_settings'] });
-      })
-      .subscribe();
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.key) return;
+      if (e.key.startsWith("comet_") || e.key.includes("drive") || e.key.includes("lead") || e.key.includes("lp")) {
+        queryClient.invalidateQueries();
+      }
+    };
+
+    const handleCustomDbUpdate = () => {
+      queryClient.invalidateQueries();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener('storage', handleStorageChange);
+      window.addEventListener('salead_database_root_updated', handleCustomDbUpdate);
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (typeof window !== "undefined") {
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('salead_database_root_updated', handleCustomDbUpdate);
+      }
     };
   }, [queryClient]);
 
+  const authSessionUser = getCurrentUser();
   const localEmail = typeof window !== "undefined" ? localStorage.getItem("comet_user_email") : null;
   const targetEmail = session?.user?.email || localEmail;
-  const currentUser = (targetEmail ? users.find(u => u.email?.toLowerCase() === targetEmail.toLowerCase()) : null) || users[0] || {
-    id: "admin-tiago",
-    name: "Tiago Rezeck",
-    email: "tiagorezeck@hotmail.com",
-    role: "Admin Geral",
-    contact: "",
-    avatar: "",
-    status: "Ativo",
-    goals: [],
-    operationalGoals: []
-  };
+
+  let currentUser: User;
+
+  // Se o usuário logado for o Standby Admin (ADMIN), ele tem acesso total a tudo, mas não aparece na lista de usuários do sistema
+  if (
+    authSessionUser?.isStandbyAdmin || 
+    authSessionUser?.email?.toLowerCase() === "admin@comet.com" ||
+    authSessionUser?.name?.toLowerCase().includes("standby") ||
+    targetEmail?.toLowerCase() === "admin@comet.com"
+  ) {
+    currentUser = {
+      id: SYSTEM_STANDBY_ADMIN.id,
+      name: "Administrador (Standby)",
+      email: SYSTEM_STANDBY_ADMIN.email,
+      role: "Admin Geral",
+      contact: "(11) 99999-9999",
+      avatarUrl: "",
+      avatar_url: "",
+      status: "Ativo",
+      goals: [],
+      operationalGoals: [],
+      allowedModules: SYSTEM_MODULES.map(m => m.id),
+      customPermissionsEnabled: false
+    };
+  } else {
+    currentUser = (targetEmail ? users.find(u => u.email?.toLowerCase() === targetEmail.toLowerCase()) : null) || users[0] || {
+      id: DEFAULT_REGISTERED_ADMIN.id,
+      name: DEFAULT_REGISTERED_ADMIN.name,
+      email: DEFAULT_REGISTERED_ADMIN.email,
+      role: "Admin Geral",
+      contact: DEFAULT_REGISTERED_ADMIN.contact || "(11) 98888-7777",
+      avatarUrl: "",
+      avatar_url: "",
+      status: "Ativo",
+      goals: [],
+      operationalGoals: [],
+      allowedModules: SYSTEM_MODULES.map(m => m.id),
+      customPermissionsEnabled: false
+    };
+  }
 
   return {
     initialized: !!company && !!currentUser,
@@ -2252,15 +2219,19 @@ export function useData() {
         };
 
         try {
-          const dbPayload = mapLeadToDb({ ...existingLeadMatch, ...updatedFields });
-          if (Object.keys(dbPayload).length > 0) {
-            await supabase.from('leads').update(dbPayload).eq('id', existingLeadMatch.id);
-          }
           await fetch(`/api/leads/${encodeURIComponent(existingLeadMatch.id)}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updatedFields),
           }).catch(() => {});
+
+          const driveCfg = getDriveConfig();
+          if (driveCfg.webappUrl) {
+            const rootDb = getLocalDatabaseRoot<any>() || {};
+            rootDb.leads = (rootDb.leads || []).map((l: any) => l.id === existingLeadMatch.id ? { ...l, ...updatedFields } : l);
+            saveLocalDatabaseRoot(rootDb);
+            pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+          }
         } catch {}
 
         invalidate('leads');
@@ -2334,10 +2305,8 @@ export function useData() {
         }
       };
 
-      // 1. Salva diretamente no banco de dados (Supabase e backend Express)
+      // 1. Salva diretamente no banco de dados (backend Express, Local Storage e Google Drive)
       try {
-        const dbPayload = mapLeadToDb(fullLead);
-        await supabase.from('leads').insert([dbPayload]).select();
         await fetch("/api/submit-lead", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2352,8 +2321,24 @@ export function useData() {
             isTest: fullLead.classification === "Lead Teste" || fullLead.tags.includes("leadtest"),
           }),
         }).catch(() => {});
+
+        // Salva no LocalStorage
+        if (typeof window !== "undefined") {
+          const rawLoc = localStorage.getItem("comet_local_leads");
+          const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
+          localStorage.setItem("comet_local_leads", JSON.stringify([fullLead, ...curLoc.filter((x: any) => x.id !== fullLead.id)]));
+        }
+
+        // Salva no Google Drive / Sheets
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.leads = [fullLead, ...(rootDb.leads || []).filter((x: any) => x.id !== fullLead.id)];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
       } catch (err) {
-        console.warn("Supabase lead insert notice:", err);
+        console.warn("Aviso ao salvar lead:", err);
       }
 
       invalidate('leads');
@@ -2376,14 +2361,27 @@ export function useData() {
         });
       } catch {}
 
-      // 3. Atualiza diretamente no Supabase
+      // 3. Atualiza no LocalStorage e Google Drive
       try {
-        const dbPayload = mapLeadToDb(u);
-        if (Object.keys(dbPayload).length > 0) {
-          await supabase.from('leads').update(dbPayload).eq('id', id).select();
+        if (typeof window !== "undefined") {
+          const rawLoc = localStorage.getItem("comet_local_leads");
+          if (rawLoc) {
+            const curLoc = JSON.parse(rawLoc);
+            if (Array.isArray(curLoc)) {
+              localStorage.setItem("comet_local_leads", JSON.stringify(curLoc.map((l: any) => l.id === id ? { ...l, ...u } : l)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.leads = (rootDb.leads || []).map((l: any) => l.id === id ? { ...l, ...u } : l);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
       } catch (err) {
-        console.warn("Supabase lead update pendente:", err);
+        console.warn("Aviso ao atualizar lead no Drive:", err);
       }
 
       invalidate('leads');
@@ -2433,14 +2431,17 @@ export function useData() {
         console.warn("Aviso ao remover lead no Google Drive:", driveErr);
       }
 
-      // 4. Remove no Supabase por id, email ou whatsapp se aplicável
-      try {
-        await supabase.from('leads').delete().eq('id', id);
-        if (targetEmail) {
-          await supabase.from('leads').delete().eq('email', targetEmail);
-        }
-      } catch (err) {
-        console.warn("Supabase lead delete notice:", err);
+      // 4. Remove do LocalStorage
+      if (typeof window !== "undefined") {
+        try {
+          const rawLoc = localStorage.getItem("comet_local_leads");
+          if (rawLoc) {
+            const curLoc = JSON.parse(rawLoc);
+            if (Array.isArray(curLoc)) {
+              localStorage.setItem("comet_local_leads", JSON.stringify(curLoc.filter((l: any) => l.id !== id)));
+            }
+          }
+        } catch {}
       }
 
       invalidate('leads');
@@ -2469,61 +2470,134 @@ export function useData() {
         console.warn("Aviso ao deletar leads em massa no Google Drive:", driveErr);
       }
 
-      // 3. Deleta no Supabase se aplicável
-      try {
-        const { error } = await supabase.from('leads').delete().in('id', ids);
-        if (error) {
-          console.warn("Supabase bulk delete aviso:", error);
-        }
-      } catch {}
+      // 3. Remove do LocalStorage
+      if (typeof window !== "undefined") {
+        try {
+          const idSet = new Set(ids);
+          const rawLoc = localStorage.getItem("comet_local_leads");
+          if (rawLoc) {
+            const curLoc = JSON.parse(rawLoc);
+            if (Array.isArray(curLoc)) {
+              localStorage.setItem("comet_local_leads", JSON.stringify(curLoc.filter((l: any) => !idSet.has(l.id))));
+            }
+          }
+        } catch {}
+      }
 
       toast.success("Leads excluídos com sucesso.");
       invalidate('leads');
     },
 
     bulkUpdateLeadStatus: async (ids: string[], status: string) => { 
-      const { error } = await supabase.from('leads').update({ classification: status }).in('id', ids);
-      if (error) {
-        console.error("Erro em bulk status:", error);
-        toast.error(`Falha ao atualizar status: ${error.message}`);
-        throw error;
-      }
+      const idSet = new Set(ids);
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((lead: any) => idSet.has(lead.id) ? { ...lead, classification: status } : lead);
+      });
+
+      try {
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.leads = (rootDb.leads || []).map((l: any) => idSet.has(l.id) ? { ...l, classification: status } : l);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Status atualizado com sucesso!");
       invalidate('leads');
     },
 
     // TASKS
     addTask: async (t: any) => { 
-      const dbPayload = mapTaskToDb(t);
-      const { data, error } = await supabase.from('tasks').insert([dbPayload]).select();
-      if (error) {
-        console.error("Erro ao criar tarefa:", error);
-        toast.error(`Falha ao criar tarefa: ${error.message}`);
-        throw error;
+      const newTask = {
+        id: t.id || `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: t.title || "Nova Tarefa",
+        done: Boolean(t.done),
+        dueDate: t.dueDate || t.due_date || new Date().toISOString(),
+        due_date: t.dueDate || t.due_date || new Date().toISOString(),
+        assignedTo: t.assignedTo || t.assigned_to || "",
+        assigned_to: t.assignedTo || t.assigned_to || "",
+        priority: t.priority || "media",
+        leadId: t.leadId || t.lead_id,
+        lead_id: t.leadId || t.lead_id,
+        leadName: t.leadName || t.lead_name,
+        lead_name: t.leadName || t.lead_name,
+        createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_tasks");
+          const current = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_tasks", JSON.stringify([newTask, ...current]));
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.tasks = [newTask, ...(rootDb.tasks || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err: any) {
+        console.warn("Aviso ao salvar tarefa:", err);
       }
+
+      toast.success("Tarefa adicionada!");
       invalidate('tasks');
-      return data;
+      return newTask;
     },
 
     updateTask: async (id: string, t: any) => { 
-      const dbPayload = mapTaskToDb(t);
-      const { data, error } = await supabase.from('tasks').update(dbPayload).eq('id', id).select();
-      if (error) {
-        console.error("Erro ao atualizar tarefa:", error);
-        toast.error(`Falha ao atualizar tarefa: ${error.message}`);
-        throw error;
+      queryClient.setQueryData(['tasks'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((task: any) => task.id === id ? { ...task, ...t } : task);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_tasks");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_tasks", JSON.stringify(list.map((task: any) => task.id === id ? { ...task, ...t } : task)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.tasks = (rootDb.tasks || []).map((task: any) => task.id === id ? { ...task, ...t } : task);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Aviso ao atualizar tarefa:", err);
       }
+
       invalidate('tasks');
-      return data;
     },
 
     deleteTask: async (id: string) => { 
+      queryClient.setQueryData(['tasks'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((task: any) => task.id !== id);
+      });
+
       try {
         await deleteTaskFromDrive(id);
-      } catch {}
-      try {
-        const { error } = await supabase.from('tasks').delete().eq('id', id);
-        if (error) {
-          console.warn("Supabase deleteTask notice:", error);
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_tasks");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_tasks", JSON.stringify(list.filter((task: any) => task.id !== id)));
+            }
+          }
         }
       } catch {}
       invalidate('tasks');
@@ -2533,14 +2607,37 @@ export function useData() {
       const task = tasks.find(t => t.id === id); 
       if (task) { 
         const nextDone = !task.done;
-        const { error } = await supabase.from('tasks').update({ 
+        const updates = { 
           done: nextDone,
+          completedAt: nextDone ? new Date().toISOString() : null,
           completed_at: nextDone ? new Date().toISOString() : null
-        }).eq('id', id);
-        if (error) {
-          toast.error("Erro ao alterar tarefa.");
-          return;
-        }
+        };
+        
+        queryClient.setQueryData(['tasks'], (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((t: any) => t.id === id ? { ...t, ...updates } : t);
+        });
+
+        try {
+          if (typeof window !== "undefined") {
+            const raw = localStorage.getItem("comet_local_tasks");
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                localStorage.setItem("comet_local_tasks", JSON.stringify(list.map((t: any) => t.id === id ? { ...t, ...updates } : t)));
+              }
+            }
+          }
+
+          const driveCfg = getDriveConfig();
+          if (driveCfg.webappUrl) {
+            const rootDb = getLocalDatabaseRoot<any>() || {};
+            rootDb.tasks = (rootDb.tasks || []).map((t: any) => t.id === id ? { ...t, ...updates } : t);
+            saveLocalDatabaseRoot(rootDb);
+            pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+          }
+        } catch {}
+
         invalidate('tasks');
       }
     },
@@ -2563,18 +2660,34 @@ export function useData() {
         } catch {}
       }
 
-      const dbPayload = {
+      const fullUser = {
         id,
-        ...mapUserToDb(u)
+        name: u.name || "Usuário",
+        email: u.email || "",
+        role: u.role || "Consultor Comercial",
+        contact: u.contact || "",
+        avatarUrl: u.avatarUrl || u.avatar_url || "",
+        status: u.status || "Ativo",
+        goals: u.goals || [],
+        operationalGoals: u.operationalGoals || [],
+        allowedModules: u.allowedModules || SYSTEM_MODULES.map(m => m.id),
+        customPermissionsEnabled: Boolean(u.customPermissionsEnabled)
       };
 
       try {
-        await supabase.from('profiles').insert([dbPayload]);
+        saveRegisteredUser(fullUser);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.users = [fullUser, ...(rootDb.users || []).filter((x: any) => x.id !== id)];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
       } catch (e) {
-        console.warn("Aviso ao cadastrar profiles no Supabase:", e);
+        console.warn("Aviso ao cadastrar usuário:", e);
       }
       invalidate('users');
-      return { id, ...u };
+      return fullUser;
     },
 
     updateUser: async (id: string, u: any) => { 
@@ -2592,32 +2705,36 @@ export function useData() {
         } catch {}
       }
 
-      const dbPayload = mapUserToDb(u);
       try {
-        const { error } = await supabase.from('profiles').update(dbPayload).eq('id', id);
-        if (error) {
-          console.warn("Aviso ao atualizar perfil no Supabase (usando armazenamento local):", error);
+        const localUsers = getRegisteredUsers();
+        const updated = localUsers.map(user => user.id === id ? { ...user, ...u } : user);
+        saveRegisteredUsers(updated);
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.users = updated;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
       } catch (err) {
-        console.warn("Erro ao atualizar profiles no Supabase:", err);
+        console.warn("Erro ao atualizar usuário:", err);
       }
       invalidate('users');
     },
 
     deleteUser: async (id: string) => { 
-      const sessionUser = getCurrentUser();
       const targetUser = users.find(u => u.id === id);
-      const activeAdminEmail = (sessionUser?.email || "sistemascomet@gmail.com").toLowerCase();
 
-      if (targetUser && (targetUser.email?.toLowerCase() === activeAdminEmail || (targetUser.role === "Admin Geral" && (targetUser.id === currentUser?.id || targetUser.email?.toLowerCase() === currentUser?.email?.toLowerCase())))) {
-        toast.error("Você não pode excluir a sua própria conta de Administrador Geral!");
-        throw new Error("Você não pode excluir a sua própria conta de Administrador Geral!");
-      }
-
-      try {
-        await supabase.from('profiles').delete().eq('id', id);
-      } catch (err: any) {
-        console.warn("Aviso ao deletar profile no Supabase:", err);
+      // Proteção rígida do Admin Titular (Tiago Rezeck)
+      if (
+        targetUser && 
+        (targetUser.email?.toLowerCase() === "tiagorezeck@hotmail.com" || 
+         targetUser.role === "Admin Geral" ||
+         targetUser.name?.toLowerCase().includes("tiago rezeck"))
+      ) {
+        toast.error("O Administrador Titular (Tiago Rezeck) é protegido pelo sistema e não pode ser excluído!");
+        throw new Error("O Administrador Titular (Tiago Rezeck) não pode ser excluído!");
       }
 
       try {
@@ -2627,117 +2744,300 @@ export function useData() {
         }
       } catch {}
 
+      // Sincroniza lista atualizada no Google Drive / Sheets
+      try {
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const remainingUsers = users.filter(u => u.id !== id);
+          const rootDb = getLocalDatabaseRoot() || {};
+          rootDb.users = remainingUsers;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
       invalidate('users');
     },
 
     // PRODUCTS
     addProduct: async (p: any) => { 
-      const dbPayload = mapProductToDb(p);
-      const { data, error } = await supabase.from('products').insert([dbPayload]).select();
-      if (error) {
-        console.error("Erro ao adicionar produto:", error);
-        toast.error(`Falha ao cadastrar produto: ${error.message}`);
-        throw error;
+      const newProduct = {
+        id: p.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: p.name || "Novo Produto",
+        price: Number(p.price) || 0,
+        active: p.active !== undefined ? Boolean(p.active) : true,
+        description: p.description || "",
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_products");
+          const current = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_products", JSON.stringify([newProduct, ...current]));
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.products = [newProduct, ...(rootDb.products || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err: any) {
+        console.warn("Aviso ao cadastrar produto:", err);
       }
+
+      toast.success("Produto cadastrado com sucesso!");
       invalidate('products');
-      return data;
+      return newProduct;
     },
 
     updateProduct: async (id: string, p: any) => { 
-      const dbPayload = mapProductToDb(p);
-      const { data, error } = await supabase.from('products').update(dbPayload).eq('id', id).select();
-      if (error) {
-        console.error("Erro ao atualizar produto:", error);
-        toast.error(`Falha ao atualizar produto: ${error.message}`);
-        throw error;
+      queryClient.setQueryData(['products'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((prod: any) => prod.id === id ? { ...prod, ...p } : prod);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_products");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_products", JSON.stringify(list.map((prod: any) => prod.id === id ? { ...prod, ...p } : prod)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.products = (rootDb.products || []).map((prod: any) => prod.id === id ? { ...prod, ...p } : prod);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Aviso ao atualizar produto:", err);
       }
+
+      toast.success("Produto atualizado!");
       invalidate('products');
-      return data;
     },
 
     deleteProduct: async (id: string) => { 
+      queryClient.setQueryData(['products'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((prod: any) => prod.id !== id);
+      });
+
       try {
         await deleteProductFromDrive(id);
-      } catch {}
-      try {
-        const { error } = await supabase.from('products').delete().eq('id', id);
-        if (error) {
-          console.warn("Supabase deleteProduct notice:", error);
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_products");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_products", JSON.stringify(list.filter((prod: any) => prod.id !== id)));
+            }
+          }
         }
       } catch {}
+
+      toast.success("Produto removido com sucesso.");
       invalidate('products');
     },
 
     // PLAYBOOKS
     addPlaybook: async (p: any) => { 
-      const dbPayload = mapPlaybookToDb(p);
-      const { data, error } = await supabase.from('playbooks').insert([dbPayload]).select();
-      if (error) {
-        console.error("Erro ao adicionar playbook:", error);
-        toast.error(`Falha ao criar playbook: ${error.message}`);
-        throw error;
+      const newPlaybook: Playbook = {
+        id: p.id || `pb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: p.title || "Novo Playbook",
+        description: p.description || "",
+        category: p.category || "Vendas",
+        content: p.content || "",
+        tags: Array.isArray(p.tags) ? p.tags : [],
+        stage: p.stage || "Geral",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_playbooks");
+          const current = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_playbooks", JSON.stringify([newPlaybook, ...current]));
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.playbooks = [newPlaybook, ...(rootDb.playbooks || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err: any) {
+        console.warn("Aviso ao criar playbook:", err);
       }
+
+      toast.success("Playbook criado com sucesso!");
       invalidate('playbooks');
-      return data;
+      return newPlaybook;
     },
 
     updatePlaybook: async (id: string, p: any) => { 
-      const dbPayload = mapPlaybookToDb(p);
-      const { data, error } = await supabase.from('playbooks').update(dbPayload).eq('id', id).select();
-      if (error) {
-        console.error("Erro ao atualizar playbook:", error);
-        toast.error(`Falha ao atualizar playbook: ${error.message}`);
-        throw error;
+      queryClient.setQueryData(['playbooks'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((pb: any) => pb.id === id ? { ...pb, ...p, updatedAt: new Date().toISOString() } : pb);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_playbooks");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_playbooks", JSON.stringify(list.map((pb: any) => pb.id === id ? { ...pb, ...p, updatedAt: new Date().toISOString() } : pb)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.playbooks = (rootDb.playbooks || []).map((pb: any) => pb.id === id ? { ...pb, ...p, updatedAt: new Date().toISOString() } : pb);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Aviso ao atualizar playbook:", err);
       }
+
+      toast.success("Playbook atualizado com sucesso!");
       invalidate('playbooks');
-      return data;
     },
 
     deletePlaybook: async (id: string) => { 
-      const { error } = await supabase.from('playbooks').delete().eq('id', id);
-      if (error) {
-        console.error("Erro ao apagar playbook:", error);
-        toast.error(`Falha ao excluir playbook: ${error.message}`);
-        throw error;
-      }
+      queryClient.setQueryData(['playbooks'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((pb: any) => pb.id !== id);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_playbooks");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_playbooks", JSON.stringify(list.filter((pb: any) => pb.id !== id)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.playbooks = (rootDb.playbooks || []).filter((pb: any) => pb.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Playbook excluído com sucesso!");
       invalidate('playbooks');
     },
 
     // OBJECTIONS
     addObjection: async (o: any) => { 
-      const { data, error } = await supabase.from('objections').insert([{
-        title: o.title,
-        category: o.category,
-        response: o.response
-      }]).select();
-      if (error) {
-        toast.error(`Falha ao criar objeção: ${error.message}`);
-        throw error;
+      const newObjection: Objection = {
+        id: o.id || `obj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: o.title || "Nova Objeção",
+        category: o.category || "Preço",
+        response: o.response || ""
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_objections");
+          const current = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_objections", JSON.stringify([newObjection, ...current]));
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.objections = [newObjection, ...(rootDb.objections || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err: any) {
+        console.warn("Aviso ao criar objeção:", err);
       }
+
+      toast.success("Objeção cadastrada com sucesso!");
       invalidate('objections');
-      return data;
+      return newObjection;
     },
 
     updateObjection: async (id: string, o: any) => { 
-      const { data, error } = await supabase.from('objections').update({
-        title: o.title,
-        category: o.category,
-        response: o.response
-      }).eq('id', id).select();
-      if (error) {
-        toast.error(`Falha ao atualizar objeção: ${error.message}`);
-        throw error;
+      queryClient.setQueryData(['objections'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((obj: any) => obj.id === id ? { ...obj, ...o } : obj);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_objections");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_objections", JSON.stringify(list.map((obj: any) => obj.id === id ? { ...obj, ...o } : obj)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.objections = (rootDb.objections || []).map((obj: any) => obj.id === id ? { ...obj, ...o } : obj);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Aviso ao atualizar objeção:", err);
       }
+
+      toast.success("Objeção atualizada!");
       invalidate('objections');
-      return data;
     },
 
     deleteObjection: async (id: string) => { 
-      const { error } = await supabase.from('objections').delete().eq('id', id);
-      if (error) {
-        toast.error(`Falha ao remover objeção: ${error.message}`);
-        throw error;
-      }
+      queryClient.setQueryData(['objections'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((obj: any) => obj.id !== id);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_objections");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_objections", JSON.stringify(list.filter((obj: any) => obj.id !== id)));
+            }
+          }
+        }
+
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.objections = (rootDb.objections || []).filter((obj: any) => obj.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Objeção removida!");
       invalidate('objections');
     },
 
@@ -2813,18 +3113,17 @@ export function useData() {
         console.warn("Erro ao chamar API de landing pages:", netErr);
       }
 
-      // 4. Sincroniza com Supabase se disponível
+      // 4. Sincroniza com Google Drive se configurado
       try {
-        const dbPayload = mapLPToDb(item);
-        const { data, error } = await supabase.from('landing_pages').insert([dbPayload]).select();
-        if (!error && data && data[0]) {
-          const syncedItem = mapLPFromDb(data[0]);
-          item.id = syncedItem.id;
-        } else if (error) {
-          console.info("Landing Page criada e salva com sucesso no armazenamento seguro (Supabase notice):", error.message);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.landingPages = [item, ...(rootDb.landingPages || []).filter((p: any) => p.id !== item.id && p.slug !== item.slug)];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
       } catch (err: any) {
-        console.warn("Sincronização com Supabase:", err);
+        console.warn("Aviso ao sincronizar LP com Google Drive:", err);
       }
 
       invalidate('landing_pages');
@@ -2915,19 +3214,14 @@ export function useData() {
           }
         }
 
-        // 3. Remove leads do Supabase e do servidor Express associados a esta LP
+        // 3. Remove leads do servidor Express associados a esta LP
         try {
-          if (targetTitle) {
-            await supabase.from('leads').delete().or(`landing_page.eq.${targetTitle},source.ilike.%${targetTitle}%`);
-          }
           await fetch(`/api/landing-pages/${encodeURIComponent(targetId)}/clear-test-leads`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ pageTitle: targetTitle, pageSlug: targetSlug })
           }).catch(() => {});
-        } catch (supErr) {
-          console.warn("Aviso ao deletar leads de teste do Supabase:", supErr);
-        }
+        } catch {}
 
         // 4. Limpa e zera contadores nas Planilhas e JSON do Google Drive
         try {
@@ -2978,41 +3272,17 @@ export function useData() {
         ]);
       } catch {}
 
-      // 4. Sincroniza com Supabase de forma resiliente usando upsert (insere se não existir, atualiza se existir)
+      // 4. Sincroniza com Google Drive se configurado
       try {
-        const dbPayload = mapLPToDb(updatedItem);
-        if (isUUID(targetId)) {
-          dbPayload.id = targetId;
-          const { error } = await supabase.from('landing_pages').upsert(dbPayload);
-          if (error) {
-            console.warn("Erro ao fazer upsert no Supabase, tentando update direto:", error.message);
-            const { data } = await supabase.from('landing_pages').select('id').eq('id', targetId).maybeSingle();
-            if (data) {
-              await supabase.from('landing_pages').update(dbPayload).eq('id', targetId);
-            } else {
-              await supabase.from('landing_pages').insert([dbPayload]);
-            }
-          }
-        } else {
-          // Busca por client_id, slug ou name caso não seja UUID
-          const { data: existingRow } = await supabase
-            .from('landing_pages')
-            .select('id')
-            .or(`config->>client_id.eq.${targetId},config->>slug.eq.${updatedItem.slug || targetId},name.eq.${updatedItem.name || targetId}`)
-            .limit(1)
-            .maybeSingle();
-
-          if (existingRow?.id) {
-            await supabase.from('landing_pages').update(dbPayload).eq('id', existingRow.id);
-          } else {
-            const { data: inserted } = await supabase.from('landing_pages').insert([dbPayload]).select().maybeSingle();
-            if (inserted?.id) {
-              updatedItem.id = inserted.id;
-            }
-          }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.landingPages = (rootDb.landingPages || []).map((p: any) => (p.id === targetId || p.slug === targetId) ? updatedItem : p);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
       } catch (err: any) {
-        console.warn("Supabase update/upsert notice:", err);
+        console.warn("Aviso ao atualizar LP no Google Drive:", err);
       }
 
       invalidate('landing_pages');
@@ -3069,19 +3339,7 @@ export function useData() {
         }
       } catch {}
 
-      // 4. Remove do Supabase por ID isolado se aplicável
-      try {
-        if (isUUID(id)) {
-          await supabase.from('landing_pages').delete().eq('id', id);
-        }
-        if (target && target.id && isUUID(target.id) && target.id !== id) {
-          await supabase.from('landing_pages').delete().eq('id', target.id);
-        }
-      } catch (err: any) {
-        console.warn("Supabase delete notice:", err);
-      }
-
-      // 5. Exclui permanentemente no Google Drive & Google Sheets
+      // 4. Exclui permanentemente no Google Drive & Google Sheets
       try {
         const targetTitle = target?.title || target?.name || "";
         const targetSlug = target?.slug || "";
@@ -3137,17 +3395,7 @@ export function useData() {
         }).catch(() => {});
       } catch {}
 
-      // 4. Remove do Supabase
-      try {
-        const validUuids = ids.filter(isUUID);
-        if (validUuids.length > 0) {
-          await supabase.from('landing_pages').delete().in('id', validUuids);
-        }
-      } catch (err: any) {
-        console.warn("Supabase bulk delete notice:", err);
-      }
-
-      // 5. Remove no Google Drive e Google Sheets
+      // 4. Remove no Google Drive e Google Sheets
       try {
         await deleteLandingPageFromDrive(ids);
         const driveCfg = getDriveConfig();
@@ -3197,17 +3445,7 @@ export function useData() {
         }).catch(() => {});
       } catch {}
 
-      // 4. Limpa no Supabase
-      try {
-        const uuidsToDelete = toDeleteIds.filter(isUUID);
-        if (uuidsToDelete.length > 0) {
-          await supabase.from('landing_pages').delete().in('id', uuidsToDelete);
-        }
-      } catch (err) {
-        console.warn("Supabase clean database notice:", err);
-      }
-
-      // 5. Limpa no Google Drive e Google Sheets
+      // 4. Limpa no Google Drive e Google Sheets
       try {
         await cleanDatabaseKeepOneInDrive(toKeep.id);
         const driveCfg = getDriveConfig();
@@ -3255,21 +3493,15 @@ export function useData() {
       saveLocalSurveys(updated);
 
       try {
-        const { data } = await supabase.from('surveys').insert([{
-          id: isUUID(newSurvey.id) ? newSurvey.id : undefined,
-          name: newSurvey.name,
-          type: newSurvey.type,
-          status: newSurvey.status,
-          questions: newSurvey.questions,
-          settings: newSurvey.settings,
-          reward: newSurvey.reward,
-          template: newSurvey.template
-        }]).select();
-        if (data && data[0] && data[0].id) {
-          newSurvey.id = data[0].id;
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.surveys = [newSurvey, ...(rootDb.surveys || []).filter((x: any) => x.id !== newSurvey.id)];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
       } catch (err) {
-        console.warn("Supabase survey add pendente, salvo localmente:", err);
+        console.warn("Aviso ao salvar pesquisa no Google Drive:", err);
       }
 
       invalidate('surveys');
@@ -3292,17 +3524,15 @@ export function useData() {
       saveLocalSurveys(updatedList);
 
       try {
-        await supabase.from('surveys').update({
-          name: updatedSurvey.name,
-          type: updatedSurvey.type,
-          status: updatedSurvey.status,
-          questions: updatedSurvey.questions,
-          settings: updatedSurvey.settings,
-          reward: updatedSurvey.reward,
-          template: updatedSurvey.template
-        }).eq('id', id);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.surveys = (rootDb.surveys || []).map((x: any) => x.id === id ? updatedSurvey : x);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
       } catch (err) {
-        console.warn("Supabase survey update pendente, salvo localmente:", err);
+        console.warn("Aviso ao atualizar pesquisa no Google Drive:", err);
       }
 
       invalidate('surveys');
@@ -3316,11 +3546,17 @@ export function useData() {
       try {
         await deleteSurveyFromDrive(id, targetSurvey?.name);
       } catch {}
+      
       try {
-        await supabase.from('surveys').delete().eq('id', id);
-      } catch (err) {
-        console.warn("Supabase survey delete pendente:", err);
-      }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.surveys = (rootDb.surveys || []).filter((x: any) => x.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
       invalidate('surveys');
     },
 
@@ -3352,231 +3588,489 @@ export function useData() {
       saveLocalSurveyResponses([newResponse, ...localList]);
 
       try {
-        await supabase.from('survey_responses').insert([{ 
-          id: isUUID(responseId) ? responseId : undefined,
-          survey_id: surveyId, 
-          lead_id: isUUID(leadIdVal) ? leadIdVal : null, 
-          landing_page_id: isUUID(lpIdVal) ? lpIdVal : null,
-          answers, 
-          duration_seconds: duration 
-        }]);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.surveyResponses = [newResponse, ...(rootDb.surveyResponses || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
       } catch (err) {
-        console.warn("Supabase survey_response sync notice:", err);
+        console.warn("Aviso ao salvar resposta da pesquisa no Google Drive:", err);
       }
+
       invalidate('survey_responses');
       return newResponse;
     },
 
     // PIPELINES
     addPipeline: async (name: string) => { 
-      const { data, error } = await supabase.from('pipelines').insert([{ name }]).select();
-      if (error) {
-        toast.error(`Falha ao criar pipeline: ${error.message}`);
-        throw error;
-      }
+      const newPipe = {
+        id: `pipe_${Date.now()}`,
+        name,
+        color: "#4F46E5",
+        is_default: false,
+        created_at: new Date().toISOString()
+      };
+
+      queryClient.setQueryData(['pipelines'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [...list, newPipe];
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_pipelines");
+          const list = raw ? JSON.parse(raw) : DEFAULT_PIPELINES;
+          localStorage.setItem("comet_local_pipelines", JSON.stringify([...list, newPipe]));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.pipelines = [...(rootDb.pipelines || DEFAULT_PIPELINES), newPipe];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Pipeline criado com sucesso!");
       invalidate('pipelines');
-      return data;
+      return [newPipe];
     },
 
     updatePipeline: async (id: string, u: any) => { 
-      const { error } = await supabase.from('pipelines').update(u).eq('id', id);
-      if (error) {
-        toast.error(`Falha ao atualizar pipeline: ${error.message}`);
-        throw error;
-      }
+      queryClient.setQueryData(['pipelines'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((p: any) => p.id === id ? { ...p, ...u } : p);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_pipelines");
+          const list = raw ? JSON.parse(raw) : DEFAULT_PIPELINES;
+          localStorage.setItem("comet_local_pipelines", JSON.stringify(list.map((p: any) => p.id === id ? { ...p, ...u } : p)));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.pipelines = (rootDb.pipelines || DEFAULT_PIPELINES).map((p: any) => p.id === id ? { ...p, ...u } : p);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Pipeline atualizado com sucesso!");
       invalidate('pipelines');
     },
 
     deletePipeline: async (id: string) => { 
-      const { error } = await supabase.from('pipelines').delete().eq('id', id);
-      if (error) {
-        toast.error(`Falha ao apagar pipeline: ${error.message}`);
-        throw error;
-      }
+      queryClient.setQueryData(['pipelines'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((p: any) => p.id !== id);
+      });
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_pipelines");
+          const list = raw ? JSON.parse(raw) : DEFAULT_PIPELINES;
+          localStorage.setItem("comet_local_pipelines", JSON.stringify(list.filter((p: any) => p.id !== id)));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.pipelines = (rootDb.pipelines || DEFAULT_PIPELINES).filter((p: any) => p.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Pipeline removido com sucesso!");
       invalidate('pipelines');
     },
 
     // PERMISSIONS & CONFIGS
     updateRolePermissions: async (role: string, stages: string[]) => { 
-      const { error } = await supabase.from('role_permissions').upsert({ role, stages });
-      if (error) {
-        toast.error(`Falha ao salvar permissões: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_role_permissions");
+          const map = raw ? JSON.parse(raw) : {};
+          map[role] = stages;
+          localStorage.setItem("comet_role_permissions", JSON.stringify(map));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.rolePermissions = { ...(rootDb.rolePermissions || {}), [role]: stages };
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Permissões atualizadas com sucesso!");
       invalidate('role_permissions');
     },
     
     setWorkingDays: async (days: number[]) => { 
-      const { error } = await supabase.from('working_days').upsert({ id: '00000000-0000-0000-0000-000000000000', days });
-      if (error) {
-        toast.error(`Falha ao salvar dias úteis: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_working_days", JSON.stringify(days));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.workingDays = days;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Dias úteis atualizados com sucesso!");
       invalidate('working_days');
     },
 
     setHolidays: async (dates: string[]) => { 
-      const { error } = await supabase.from('holidays').upsert({ id: '00000000-0000-0000-0000-000000000000', dates });
-      if (error) {
-        toast.error(`Falha ao salvar feriados: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_holidays", JSON.stringify(dates));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.holidays = dates;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Feriados atualizados com sucesso!");
       invalidate('holidays');
     },
 
     setVisibility: async (v: VisibilitySettings) => { 
-      const { error } = await supabase.from('visibility_settings').upsert({ id: '00000000-0000-0000-0000-000000000000', ...v });
-      if (error) {
-        toast.error(`Falha ao atualizar visibilidade: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_visibility_settings", JSON.stringify(v));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.visibility = v;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Visibilidade atualizada com sucesso!");
       invalidate('visibility_settings');
     },
 
     setSlaThresholds: async (t: any) => { 
-      const { error } = await supabase.from('sla_thresholds').upsert({ id: '00000000-0000-0000-0000-000000000000', ...t });
-      if (error) {
-        toast.error(`Falha ao atualizar SLA: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_sla_thresholds", JSON.stringify(t));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.slaThresholds = t;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("SLA atualizado com sucesso!");
       invalidate('sla_thresholds');
     },
 
     // MARKETING INVESTMENTS
     addMarketingInvestment: async (inv: any) => { 
-      const payload = {
+      const newInv = {
+        id: inv.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         amount: Number(inv.amount) || 0,
-        channel: inv.channel,
-        start_date: inv.start_date || inv.startDate,
-        end_date: inv.end_date || inv.endDate,
-        landing_page_id: isUUID(inv.landing_page_id || inv.landingPageId) ? (inv.landing_page_id || inv.landingPageId) : null,
-        description: inv.description || ""
+        channel: inv.channel || "Meta Ads",
+        start_date: inv.start_date || inv.startDate || new Date().toISOString(),
+        end_date: inv.end_date || inv.endDate || new Date().toISOString(),
+        landing_page_id: inv.landing_page_id || inv.landingPageId || null,
+        description: inv.description || "",
+        created_at: new Date().toISOString()
       };
-      const { data, error } = await supabase.from('marketing_investments').insert([payload]).select();
-      if (error) {
-        toast.error(`Falha ao lançar investimento: ${error.message}`);
-        throw error;
-      }
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_investments");
+          const list = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_investments", JSON.stringify([newInv, ...list]));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.marketingInvestments = [newInv, ...(rootDb.marketingInvestments || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
       toast.success("Investimento lançado com sucesso!");
       invalidate('marketing_investments');
-      return data;
+      return [newInv];
     },
 
     deleteMarketingInvestment: async (id: string) => { 
-      const { error } = await supabase.from('marketing_investments').delete().eq('id', id);
-      if (error) {
-        toast.error(`Falha ao remover investimento: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_investments");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_investments", JSON.stringify(list.filter((x: any) => x.id !== id)));
+            }
+          }
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.marketingInvestments = (rootDb.marketingInvestments || []).filter((x: any) => x.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
       toast.success("Investimento removido!");
       invalidate('marketing_investments');
     },
 
     // AUTOMATIONS
     addAutomation: async (a: any) => { 
-      const dbPayload = mapAutomationToDb(a);
-      const { data, error } = await supabase.from('automations').insert([dbPayload]).select();
-      if (error) {
-        toast.error(`Falha ao criar automação: ${error.message}`);
-        throw error;
-      }
+      const newAuto = {
+        ...a,
+        id: a.id || Date.now(),
+        active: a.active !== undefined ? a.active : true,
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_automations");
+          const list = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_automations", JSON.stringify([newAuto, ...list]));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.automations = [newAuto, ...(rootDb.automations || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Automação criada com sucesso!");
       invalidate('automations');
-      return data;
+      return [newAuto];
     },
 
     updateAutomation: async (id: number, a: any) => { 
-      const dbPayload = mapAutomationToDb(a);
-      const { data, error } = await supabase.from('automations').update(dbPayload).eq('id', id).select();
-      if (error) {
-        toast.error(`Falha ao atualizar automação: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_automations");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_automations", JSON.stringify(list.map((x: any) => x.id === id ? { ...x, ...a } : x)));
+            }
+          }
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.automations = (rootDb.automations || []).map((x: any) => x.id === id ? { ...x, ...a } : x);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Automação atualizada com sucesso!");
       invalidate('automations');
-      return data;
+      return [{ id, ...a }];
     },
 
     deleteAutomation: async (id: number) => { 
-      const { error } = await supabase.from('automations').delete().eq('id', id);
-      if (error) {
-        toast.error(`Falha ao apagar automação: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_automations");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_automations", JSON.stringify(list.filter((x: any) => x.id !== id)));
+            }
+          }
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.automations = (rootDb.automations || []).filter((x: any) => x.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Automação removida com sucesso!");
       invalidate('automations');
     },
 
     toggleAutomation: async (id: number) => { 
       const aut = automations.find(a => a.id === id); 
       if (aut) { 
-        const { error } = await supabase.from('automations').update({ active: !aut.active }).eq('id', id);
-        if (error) {
-          toast.error("Erro ao alterar status da automação.");
-          return;
-        }
+        const updated = !aut.active;
+        try {
+          if (typeof window !== "undefined") {
+            const raw = localStorage.getItem("comet_local_automations");
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                localStorage.setItem("comet_local_automations", JSON.stringify(list.map((x: any) => x.id === id ? { ...x, active: updated } : x)));
+              }
+            }
+          }
+          const driveCfg = getDriveConfig();
+          if (driveCfg.webappUrl) {
+            const rootDb = getLocalDatabaseRoot<any>() || {};
+            rootDb.automations = (rootDb.automations || []).map((x: any) => x.id === id ? { ...x, active: updated } : x);
+            saveLocalDatabaseRoot(rootDb);
+            pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+          }
+        } catch {}
+
         invalidate('automations');
       }
     },
 
     // HANDOFF RULES
     addHandoffRule: async (r: any) => { 
-      const { data, error } = await supabase.from('handoff_rules').insert([r]).select();
-      if (error) {
-        toast.error(`Falha ao criar regra de handoff: ${error.message}`);
-        throw error;
-      }
+      const newRule = {
+        id: r.id || `hr_${Date.now()}`,
+        ...r,
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_handoff_rules");
+          const list = raw ? JSON.parse(raw) : [];
+          localStorage.setItem("comet_local_handoff_rules", JSON.stringify([newRule, ...list]));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.handoffRules = [newRule, ...(rootDb.handoffRules || [])];
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Regra de handoff criada com sucesso!");
       invalidate('handoff_rules');
-      return data;
+      return [newRule];
     },
 
     updateHandoffRule: async (id: string, r: any) => { 
-      const { data, error } = await supabase.from('handoff_rules').update(r).eq('id', id).select();
-      if (error) {
-        toast.error(`Falha ao atualizar regra de handoff: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_handoff_rules");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_handoff_rules", JSON.stringify(list.map((x: any) => x.id === id ? { ...x, ...r } : x)));
+            }
+          }
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.handoffRules = (rootDb.handoffRules || []).map((x: any) => x.id === id ? { ...x, ...r } : x);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Regra de handoff atualizada!");
       invalidate('handoff_rules');
-      return data;
+      return [{ id, ...r }];
     },
 
     deleteHandoffRule: async (id: string) => { 
-      const { error } = await supabase.from('handoff_rules').delete().eq('id', id);
-      if (error) {
-        toast.error(`Falha ao apagar regra de handoff: ${error.message}`);
-        throw error;
-      }
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_handoff_rules");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem("comet_local_handoff_rules", JSON.stringify(list.filter((x: any) => x.id !== id)));
+            }
+          }
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.handoffRules = (rootDb.handoffRules || []).filter((x: any) => x.id !== id);
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
+      toast.success("Regra de handoff excluída!");
       invalidate('handoff_rules');
     },
 
     // STAGE WORKFLOWS
     updateWorkflow: async (pipelineId: string, stageName: string, updates: Partial<StageWorkflow>) => { 
-      const { error } = await supabase.from('stage_workflows').upsert({ 
-        stage_id: isUUID(pipelineId) ? pipelineId : undefined, 
-        rule_text: updates.rules?.map(r => r.text).join('; ') || '',
-        ...updates 
-      });
-      if (error) {
-        console.warn("Erro ao atualizar workflow:", error.message);
+      try {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("comet_local_stage_workflows");
+          const map = raw ? JSON.parse(raw) : {};
+          const key = `${pipelineId}_${stageName}`;
+          map[key] = { ...(map[key] || {}), ...updates, stageName, pipelineId };
+          localStorage.setItem("comet_local_stage_workflows", JSON.stringify(map));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.stageWorkflows = { ...(rootDb.stageWorkflows || {}), [`${pipelineId}_${stageName}`]: updates };
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch (err: any) {
+        console.warn("Aviso ao atualizar workflow:", err.message);
       }
       invalidate('stage_workflows');
     },
 
     // COMPANY SETTINGS
     setCompany: async (c: any) => { 
-      const { error } = await supabase.from('company_settings').upsert({ 
-        id: '00000000-0000-0000-0000-000000000000', 
-        name: c.name,
-        sector: c.sector,
-        purpose: c.purpose,
-        logo: c.logo,
-        contact: c.contact,
-        email: c.email,
-        address: c.address,
-        website: c.website,
+      const updated = {
+        name: c.name || "Minha Empresa",
+        sector: c.sector || "",
+        purpose: c.purpose || "",
+        logo: c.logo || "",
+        contact: c.contact || "",
+        email: c.email || "",
+        address: c.address || "",
+        website: c.website || "",
         updated_at: new Date().toISOString()
-      });
-      if (error) {
-        toast.error(`Falha ao salvar dados da empresa: ${error.message}`);
-        throw error;
-      }
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_company_settings", JSON.stringify(updated));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.company = updated;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
       toast.success("Dados da empresa atualizados!");
       invalidate('company_settings');
     },
@@ -3587,16 +4081,25 @@ export function useData() {
     },
 
     setAIConfig: async (config: any) => { 
-      const { error } = await supabase.from('ai_config').upsert({ 
-        id: '00000000-0000-0000-0000-000000000000', 
+      const updated = {
         openrouter_key: config.openRouterKey, 
         model_id: config.modelId, 
         model_name: config.modelName 
-      });
-      if (error) {
-        toast.error(`Falha ao configurar IA: ${error.message}`);
-        throw error;
-      }
+      };
+
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_ai_config", JSON.stringify(updated));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.aiConfig = updated;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
+
       invalidate('ai_settings'); 
       toast.success("Configuração de IA salva com sucesso!");
     },
@@ -3644,64 +4147,74 @@ export function useData() {
       toast.loading(mode === 'replace' ? "Substituindo base de dados..." : "Mesclando dados no sistema...");
 
       try {
-        if (mode === 'replace') {
-          // Limpeza inicial antes de reinserir
-          const wipeList = ['tasks', 'leads', 'products', 'playbooks', 'objections', 'landing_pages', 'surveys', 'automations', 'marketing_investments'];
-          for (const tbl of wipeList) {
-            await supabase.from(tbl).delete().not('id', 'is', null);
-          }
-        }
+        const rootDb = getLocalDatabaseRoot<any>() || {};
 
-        // 1. Leads
         if (Array.isArray(newData.leads) && newData.leads.length > 0) {
-          const leadRows = newData.leads.map((l: any) => mapLeadToDb(l));
-          await supabase.from('leads').upsert(leadRows);
+          const currentLeads = mode === 'replace' ? [] : (rootDb.leads || getLocalLeads() || []);
+          const mergedLeads = mode === 'replace' ? newData.leads : [...newData.leads, ...currentLeads.filter((cl: any) => !newData.leads.some((nl: any) => nl.id === cl.id))];
+          saveLocalLeads(mergedLeads);
+          rootDb.leads = mergedLeads;
         }
 
-        // 2. Tasks
         if (Array.isArray(newData.tasks) && newData.tasks.length > 0) {
-          const taskRows = newData.tasks.map((t: any) => mapTaskToDb(t));
-          await supabase.from('tasks').upsert(taskRows);
+          const currentTasks = mode === 'replace' ? [] : (rootDb.tasks || getLocalTasks() || []);
+          const mergedTasks = mode === 'replace' ? newData.tasks : [...newData.tasks, ...currentTasks.filter((ct: any) => !newData.tasks.some((nt: any) => nt.id === ct.id))];
+          saveLocalTasks(mergedTasks);
+          rootDb.tasks = mergedTasks;
         }
 
-        // 3. Products
         if (Array.isArray(newData.products) && newData.products.length > 0) {
-          const prodRows = newData.products.map((p: any) => mapProductToDb(p));
-          await supabase.from('products').upsert(prodRows);
+          const currentProducts = mode === 'replace' ? [] : (rootDb.products || []);
+          const mergedProducts = mode === 'replace' ? newData.products : [...newData.products, ...currentProducts.filter((cp: any) => !newData.products.some((np: any) => np.id === cp.id))];
+          rootDb.products = mergedProducts;
+          if (typeof window !== "undefined") localStorage.setItem("comet_local_products", JSON.stringify(mergedProducts));
         }
 
-        // 4. Playbooks
         if (Array.isArray(newData.playbooks) && newData.playbooks.length > 0) {
-          const pbRows = newData.playbooks.map((pb: any) => mapPlaybookToDb(pb));
-          await supabase.from('playbooks').upsert(pbRows);
+          const currentPlaybooks = mode === 'replace' ? [] : (rootDb.playbooks || []);
+          const mergedPlaybooks = mode === 'replace' ? newData.playbooks : [...newData.playbooks, ...currentPlaybooks.filter((cp: any) => !newData.playbooks.some((np: any) => np.id === cp.id))];
+          rootDb.playbooks = mergedPlaybooks;
+          if (typeof window !== "undefined") localStorage.setItem("comet_local_playbooks", JSON.stringify(mergedPlaybooks));
         }
 
-        // 5. Objections
         if (Array.isArray(newData.objections) && newData.objections.length > 0) {
-          await supabase.from('objections').upsert(newData.objections);
+          const currentObjections = mode === 'replace' ? [] : (rootDb.objections || []);
+          const mergedObjections = mode === 'replace' ? newData.objections : [...newData.objections, ...currentObjections.filter((co: any) => !newData.objections.some((no: any) => no.id === co.id))];
+          rootDb.objections = mergedObjections;
+          if (typeof window !== "undefined") localStorage.setItem("comet_local_objections", JSON.stringify(mergedObjections));
         }
 
-        // 6. Landing Pages
         if (Array.isArray(newData.landingPages) && newData.landingPages.length > 0) {
-          const lpRows = newData.landingPages.map((lp: any) => mapLPToDb(lp));
-          await supabase.from('landing_pages').upsert(lpRows);
+          const currentLps = mode === 'replace' ? [] : (rootDb.landingPages || getLocalLandingPages() || []);
+          const mergedLps = mode === 'replace' ? newData.landingPages : [...newData.landingPages, ...currentLps.filter((clp: any) => !newData.landingPages.some((nlp: any) => nlp.id === clp.id))];
+          saveLocalLandingPages(mergedLps);
+          rootDb.landingPages = mergedLps;
         }
 
-        // 7. Automations
         if (Array.isArray(newData.automations) && newData.automations.length > 0) {
-          const autoRows = newData.automations.map((a: any) => mapAutomationToDb(a));
-          await supabase.from('automations').upsert(autoRows);
+          const currentAutos = mode === 'replace' ? [] : (rootDb.automations || []);
+          const mergedAutos = mode === 'replace' ? newData.automations : [...newData.automations, ...currentAutos.filter((ca: any) => !newData.automations.some((na: any) => na.id === ca.id))];
+          rootDb.automations = mergedAutos;
+          if (typeof window !== "undefined") localStorage.setItem("comet_local_automations", JSON.stringify(mergedAutos));
         }
 
-        // 8. Configurações gerais
+        if (newData.company) {
+          rootDb.company = newData.company;
+          if (typeof window !== "undefined") localStorage.setItem("comet_company_settings", JSON.stringify(newData.company));
+        }
         if (newData.visibility) {
-          await supabase.from('visibility_settings').upsert({ id: '00000000-0000-0000-0000-000000000000', ...newData.visibility });
+          rootDb.visibility = newData.visibility;
+          if (typeof window !== "undefined") localStorage.setItem("comet_visibility_settings", JSON.stringify(newData.visibility));
         }
         if (newData.slaThresholds) {
-          await supabase.from('sla_thresholds').upsert({ id: '00000000-0000-0000-0000-000000000000', ...newData.slaThresholds });
+          rootDb.slaThresholds = newData.slaThresholds;
+          if (typeof window !== "undefined") localStorage.setItem("comet_sla_thresholds", JSON.stringify(newData.slaThresholds));
         }
-        if (newData.company) {
-          await supabase.from('company_settings').upsert({ id: '00000000-0000-0000-0000-000000000000', ...newData.company });
+
+        saveLocalDatabaseRoot(rootDb);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          await pushToGoogleDrive(driveCfg.webappUrl, rootDb);
         }
 
         queryClient.invalidateQueries();
@@ -3717,45 +4230,71 @@ export function useData() {
       toast.loading(`Importando registros de ${key}...`);
       try {
         const items = Array.isArray(data) ? data : [data];
+        const rootDb = getLocalDatabaseRoot<any>() || {};
 
         switch (key) {
           case 'leads': {
-            const dbPayloads = items.map(mapLeadToDb);
-            await supabase.from('leads').insert(dbPayloads);
+            const current = getLocalLeads();
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            saveLocalLeads(merged);
+            rootDb.leads = merged;
             break;
           }
           case 'tasks': {
-            const dbPayloads = items.map(mapTaskToDb);
-            await supabase.from('tasks').insert(dbPayloads);
+            const current = getLocalTasks();
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            saveLocalTasks(merged);
+            rootDb.tasks = merged;
             break;
           }
           case 'products': {
-            const dbPayloads = items.map(mapProductToDb);
-            await supabase.from('products').insert(dbPayloads);
+            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_products") : null;
+            const current = raw ? JSON.parse(raw) : [];
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            if (typeof window !== "undefined") localStorage.setItem("comet_local_products", JSON.stringify(merged));
+            rootDb.products = merged;
             break;
           }
           case 'objections': {
-            await supabase.from('objections').insert(items);
+            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_objections") : null;
+            const current = raw ? JSON.parse(raw) : [];
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            if (typeof window !== "undefined") localStorage.setItem("comet_local_objections", JSON.stringify(merged));
+            rootDb.objections = merged;
             break;
           }
           case 'landingPages': {
-            const dbPayloads = items.map(mapLPToDb);
-            await supabase.from('landing_pages').insert(dbPayloads);
+            const current = getLocalLandingPages();
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            saveLocalLandingPages(merged);
+            rootDb.landingPages = merged;
             break;
           }
           case 'playbooks': {
-            const dbPayloads = items.map(mapPlaybookToDb);
-            await supabase.from('playbooks').insert(dbPayloads);
+            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_playbooks") : null;
+            const current = raw ? JSON.parse(raw) : [];
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            if (typeof window !== "undefined") localStorage.setItem("comet_local_playbooks", JSON.stringify(merged));
+            rootDb.playbooks = merged;
             break;
           }
           case 'automations': {
-            const dbPayloads = items.map(mapAutomationToDb);
-            await supabase.from('automations').insert(dbPayloads);
+            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_automations") : null;
+            const current = raw ? JSON.parse(raw) : [];
+            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
+            if (typeof window !== "undefined") localStorage.setItem("comet_local_automations", JSON.stringify(merged));
+            rootDb.automations = merged;
             break;
           }
           default: {
             console.warn(`Módulo ${key} não possui handler específico.`);
           }
+        }
+
+        saveLocalDatabaseRoot(rootDb);
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
 
         queryClient.invalidateQueries();
@@ -3769,16 +4308,38 @@ export function useData() {
 
     addFunnelType: async (type: string) => { 
       const next = [...funnelTypes, type]; 
-      const { error } = await supabase.from('funnel_types').upsert({ id: '00000000-0000-0000-0000-000000000000', types: next }); 
-      if (error) toast.error("Erro ao salvar tipo de funil.");
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_funnel_types", JSON.stringify(next));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.funnelTypes = next;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
       invalidate('funnel_types'); 
+      toast.success("Tipo de funil adicionado com sucesso!");
     },
 
     deleteFunnelType: async (type: string) => { 
       const next = funnelTypes.filter(t => t !== type); 
-      const { error } = await supabase.from('funnel_types').upsert({ id: '00000000-0000-0000-0000-000000000000', types: next }); 
-      if (error) toast.error("Erro ao remover tipo de funil.");
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("comet_funnel_types", JSON.stringify(next));
+        }
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.funnelTypes = next;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        }
+      } catch {}
       invalidate('funnel_types'); 
+      toast.success("Tipo de funil removido!");
     },
 
     resetData: async () => {
@@ -3788,9 +4349,6 @@ export function useData() {
         toast.error("Acesso Negado: Apenas o Administrador Geral pode resetar o banco de dados!");
         return;
       }
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
       const toastId = toast.loading("Criando checkpoint e executando limpeza do banco...");
 
@@ -3843,66 +4401,70 @@ export function useData() {
         console.warn("Aviso na criação do checkpoint pré-reset:", cpErr);
       }
 
-      // 1. Limpeza de tabelas transacionais e customizadas (A BASE DE LEADS NUNCA É APAGADA NO RESET)
-      const tablesToWipe = [
-        'tasks', 'marketing_investments', 
-        'survey_responses', 'handoff_rules', 'stage_workflows', 'automations',
-        'objections', 'playbooks', 'landing_pages', 'surveys', 'products', 'pipelines'
-      ];
-
-      for (const table of tablesToWipe) {
-        await supabase.from(table).delete().not('id', 'is', null);
-      }
-
-      // 2. Limpeza de Membros (Mantém apenas o usuário ativo)
-      await supabase.from('profiles').delete().neq('id', user.id);
-
-      // 3. Limpeza de caches e LPs locais para abrir ambiente zerado e limpo
+      // 1. Limpeza de dados transacionais e customizados (A BASE DE LEADS NUNCA É APAGADA NO RESET)
       try {
+        saveLocalTasks([]);
+        saveLocalSurveys([]);
+        saveLocalSurveyResponses([]);
+        saveLocalLandingPages([]);
         localStorage.removeItem(LOCAL_LP_STORAGE_KEY);
         localStorage.removeItem(DELETED_LP_STORAGE_KEY);
         localStorage.removeItem(LP_SEED_INITIALIZED_KEY);
-      } catch {}
+        localStorage.removeItem("comet_local_investments");
+        localStorage.removeItem("comet_local_products");
+        localStorage.removeItem("comet_local_objections");
+        localStorage.removeItem("comet_local_handoff_rules");
+        localStorage.removeItem("comet_local_stage_workflows");
 
-      // 4. RECRIAR PADRÕES (SEED)
-      
-      // 4a. Inserir Pipelines Padrão
-      for (const pipe of DEFAULT_PIPELINES) {
-        await supabase.from('pipelines').insert([{
-          name: pipe.name,
-          color: pipe.color,
-          is_default: pipe.id === "prospection"
-        }]);
-      }
+        // 2. RECRIAR PADRÕES (SEED)
+        localStorage.setItem("comet_local_pipelines", JSON.stringify(DEFAULT_PIPELINES));
+        localStorage.setItem("comet_local_playbooks", JSON.stringify(DEFAULT_PLAYBOOKS));
+        localStorage.setItem("comet_local_automations", JSON.stringify([
+          {
+            id: 1,
+            name: "SLA: Alerta de Inatividade (24h)",
+            category: "SLA",
+            trigger_event: "lead.sla_breach",
+            priority: "alta",
+            active: true,
+            action_type: "notify",
+            action_config: { message: "Atenção! Um lead entrou em zona de alerta por falta de interação." }
+          },
+          {
+            id: 2,
+            name: "Tarefa: Primeiro Contato Inbound",
+            category: "Vendas",
+            trigger_event: "lead.created",
+            priority: "urgente",
+            active: true,
+            action_type: "create_task",
+            action_config: { title: "Realizar primeiro contato via WhatsApp (Lead Novo)" }
+          }
+        ]));
 
-      // 4b. Inserir Playbooks Padrão
-      for (const pb of DEFAULT_PLAYBOOKS) {
-        await supabase.from('playbooks').insert([mapPlaybookToDb(pb)]);
-      }
-
-      // 4c. Automações Padrão
-      await supabase.from('automations').insert([
-        {
-          name: "SLA: Alerta de Inatividade (24h)",
-          category: "SLA",
-          trigger_event: "lead.sla_breach",
-          priority: "alta",
-          active: true,
-          action_type: "notify",
-          action_config: { message: "Atenção! Um lead entrou em zona de alerta por falta de interação." }
-        },
-        {
-          name: "Tarefa: Primeiro Contato Inbound",
-          category: "Vendas",
-          trigger_event: "lead.created",
-          priority: "urgente",
-          active: true,
-          action_type: "create_task",
-          action_config: { title: "Realizar primeiro contato via WhatsApp (Lead Novo)" }
+        // Atualiza Google Drive se configurado
+        const driveCfg = getDriveConfig();
+        if (driveCfg.webappUrl) {
+          const rootDb = getLocalDatabaseRoot<any>() || {};
+          rootDb.tasks = [];
+          rootDb.surveys = [];
+          rootDb.surveyResponses = [];
+          rootDb.landingPages = [];
+          rootDb.marketingInvestments = [];
+          rootDb.products = [];
+          rootDb.objections = [];
+          rootDb.handoffRules = [];
+          rootDb.stageWorkflows = {};
+          rootDb.pipelines = DEFAULT_PIPELINES;
+          rootDb.playbooks = DEFAULT_PLAYBOOKS;
+          saveLocalDatabaseRoot(rootDb);
+          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
-      ]);
+      } catch (err: any) {
+        console.warn("Aviso no reset dos dados:", err);
+      }
 
-      // 5. Resetar cache e avisar usuário
+      // 3. Resetar cache e avisar usuário
       queryClient.invalidateQueries();
       toast.dismiss(toastId);
       toast.success("Banco de dados resetado com sucesso! Checkpoint criado e Base de Leads 100% preservada.");

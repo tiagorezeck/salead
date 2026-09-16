@@ -1,88 +1,56 @@
 "use client";
 
-import { supabase } from "@/integrations/supabase/client";
 import { type AutomationLog } from "./automation-types";
 
-let logsCache: AutomationLog[] = [];
-let listeners: (() => void)[] = [];
-let isPolling = false;
+const STORAGE_KEY = "comet_automation_logs";
 
-const notify = () => listeners.forEach(fn => fn());
-
-async function fetchLogs() {
+function getInitialLogs(): AutomationLog[] {
+  if (typeof window === "undefined") return [];
   try {
-    const { data } = await supabase
-      .from('automation_logs')
-      .select('*')
-      .order('timestamp', { ascending: false })
-      .limit(100);
-    
-    if (data) {
-      logsCache = data.map(l => ({
-        id: l.id,
-        automationId: l.automation_id,
-        timestamp: l.timestamp,
-        targetId: l.target_id,
-        targetName: l.target_name,
-        action: l.action,
-        result: l.result,
-        durationMs: l.duration_ms,
-        error: l.error
-      }));
-      notify();
-    }
-  } catch (e) {
-    console.error("[AutomationLogger] Fetch error:", e);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
   }
 }
 
-function startPolling() {
-  if (isPolling) return;
-  isPolling = true;
-  fetchLogs(); // initial
-  const interval = setInterval(fetchLogs, 5000);
-  // No cleanup for simplicity in this context
-}
+let logsCache: AutomationLog[] = getInitialLogs();
+let listeners: (() => void)[] = [];
+
+const notify = () => {
+  listeners.forEach(fn => fn());
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(logsCache.slice(0, 100)));
+    } catch {}
+  }
+};
 
 export const AutomationLogger = {
   getLogs: (): AutomationLog[] => {
-    if (!isPolling) startPolling();
+    if (logsCache.length === 0 && typeof window !== "undefined") {
+      logsCache = getInitialLogs();
+    }
     return logsCache;
   },
 
   addLog: async (log: Omit<AutomationLog, 'id' | 'timestamp'>) => {
-    const newLog = {
+    const newLog: AutomationLog = {
       ...log,
-      id: `log-${Date.now()}-${Math.random()}`,
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       timestamp: new Date().toISOString()
     };
     logsCache = [newLog, ...logsCache].slice(0, 100);
     notify();
-    
-    try {
-      await supabase.from('automation_logs').insert([{
-        automation_id: log.automationId,
-        target_id: log.targetId,
-        target_name: log.targetName,
-        action: log.action,
-        result: log.result,
-        duration_ms: log.durationMs,
-        error: log.error
-      }]);
-    } catch (e) {
-      console.error("[AutomationLogger] Insert error:", e);
-    }
   },
 
   subscribe: (fn: () => void) => {
     listeners.push(fn);
-    if (!isPolling) startPolling();
     return () => { listeners = listeners.filter(l => l !== fn); };
   },
 
   clearLogs: async () => {
     logsCache = [];
     notify();
-    await supabase.from('automation_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   }
 };

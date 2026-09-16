@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useData } from "@/hooks/use-data";
 import { 
-  Search, Plus, LayoutGrid, List, Users as UsersIcon, ChevronDown, Eye, Calendar, Lock, Ban, Layers
+  Search, Plus, LayoutGrid, List, Users as UsersIcon, ChevronDown, Eye, Calendar, Lock, Ban, Layers,
+  Phone, Mail, MessageCircle, ArrowRight, CheckCircle2, Clock, Sparkles
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -11,8 +12,10 @@ import { KanbanCard } from "@/components/crm/kanban-card";
 import { NewTaskModal } from "@/components/crm/new-task-modal";
 import { ScheduleModal } from "@/components/crm/schedule-modal";
 import { toast } from "sonner";
-import { isWithinInterval } from "date-fns";
-import { type PipelineStage, type Lead } from "@/data/mock";
+import { isWithinInterval, format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { type PipelineStage, type Lead, CLASSIFICATION_CONFIG, SLA_CONFIG } from "@/data/mock";
+import { calculateLeadScore, getScoreColor } from "@/lib/scoring";
 
 export const Route = createFileRoute("/app/crm")({
   component: CRMPage,
@@ -202,9 +205,108 @@ function CRMPage() {
             })}
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-3xl shadow-card overflow-hidden">
-            {/* Tabela de Leads (simplificada para o exemplo) */}
-            <div className="p-20 text-center text-muted-foreground italic">Visão de Lista em desenvolvimento...</div>
+          <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    <th className="p-4">Lead / Empresa</th>
+                    <th className="p-4">Etapa</th>
+                    <th className="p-4">Classificação</th>
+                    <th className="p-4">Score</th>
+                    <th className="p-4">Valor</th>
+                    <th className="p-4">Responsável</th>
+                    <th className="p-4">Contato</th>
+                    <th className="p-4 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {filteredLeads.map((lead) => {
+                    const score = calculateLeadScore(lead);
+                    const classification = CLASSIFICATION_CONFIG[lead.classification || "Lead"] || { label: "Lead", cls: "bg-muted text-muted-foreground" };
+                    const cleanPhone = lead.whatsapp?.replace(/\D/g, "") || "";
+
+                    return (
+                      <tr 
+                        key={lead.id}
+                        onClick={() => setSelectedLeadId(lead.id)}
+                        className="hover:bg-muted/30 cursor-pointer transition-colors group"
+                      >
+                        <td className="p-4">
+                          <div className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">
+                            {lead.name}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {lead.company || "Empresa não informada"} {lead.source && `· ${lead.source}`}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-primary/10 text-primary border border-primary/20">
+                            {lead.stage}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <span className={cn("text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-tighter", classification.cls)}>
+                            {classification.label}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <span className={cn("font-black px-2 py-0.5 rounded-md text-[11px]", getScoreColor(score))}>
+                            {score} pts
+                          </span>
+                        </td>
+                        <td className="p-4 font-bold text-foreground">
+                          {lead.value ? formatCurrency(lead.value) : "R$ 0,00"}
+                        </td>
+                        <td className="p-4 text-muted-foreground font-medium">
+                          {lead.owner || "Sem responsável"}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            {cleanPhone && (
+                              <a
+                                href={`https://wa.me/55${cleanPhone}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 transition-colors"
+                                title="Abrir WhatsApp"
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" />
+                              </a>
+                            )}
+                            {lead.email && (
+                              <a
+                                href={`mailto:${lead.email}`}
+                                className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors"
+                                title="Enviar E-mail"
+                              >
+                                <Mail className="h-3.5 w-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => setSelectedLeadId(lead.id)}
+                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                            title="Ver detalhes"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredLeads.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-muted-foreground font-medium">
+                        Nenhum lead encontrado com os filtros atuais.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

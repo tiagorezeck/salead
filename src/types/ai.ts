@@ -32,16 +32,16 @@ export const SYSTEM_GOOGLE_KEY = typeof process !== 'undefined' && process.env?.
   : "";
 
 export const DEFAULT_AI_CONFIG: AIConfig = {
-  activeProvider: 'openrouter',
+  activeProvider: 'google',
   openRouterKey: SYSTEM_OPENROUTER_KEY,
   googleKey: SYSTEM_GOOGLE_KEY,
   customPaidKey: '',
   customEndpoint: 'https://api.openai.com/v1',
-  modelId: 'openai/gpt-4o-mini',
-  modelName: 'GPT-4o Mini (Recomendado OpenRouter)',
+  modelId: 'gemini-3.8-flash',
+  modelName: 'Gemini 3.8 Flash (Padrão Oficial - Recomendado)',
   customModels: {
     google: [
-      { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash (Último Válido - Recomendado)", description: "Modelo oficial mais recente e veloz para geração de copy, headlines e páginas de alta conversão" },
+      { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash (Padrão Oficial - Recomendado)", description: "Modelo oficial mais recente e veloz para geração de copy, headlines e páginas de alta conversão" },
       { id: "gemini-3.7-flash", name: "Gemini 3.7 Flash (Raciocínio Híbrido)", description: "Geração avançada com capacidade de raciocínio dinâmico e precisão para funis complexos" },
       { id: "gemini-flash-latest", name: "Gemini Flash Latest (Sempre Atualizado)", description: "Alias oficial do Google que aponta automaticamente para a versão mais recente do Flash" },
       { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite (Ultra Rápido)", description: "Velocidade extrema e menor latência para respostas instantâneas" },

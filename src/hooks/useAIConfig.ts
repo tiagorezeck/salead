@@ -51,10 +51,12 @@ export function useAIConfig() {
           }
         };
 
-        // Upgrade legacy active model selection if outdated
-        if (merged.activeProvider === "google" && (merged.modelId?.includes("gemini-1.5") || merged.modelId?.includes("gemini-2.0"))) {
-          merged.modelId = "gemini-3.8-flash";
-          merged.modelName = "Gemini 3.8 Flash (Último Válido - Recomendado)";
+        // Upgrade legacy active model selection if outdated or standard
+        if (merged.activeProvider === "google") {
+          if (merged.modelId?.includes("gemini-1.5") || merged.modelId?.includes("gemini-2.0") || !merged.modelId) {
+            merged.modelId = "gemini-3.8-flash";
+            merged.modelName = "Gemini 3.8 Flash (Padrão Oficial - Recomendado)";
+          }
         } else if (merged.activeProvider === "openrouter" && merged.modelId?.includes("gemini-flash-1.5")) {
           merged.modelId = "google/gemini-2.5-flash";
           merged.modelName = "Gemini 2.5 Flash (Google via OpenRouter)";

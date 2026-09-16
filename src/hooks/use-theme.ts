@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 
 export type Theme = "light" | "dark";
 
@@ -35,37 +34,7 @@ export function useTheme() {
     return () => observer.disconnect();
   }, []);
 
-  // Fetch saved user preference from Supabase if logged in
-  useEffect(() => {
-    async function loadTheme() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('theme')
-            .eq('id', user.id)
-            .single();
-          
-          if (data?.theme === "dark" || data?.theme === "light") {
-            setTheme(data.theme as Theme);
-            if (data.theme === "dark") {
-              document.documentElement.classList.add("dark");
-              localStorage.setItem("comet_theme", "dark");
-            } else {
-              document.documentElement.classList.remove("dark");
-              localStorage.setItem("comet_theme", "light");
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("Could not load user theme from profile:", err);
-      }
-    }
-    loadTheme();
-  }, []);
-
-  const toggleTheme = async () => {
+  const toggleTheme = () => {
     const currentIsDark = document.documentElement.classList.contains("dark");
     const next: Theme = currentIsDark ? "light" : "dark";
     setTheme(next);
@@ -77,14 +46,8 @@ export function useTheme() {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("comet_theme", "light");
     }
-    
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('profiles').update({ theme: next }).eq('id', user.id);
-      }
-    } catch {}
   };
 
   return { theme, toggleTheme };
 }
+

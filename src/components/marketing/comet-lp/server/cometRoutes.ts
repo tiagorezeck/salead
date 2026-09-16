@@ -1199,8 +1199,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-// Candidate models in fallback order: flash-lite provides sub-3s response, followed by 3.8 and 3.7
-const CANDIDATE_MODELS = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash"];
+// Candidate models in fallback order: gemini-3.8-flash is the primary standard model, followed by 3.7 and 3.1 flash lite
+const CANDIDATE_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.1-flash-lite"];
 
 // Multi-model call with timeout per model to guarantee fast response
 async function callGeminiWithWaterfall(
@@ -1259,7 +1259,7 @@ cometLpRouter.post("/api/ai/generate-landing-page", async (req, res) => {
 
     const ai = getGeminiClient();
 
-    const systemInstruction = `Você é o LAN, um Diretor de Arte Digital e Engenheiro de CRO (Conversion Rate Optimization) de Nível Mundial.
+    const systemInstruction = `Você é o LANAI, um Diretor de Arte Digital e Engenheiro de CRO (Conversion Rate Optimization) de Nível Mundial.
 Seu objetivo é gerar o blueprint JSON completo de uma Landing Page ultra personalizada e estrategicamente calibrada para o nicho, público e produto fornecido.
 
 DIRETRIZ DE NÃO REPETIÇÃO & ESCOLHA AUTÔNOMA DO MELHOR MODELO (CRÍTICO):
@@ -1311,9 +1311,9 @@ Regras de Copy e Estrutura:
 - Cidade / Região: ${cityOrRegion || "Nacional / São Paulo"}
 - Público-Alvo: ${targetAudience || "Empresários, profissionais liberais e tomadores de decisão"}
 - Oferta / Diferenciais: ${offerDetails || "Acesso imediato com garantia incondicional e suporte individualizado"}
-- Preferência de Tema (ou auto): ${theme || "auto (LAN decide se será claro, escuro, midnight ou hybrid)"}
-- Preferência de Modelo de Hero (ou auto): ${heroModel || "auto (LAN decide o melhor dos 10 modelos)"}
-- Preferência de Cor (ou auto): ${accentColor || "auto (LAN decide a melhor cor psicológica)"}`;
+- Preferência de Tema (ou auto): ${theme || "auto (LANAI decide se será claro, escuro, midnight ou hybrid)"}
+- Preferência de Modelo de Hero (ou auto): ${heroModel || "auto (LANAI decide o melhor dos 10 modelos)"}
+- Preferência de Cor (ou auto): ${accentColor || "auto (LANAI decide a melhor cor psicológica)"}`;
 
     const responseSchema = {
       type: Type.OBJECT,
@@ -1602,7 +1602,7 @@ Regras de Copy e Estrutura:
   }
 });
 
-// Endpoint do Robô LAN para refinamento/edição da LP por Prompt
+// Endpoint do Robô LANAI para refinamento/edição da LP por Prompt
 cometLpRouter.post("/api/comet-lp/refine-page", async (req, res) => {
   try {
     const { page, prompt } = req.body;
@@ -1612,7 +1612,7 @@ cometLpRouter.post("/api/comet-lp/refine-page", async (req, res) => {
 
     const ai = getGeminiClient();
 
-    const systemInstruction = `Você é o LAN, o Agente de IA e Diretor de Arte de CRO de Nível Mundial.
+    const systemInstruction = `Você é o LANAI, o Agente de IA e Diretor de Arte de CRO de Nível Mundial.
 Seu objetivo é alterar a Landing Page fornecida no JSON com base na instrução exata fornecida pelo usuário.
 
 Instrução do Usuário: "${prompt}"
@@ -1636,11 +1636,11 @@ Instruções de edição:
           return res.json({
             success: true,
             page: updatedPage,
-            message: "Landing Page atualizada com sucesso pelo Robô LAN!"
+            message: "Landing Page atualizada com sucesso pelo Robô LANAI!"
           });
         }
       } catch (err: any) {
-        console.warn("LAN refine page waterfall notice:", err?.message);
+        console.warn("LANAI refine page waterfall notice:", err?.message);
       }
     }
 
@@ -1717,11 +1717,11 @@ Instruções de edição:
     return res.json({
       success: true,
       page: updated,
-      message: "Alterações aplicadas com sucesso pelo Robô LAN!"
+      message: "Alterações aplicadas com sucesso pelo Robô LANAI!"
     });
   } catch (err: any) {
-    console.error("LAN refine page error:", err);
-    return res.status(500).json({ error: "Erro ao processar solicitação do Robô LAN" });
+    console.error("LANAI refine page error:", err);
+    return res.status(500).json({ error: "Erro ao processar solicitação do Robô LANAI" });
   }
 });
 

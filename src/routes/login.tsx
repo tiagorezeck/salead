@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck, Sun, Moon } from "lucide-react";
 import { LoginForm } from "@/components/auth/login-form";
 import { BrandLogo } from "@/components/brand-logo";
@@ -24,19 +23,7 @@ function LoginPage() {
     const local = localStorage.getItem("comet_local_session");
     if (local) {
       navigate({ to: "/app/dashboard" });
-      return;
     }
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate({ to: "/app/dashboard" });
-      }
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        navigate({ to: "/app/dashboard" });
-      }
-    });
-    return () => subscription.unsubscribe();
   }, [navigate]);
 
   useEffect(() => {

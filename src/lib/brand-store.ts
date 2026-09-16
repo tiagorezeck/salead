@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { getLocalDatabaseRoot, saveLocalDatabaseRoot, pushToGoogleDrive } from "@/services/googleDriveDatabaseService";
 
 export type BrandSizePreset = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
@@ -258,11 +258,15 @@ function syncBrandSettingsToCloud(data: any) {
   if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
   cloudSyncTimeout = setTimeout(async () => {
     try {
-      await supabase.from('company_settings').upsert({
-        id: '00000000-0000-0000-0000-000000000000',
+      const root = getLocalDatabaseRoot();
+      const currentCompany = root?.company || {};
+      root.company = {
+        ...currentCompany,
         logo_config: data,
-        updated_at: new Date().toISOString()
-      });
+        updatedAt: new Date().toISOString()
+      };
+      saveLocalDatabaseRoot(root);
+      pushToGoogleDrive(root).catch(() => {});
     } catch (err) {
       console.warn("Could not sync brand logo to cloud:", err);
     }

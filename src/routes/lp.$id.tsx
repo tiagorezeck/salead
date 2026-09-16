@@ -26,7 +26,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 
 import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/LandingPageRenderer";
 import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-viewer";
@@ -220,23 +219,7 @@ function PublicLPPage() {
           }).catch(() => {});
         } catch {}
 
-        // 4. Atualiza no Supabase (Banco de dados remoto)
-        try {
-          if (isUUID(targetLp.id)) {
-            await supabase.from("landing_pages").update({ visits: newVisits }).eq("id", targetLp.id);
-          } else if (targetLp.name || targetLp.title) {
-            const pageName = targetLp.name || targetLp.title;
-            const { data: sbRow } = await supabase.from("landing_pages").select("id, visits").eq("name", pageName).maybeSingle();
-            if (sbRow?.id) {
-              const curV = Number(sbRow.visits) || 0;
-              await supabase.from("landing_pages").update({ visits: curV + 1 }).eq("id", sbRow.id);
-            }
-          }
-        } catch (vErr) {
-          console.warn("Aviso ao incrementar visitas no Supabase:", vErr);
-        }
-
-        // 5. Registra evento de Analytics
+        // 4. Registra evento de Analytics
         try {
           if (typeof window !== "undefined") {
             const { source, utm } = parseUtm(window.location.search);
@@ -269,86 +252,7 @@ function PublicLPPage() {
         }
 
         // =====================================================================
-        // PASSO 2: BUSCA NO SUPABASE (BANCO DE DADOS REMOTO)
-        // =====================================================================
-        let foundData: any = null;
-
-        // 2.1 Se o ID for UUID válido, busca direto por ID
-        if (isUUID(id)) {
-          const { data, error } = await supabase
-            .from("landing_pages")
-            .select("*")
-            .eq("id", id)
-            .maybeSingle();
-
-          if (data && !error && !deletedIds.has(data.id)) {
-            foundData = data;
-          }
-        }
-
-        // 2.2 Se não encontrou por UUID ou o parâmetro for slug/nome, busca no JSONB config ou coluna name
-        if (!foundData) {
-          try {
-            const { data: byQuery } = await supabase
-              .from("landing_pages")
-              .select("*")
-              .or(`config->>slug.eq.${id},config->>client_id.eq.${id},name.eq.${id}`)
-              .limit(1);
-
-            if (byQuery && byQuery.length > 0) {
-              const candidate = byQuery[0];
-              if (!deletedIds.has(candidate.id)) {
-                foundData = candidate;
-              }
-            }
-          } catch (e) {
-            console.warn("Supabase query por slug/name notice:", e);
-          }
-        }
-
-        // 2.3 Se ainda não encontrou, busca em lista para correspondência flexível
-        if (!foundData) {
-          try {
-            const { data: allRows } = await supabase.from("landing_pages").select("*").limit(50);
-            if (allRows && allRows.length > 0) {
-              const match = allRows.find((p) => {
-                if (deletedIds.has(p.id)) return false;
-                if (p.id === id) return true;
-                if (p.config?.slug === id || (p.config?.slug && normalizeSlug(p.config.slug) === normId)) return true;
-                if (p.config?.client_id === id) return true;
-                if (p.name && (p.name === id || normalizeSlug(p.name) === normId)) return true;
-                return false;
-              });
-              if (match) foundData = match;
-            }
-          } catch {}
-        }
-
-        if (foundData) {
-          const mappedLP = {
-            id: foundData.id,
-            name: foundData.name,
-            title: foundData.name,
-            template: foundData.template,
-            status: foundData.status,
-            visits: Number(foundData.visits) || 0,
-            leads: Number(foundData.leads || foundData.leads_count) || 0,
-            ...(typeof foundData.config === "object" ? foundData.config : {}),
-            surveyId: foundData.config?.surveyId || foundData.survey_id || undefined,
-            externalUrl: foundData.config?.externalUrl || foundData.external_url || undefined,
-          };
-
-          if (isMounted) {
-            setLp(mappedLP);
-            setLoading(false);
-          }
-
-          await recordVisitForLP(mappedLP);
-          return;
-        }
-
-        // =====================================================================
-        // PASSO 3: BUSCA NO ARMAZENAMENTO LOCAL (SE FOR ACESSADO NA MESMA SESSÃO)
+        // PASSO 2: BUSCA NO ARMAZENAMENTO LOCAL (SE FOR ACESSADO NA MESMA SESSÃO)
         // =====================================================================
         try {
           const localKeys = ["active_preview_page", "people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
@@ -384,7 +288,7 @@ function PublicLPPage() {
         } catch {}
 
         // =====================================================================
-        // PASSO 4: RESOLUÇÃO EM TEMPLATES PRÉ-CONFIGURADOS (PRESETS & AI LPs)
+        // PASSO 3: RESOLUÇÃO EM TEMPLATES PRÉ-CONFIGURADOS (PRESETS & AI LPs)
         // =====================================================================
         const presetMatch = PRESET_TEMPLATES.find((p) => {
           if (p.id === id || p.slug === id) return true;
@@ -396,17 +300,6 @@ function PublicLPPage() {
           setLp(presetMatch);
           setLoading(false);
           await recordVisitForLP(presetMatch);
-
-          // Sincroniza em segundo plano no Supabase se ainda não existir
-          try {
-            const dbPayload = {
-              name: presetMatch.title,
-              template: (presetMatch as any).template || "COMET",
-              status: "Ativa",
-              config: { ...presetMatch, slug: presetMatch.slug || id },
-            };
-            (supabase.from("landing_pages").insert([dbPayload]) as any);
-          } catch {}
           return;
         }
 
@@ -498,16 +391,6 @@ function PublicLPPage() {
         }
       })
       .catch(() => {});
-
-    // 5. Busca no Supabase
-    (supabase
-      .from("surveys")
-      .select("*")
-      .eq("id", surveyId)
-      .maybeSingle() as any)
-      ?.then(({ data }: any) => {
-        if (data) setAssignedSurvey(data);
-      });
   }, [lp?.surveyId, (lp as any)?.config?.surveyId, (lp as any)?.minSurveyId, (lp as any)?.survey_id, surveys]);
 
   // Verifica se há parâmetros de pesquisa/cadastro na URL para abrir o fluxo do sistema
@@ -855,16 +738,6 @@ function PublicLPPage() {
                     }).catch(() => {});
                   } catch {}
 
-                  // 2. Grava diretamente no Supabase e incrementa leads_count
-                  try {
-                    await supabase.from("leads").insert([leadRecord]);
-                    if (isUUID(lp.id)) {
-                      await supabase.from("landing_pages").update({ leads_count: (lp.leads_count || lp.leads || 0) + 1 }).eq("id", lp.id);
-                    }
-                  } catch (err) {
-                    console.warn("Supabase lead direct insert notice:", err);
-                  }
-
                   toast.success("✅ Cadastro e respostas enviadas com sucesso!");
                 }}
               />
@@ -1029,33 +902,7 @@ function PublicLPPage() {
             console.warn("Google Drive direct sync notice:", gErr);
           }
 
-          // 4. Grava diretamente no Supabase e atualiza leads_count e visits em tempo real
-          try {
-            const dbPayload = mapLeadToDb(leadRecord);
-            await supabase.from("leads").insert([dbPayload]);
-            
-            if (isUUID(lp.id)) {
-              const { data: lpRow } = await supabase.from("landing_pages").select("leads_count, visits").eq("id", lp.id).maybeSingle();
-              const curLeads = Number(lpRow?.leads_count) || 0;
-              const curVisits = Number(lpRow?.visits) || 0;
-              const nextLeads = curLeads + 1;
-              const nextVisits = Math.max(curVisits, nextLeads);
-              await supabase.from("landing_pages").update({ leads_count: nextLeads, visits: nextVisits }).eq("id", lp.id);
-            } else if (lp.name) {
-              const { data: lpRow } = await supabase.from("landing_pages").select("id, leads_count, visits").eq("name", lp.name).maybeSingle();
-              if (lpRow) {
-                const curLeads = Number(lpRow?.leads_count) || 0;
-                const curVisits = Number(lpRow?.visits) || 0;
-                const nextLeads = curLeads + 1;
-                const nextVisits = Math.max(curVisits, nextLeads);
-                await supabase.from("landing_pages").update({ leads_count: nextLeads, visits: nextVisits }).eq("id", lpRow.id);
-              }
-            }
-          } catch (err) {
-            console.warn("Supabase lead direct insert notice:", err);
-          }
-
-          // 7. Notifica Analytics de Conversão da LP
+          // 5. Notifica Analytics de Conversão da LP
           try {
             getLPModule().analytics.track({
               lpId: lp.id,
@@ -1239,19 +1086,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         console.warn("Google Drive direct sync notice:", gErr);
       }
 
-      // 3. Gravação direta no Supabase
-      try {
-        await supabase.from("leads").insert([leadRecord]);
-        if (isUUID(lp.id)) {
-          await supabase.from("landing_pages").update({ 
-            leads_count: (lp.leads_count || lp.leads || 0) + 1 
-          }).eq("id", lp.id);
-        }
-      } catch (err) {
-        console.warn("Supabase lead direct insert notice:", err);
-      }
-
-      // 4. Analytics
+      // 3. Analytics
       try {
         getLPModule().analytics.track({
           lpId: lp.id,

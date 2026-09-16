@@ -46,7 +46,7 @@ export function LANAICard({ onOpenSettings, className }: LANAICardProps) {
           </div>
           <div>
             <h2 className="text-xl sm:text-2xl font-black tracking-tight text-[#111827] dark:text-white">
-              LAN - Agente de Landing Page IA
+              LANAI - Agente de Landing Page IA
             </h2>
             <p className="text-xs sm:text-sm font-medium text-[#6B7280] dark:text-[#9CA3AF] mt-0.5">
               Automação Inteligente de Design, Copy e Alta Conversão
@@ -64,7 +64,7 @@ export function LANAICard({ onOpenSettings, className }: LANAICardProps) {
           )}
         >
           <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>{active ? "LAN ATIVO" : "PENDENTE DE CHAVE"}</span>
+          <span>{active ? "LANAI ATIVO" : "PENDENTE DE CHAVE"}</span>
         </div>
       </div>
 
@@ -96,11 +96,11 @@ export function LANAICard({ onOpenSettings, className }: LANAICardProps) {
         </div>
       </div>
 
-      {/* Box: O que o LAN faz por você */}
+      {/* Box: O que o LANAI faz por você */}
       <div className="bg-[#ECFDF5]/60 dark:bg-[#059669]/10 border border-[#A7F3D0] dark:border-[#059669]/30 rounded-2xl p-5 mb-6">
         <div className="flex items-center gap-2 text-xs sm:text-sm font-black uppercase tracking-wider text-[#047857] dark:text-[#34D399] mb-3">
           <Sparkles className="w-4 h-4" />
-          <span>O QUE O LAN FAZ POR VOCÊ?</span>
+          <span>O QUE O LANAI FAZ POR VOCÊ?</span>
         </div>
         <ul className="space-y-2 text-xs sm:text-sm text-[#374151] dark:text-[#D1D5DB] leading-relaxed">
           <li className="flex items-start gap-2">
@@ -129,7 +129,7 @@ export function LANAICard({ onOpenSettings, className }: LANAICardProps) {
         className="w-full py-4 px-6 rounded-2xl bg-[#059669] hover:bg-[#047857] active:scale-[0.99] text-white font-black text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-lg shadow-[#059669]/25 transition-all cursor-pointer"
       >
         <Bot className="w-5 h-5" />
-        <span>CONFIGURAR MODELOS & CHAVES DO LAN</span>
+        <span>CONFIGURAR MODELOS & CHAVES DO LANAI</span>
       </button>
     </div>
   );

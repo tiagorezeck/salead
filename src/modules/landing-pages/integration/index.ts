@@ -2,7 +2,7 @@
 
 import { localStorageProvider, type StorageProvider } from "../providers/storage-provider";
 import { createLocalAnalytics, type AnalyticsProvider } from "../providers/analytics-provider";
-import { supabase } from "@/integrations/supabase/client";
+import { getLocalDatabaseRoot, saveLocalDatabaseRoot, pushToGoogleDrive } from "@/services/googleDriveDatabaseService";
 
 export interface LPUser {
   id: string;
@@ -43,7 +43,7 @@ const defaultAuth: AuthAdapter = {
   isAuthenticated: () => false,
 };
 
-// Supabase Direct CRM integration default
+// Direct CRM integration default via Local Storage + Google Drive + Express Server
 const defaultCrm: CrmAdapter = {
   onLeadCaptured: async (payload: LeadPayload) => {
     try {
@@ -52,22 +52,21 @@ const defaultCrm: CrmAdapter = {
       const leadEmail = String(data["E-mail"] || data["Seu melhor e-mail"] || data["email"] || "");
       const leadPhone = String(data["WhatsApp"] || data["WhatsApp para contato"] || data["whatsapp"] || data["phone"] || "");
 
-      // Busca pipelines para associar ao funil padrão de prospecção
-      const { data: pipelines } = await supabase.from('pipelines').select('id, name');
-      const defaultPipeline = pipelines?.find(p => p.name?.toUpperCase().includes('PROSPECÇÃO')) || pipelines?.[0];
-
+      const leadId = `lead-${Date.now()}-${Math.random().toString(36).substring(7)}`;
       const leadPayload = {
+        id: leadId,
         name: leadName,
         email: leadEmail,
         whatsapp: leadPhone,
         company: `${leadName} (LP: ${payload.slug})`,
-        source: `LP: ${payload.slug} (${payload.source})`,
+        source: `LP: ${payload.slug} (${payload.source || "Landing Page"})`,
         landing_page: payload.lpId,
-        pipeline_id: defaultPipeline?.id || null,
         stage: 'Leads',
         classification: 'Lead',
         temperature: 'Morno',
         tags: [payload.source, payload.utm?.utm_campaign || 'inbound'].filter(Boolean),
+        createdAt: new Date(payload.ts || Date.now()).toISOString(),
+        updatedAt: new Date().toISOString(),
         metadata: {
           capturedVia: 'Landing Page Modular',
           slug: payload.slug,
@@ -75,13 +74,39 @@ const defaultCrm: CrmAdapter = {
           utm: payload.utm,
           formData: payload.data,
           referrer: payload.referrer,
-          capturedAt: new Date(payload.ts).toISOString(),
+          capturedAt: new Date(payload.ts || Date.now()).toISOString(),
         }
       };
 
-      await supabase.from('leads').insert([leadPayload]);
+      // 1. Salva no LocalStorage do CRM
+      if (typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("comet_local_leads") || "[]";
+          const list = JSON.parse(raw);
+          list.unshift(leadPayload);
+          localStorage.setItem("comet_local_leads", JSON.stringify(list));
+        } catch {}
+      }
+
+      // 2. Salva no Snapshot do Google Drive
+      try {
+        const root = getLocalDatabaseRoot();
+        if (!Array.isArray(root.leads)) root.leads = [];
+        root.leads.unshift(leadPayload);
+        saveLocalDatabaseRoot(root);
+        pushToGoogleDrive(root).catch(() => {});
+      } catch {}
+
+      // 3. Envia para o servidor backend Express
+      try {
+        fetch("/api/leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(leadPayload)
+        }).catch(() => {});
+      } catch {}
     } catch (err) {
-      console.error("Erro ao salvar lead capturado no CRM via Supabase:", err);
+      console.error("Erro ao salvar lead capturado no CRM:", err);
     }
   },
 };

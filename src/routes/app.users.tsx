@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useData, type User } from "@/hooks/use-data";
 import { SYSTEM_MODULES, DEFAULT_ROLE_MODULES, type SystemModule } from "@/data/mock";
-import { Users, Plus, Mail, Phone, Shield, Trash2, Search, X, UserPlus, Image as ImageIcon, Target, Camera, Key, Save, Power, Loader2, Upload, Globe, Check, Link as LinkIcon, Pencil, CheckCircle2, Clock, Ban, UserCheck, Sliders, CheckSquare, Layers, Lock, Unlock, Sparkles, AlertCircle } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Trash2, Search, X, UserPlus, Image as ImageIcon, Target, Camera, Key, Save, Power, Loader2, Upload, Globe, Check, Link as LinkIcon, Pencil, CheckCircle2, Clock, Ban, UserCheck, Sliders, CheckSquare, Layers, Lock, Unlock, Sparkles, AlertCircle, ShieldCheck, RefreshCw } from "lucide-react";
 import { useState, useRef } from "react";
 import { cn, formatPhone } from "@/lib/utils";
 import { UserGoalsModal } from "@/components/crm/user-goals-modal";
 import { toast } from "sonner";
 import { getRegisteredUsers, saveRegisteredUsers, approveUserAccess, registerNewUser } from "@/lib/auth-service";
+import { getDriveConfig, pushToGoogleDrive, getLocalDatabaseRoot, saveLocalDatabaseRoot } from "@/services/googleDriveDatabaseService";
 
 export const Route = createFileRoute("/app/users")({
   component: UsersPage,
@@ -38,6 +39,7 @@ function UsersPage() {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSyncingUsers, setIsSyncingUsers] = useState(false);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   
@@ -159,33 +161,58 @@ function UsersPage() {
     }
   };
 
+  const handleSyncCleanUsersToSheets = async () => {
+    setIsSyncingUsers(true);
+    try {
+      const driveCfg = getDriveConfig();
+      if (!driveCfg.webappUrl) {
+        toast.error("URL do Google Apps Script não configurada em Integrações.");
+        return;
+      }
+      const rootDb = getLocalDatabaseRoot() || {};
+      rootDb.users = users;
+      saveLocalDatabaseRoot(rootDb);
+      await pushToGoogleDrive(driveCfg.webappUrl, rootDb);
+      toast.success("Aba 'Usuarios' sincronizada e atualizada com sucesso no Google Sheets!");
+    } catch (err: any) {
+      toast.error("Erro ao sincronizar com Google Sheets: " + (err.message || "Falha na conexão"));
+    } finally {
+      setIsSyncingUsers(false);
+    }
+  };
+
   const handleConfirmDeleteUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userToDelete) return;
 
-    const isSelfToDelete = currentUser && (
-      userToDelete.id === currentUser.id ||
-      (userToDelete.email && currentUser.email && userToDelete.email.toLowerCase() === currentUser.email.toLowerCase()) ||
-      userToDelete.role === "Admin Geral"
-    );
+    const isTiagoOrAdmin = 
+      userToDelete.email?.toLowerCase() === "tiagorezeck@hotmail.com" ||
+      userToDelete.name?.toLowerCase().includes("tiago rezeck") ||
+      userToDelete.role === "Admin Geral";
 
-    if (isSelfToDelete) {
-      toast.error("Você não pode excluir a sua própria conta de Administrador Geral!");
+    if (isTiagoOrAdmin) {
+      toast.error("O Administrador Titular (Tiago Rezeck) é fixado pelo sistema e não pode ser excluído!");
       setUserToDelete(null);
       return;
     }
 
     if (!deletePassword.trim()) {
-      toast.error("Informe sua senha de Administrador para confirmar a exclusão.");
+      toast.error("Informe a senha de Administrador (ou 1234 / ADMIN) para confirmar a exclusão.");
       return;
     }
 
-    // Valida senha master ou senha do perfil logado
-    const isMasterAdminPass = deletePassword.trim() === "admin" || deletePassword.trim() === "123456";
-    const isCurrentUserPassMatch = currentUser && (currentUser as any).password === deletePassword.trim();
+    // Valida senha master (1234, 123456, ADMIN, admin) ou senha do perfil logado
+    const trimmedPass = deletePassword.trim();
+    const isMasterAdminPass = 
+      trimmedPass === "1234" || 
+      trimmedPass === "123456" || 
+      trimmedPass.toUpperCase() === "ADMIN" || 
+      trimmedPass.toLowerCase() === "admin" || 
+      trimmedPass.toLowerCase() === "admin123";
+    const isCurrentUserPassMatch = currentUser && (currentUser as any).password === trimmedPass;
 
     if (!isMasterAdminPass && !isCurrentUserPassMatch) {
-      toast.error("Senha de Administrador incorreta. A exclusão de usuários exige autorização por senha.");
+      toast.error("Senha incorreta. Digite sua senha ou a chave mestre (1234 ou ADMIN) para confirmar a exclusão.");
       return;
     }
 
@@ -207,14 +234,13 @@ function UsersPage() {
     setIsLoading(true);
 
     let finalRole = form.role;
-    const isEditingMainAdmin = editingUser && (
-      editingUser.email?.toLowerCase() === (currentUser?.email || "sistemascomet@gmail.com").toLowerCase() ||
-      editingUser.role === "Admin Geral"
-    );
+    const isTiago = 
+      form.email.toLowerCase() === "tiagorezeck@hotmail.com" ||
+      (editingUser && (editingUser.email?.toLowerCase() === "tiagorezeck@hotmail.com" || editingUser.name?.toLowerCase().includes("tiago rezeck")));
 
-    if (finalRole === "Admin Geral" && !isEditingMainAdmin) {
+    if (finalRole === "Admin Geral" && !isTiago) {
       finalRole = "Gestor";
-      toast.info("O sistema permite apenas 1 Administrador Geral. O cargo foi ajustado para Gestor.");
+      toast.info("Regra do sistema: Apenas Tiago Rezeck é o Admin cadastrado. O novo usuário foi registrado com cargo Gestor.");
     }
 
     try {
@@ -286,14 +312,79 @@ function UsersPage() {
             Gestão de permissões, autorização de novos acessos e sincronização multiusuário.
           </p>
         </div>
-        {isAdmin && (
-          <button 
-            onClick={handleOpenAdd}
-            className="text-xs font-black uppercase tracking-widest px-6 py-3 rounded-xl bg-gradient-primary text-primary-foreground shadow-elegant inline-flex items-center gap-2 hover:scale-105 transition-all cursor-pointer"
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleSyncCleanUsersToSheets}
+            disabled={isSyncingUsers}
+            className="text-xs font-bold px-4 py-3 rounded-xl bg-muted/60 hover:bg-muted border border-border text-foreground transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+            title="Atualiza a aba 'Usuarios' do Google Sheets com a lista limpa oficial"
           >
-            <UserPlus className="h-4 w-4" /> NOVO MEMBRO
+            <RefreshCw className={cn("h-4 w-4 text-emerald-500", isSyncingUsers && "animate-spin")} />
+            {isSyncingUsers ? "Sincronizando..." : "Sincronizar no Sheets"}
           </button>
-        )}
+          {isAdmin && (
+            <button 
+              onClick={handleOpenAdd}
+              className="text-xs font-black uppercase tracking-widest px-6 py-3 rounded-xl bg-gradient-primary text-primary-foreground shadow-elegant inline-flex items-center gap-2 hover:scale-105 transition-all cursor-pointer"
+            >
+              <UserPlus className="h-4 w-4" /> NOVO MEMBRO
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* CARD DE GOVERNANÇA: 2 ADMINS & GESTORES */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-card border border-border shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <ShieldCheck className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-foreground">Regra de Segurança e Governança de Contas</div>
+              <div className="text-[11px] text-muted-foreground">Estrutura fixa de 2 Administradores e Liderança por Gestores</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20 flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              2 Admins Definidos
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-primary/5 border border-primary/15 space-y-1">
+            <div className="font-bold text-foreground flex items-center gap-1.5">
+              <Shield className="h-3.5 w-3.5 text-primary" />
+              <span>1. Admin Titular Cadastrado</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              <strong>Tiago Rezeck</strong> (<span className="text-foreground">tiagorezeck@hotmail.com</span>). É o administrador ativo oficial e visível na listagem de usuários.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-zinc-500/5 border border-zinc-500/15 space-y-1">
+            <div className="font-bold text-foreground flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5 text-zinc-600 dark:text-zinc-400" />
+              <span>2. Admin Standby (Invisível)</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Usuário <strong>ADMIN</strong> • Senha <strong>ADMIN</strong>. Fica em stand-by caso haja problema de login. Abre tudo e tem tudo habilitado, sem aparecer na listagem.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/15 space-y-1">
+            <div className="font-bold text-foreground flex items-center gap-1.5">
+              <Sliders className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <span>3. Demais Membros: Gestor</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Para ter acesso amplo (excluir, acrescentar, editar tudo), os usuários assumem o cargo de <strong>Gestor</strong>, onde o Admin pode liberar tudo ou partes.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* PAINEL DE APROVAÇÕES PENDENTES (ADMIN FLOW) */}
@@ -526,8 +617,22 @@ function UsersPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">E-mail Corporativo</label>
-                    <input required type="email" disabled={!!editingUser} value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm outline-none disabled:opacity-50" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">E-mail (Google Agenda / Gmail)</label>
+                      <span className="text-[9px] text-primary font-medium">Conta Google</span>
+                    </div>
+                    <input 
+                      required 
+                      type="email" 
+                      placeholder="usuario@empresa.com ou gmail.com" 
+                      disabled={!!editingUser} 
+                      value={form.email} 
+                      onChange={e => setForm({...form, email: e.target.value})} 
+                      className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm outline-none disabled:opacity-50" 
+                    />
+                    <span className="text-[10px] text-muted-foreground block">
+                      Usado para sincronizar automaticamente reuniões e eventos no Google Agenda.
+                    </span>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">WhatsApp</label>
@@ -550,14 +655,18 @@ function UsersPage() {
                       className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm outline-none font-bold"
                     >
                       {ROLES.map(r => {
-                        const isEditingMainAdmin = editingUser && (
-                          editingUser.email?.toLowerCase() === (currentUser?.email || "sistemascomet@gmail.com").toLowerCase() || 
-                          editingUser.role === "Admin Geral"
+                        const isTiago = editingUser && (
+                          editingUser.email?.toLowerCase() === "tiagorezeck@hotmail.com" || 
+                          editingUser.name?.toLowerCase().includes("tiago rezeck")
                         );
-                        const isOptionAdminDisabled = r === "Admin Geral" && !isEditingMainAdmin;
+                        const isOptionAdminDisabled = r === "Admin Geral" && !isTiago;
                         return (
                           <option key={r} value={r} disabled={isOptionAdminDisabled}>
-                            {r} {isOptionAdminDisabled ? " (Apenas 1 Admin por sistema)" : ""}
+                            {r === "Admin Geral" 
+                              ? "Admin Geral (Exclusivo: Tiago Rezeck)" 
+                              : r === "Gestor" 
+                              ? "Gestor (Acesso Total ou Personalizado pelo Admin)" 
+                              : r}
                           </option>
                         );
                       })}
@@ -771,16 +880,19 @@ function UsersPage() {
 
             <form onSubmit={handleConfirmDeleteUser} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  Digite sua senha de Administrador para confirmar:
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Senha de Administrador:
+                  </label>
+                  <span className="text-[10px] text-muted-foreground">Padrão: <strong className="text-foreground font-mono">1234</strong></span>
+                </div>
                 <div className="relative">
                   <Lock className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input
                     type="password"
                     required
                     autoFocus
-                    placeholder="Sua senha de administrador..."
+                    placeholder="Digite 1234 ou sua senha de admin..."
                     value={deletePassword}
                     onChange={(e) => setDeletePassword(e.target.value)}
                     className="w-full bg-muted/50 border border-border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-red-500/30"

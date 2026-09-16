@@ -8,7 +8,7 @@ import { BrandLogo } from "@/components/brand-logo";
 import { authenticateUser, registerNewUser } from "@/lib/auth-service";
 
 const ROLES = [
-  "Admin Geral", 
+  "Gestor",
   "Head of Sales", 
   "Team Leader", 
   "Marketing", 
@@ -251,26 +251,50 @@ export function LoginForm() {
         </div>
 
         {!isRegistering && (
-          <div className="flex items-center justify-between p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs">
-            <div className="min-w-0 pr-2">
-              <div className="font-bold text-foreground flex items-center gap-1.5">
-                <Shield className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span>Acesso Admin</span>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs">
+              <div className="min-w-0 pr-2">
+                <div className="font-bold text-foreground flex items-center gap-1.5">
+                  <Shield className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>Admin do Sistema</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground truncate">
+                  Usuário: <strong>Tiago Rezeck</strong> • Senha: <strong>admin</strong>
+                </div>
               </div>
-              <div className="text-[11px] text-muted-foreground truncate">
-                Usuário: <strong>Tiago Rezeck</strong> • Senha: <strong>admin</strong>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail("Tiago Rezeck");
+                  setPassword("admin");
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-[11px] font-bold hover:bg-primary/90 transition-all cursor-pointer shrink-0 shadow-sm"
+              >
+                Preencher
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setEmail("Tiago Rezeck");
-                setPassword("admin");
-              }}
-              className="px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-[11px] font-bold hover:bg-primary/90 transition-all cursor-pointer shrink-0 shadow-sm"
-            >
-              Preencher
-            </button>
+
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-500/10 border border-zinc-500/20 text-xs">
+              <div className="min-w-0 pr-2">
+                <div className="font-bold text-foreground flex items-center gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5 text-zinc-600 dark:text-zinc-400 shrink-0" />
+                  <span>Admin Standby (Emergência)</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground truncate">
+                  Usuário: <strong>ADMIN</strong> • Senha: <strong>ADMIN</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail("ADMIN");
+                  setPassword("ADMIN");
+                }}
+                className="px-2 py-1 rounded-lg bg-muted border border-border text-foreground text-[11px] font-bold hover:bg-muted/80 transition-all cursor-pointer shrink-0 shadow-sm"
+              >
+                Preencher
+              </button>
+            </div>
           </div>
         )}
 

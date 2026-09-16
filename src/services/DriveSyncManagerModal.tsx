@@ -8,6 +8,9 @@ import {
   testDriveConnection,
   pushToGoogleDrive,
   fetchFromGoogleDrive,
+  forceReadSpreadsheetFromDrive,
+  getLocalDatabaseRoot,
+  saveLocalDatabaseRoot,
   DriveFileInfo 
 } from './googleDriveDatabaseService';
 import { 
@@ -150,6 +153,64 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
       setStatusMessage({ text: 'Erro ao subir banco: ' + err.message, type: 'error' });
     } finally {
       setSyncingUp(false);
+    }
+  };
+
+  const handleForcarLeituraPlanilha = async () => {
+    if (!webappUrl.trim()) {
+      setStatusMessage({ text: 'Informe a URL do Web App primeiro.', type: 'error' });
+      return;
+    }
+    try {
+      setSyncingDown(true);
+      // Limpa chaves de exclusão locais legadas para importar tudo da planilha sem bloqueios
+      if (typeof window !== "undefined") {
+        try {
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith("deleted_") || key.includes("deleted_lps") || key.includes("deleted_leads"))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+        } catch {}
+      }
+
+      const remoteData = await forceReadSpreadsheetFromDrive<any>(webappUrl.trim());
+
+      // Mescla com a API local de leads
+      try {
+        const localLeadsRes = await fetch('/api/leads');
+        if (localLeadsRes.ok) {
+          const leadsFromApi = await localLeadsRes.json();
+          if (Array.isArray(leadsFromApi) && leadsFromApi.length > 0) {
+            const currentRoot = getLocalDatabaseRoot() || {};
+            const existingLeads = Array.isArray(currentRoot.leads) ? currentRoot.leads : [];
+            const ids = new Set(existingLeads.map((l: any) => l.id));
+            leadsFromApi.forEach((l: any) => {
+              if (!ids.has(l.id)) {
+                existingLeads.push(l);
+              }
+            });
+            currentRoot.leads = existingLeads;
+            saveLocalDatabaseRoot(currentRoot);
+          }
+        }
+      } catch {}
+
+      if (remoteData) {
+        onDataRestored(remoteData);
+      }
+      setStatusMessage({ text: 'Leitura completa do Google Sheets e Apps Script concluída com sucesso!', type: 'success' });
+      toast.success('Leitura completa realizada! Atualizando tela...');
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+    } catch (err: any) {
+      setStatusMessage({ text: 'Erro ao ler dados da planilha: ' + err.message, type: 'error' });
+    } finally {
+      setSyncingDown(false);
     }
   };
 
@@ -359,7 +420,27 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
                 </div>
               </div>
 
-              {/* Botões de Ação Principais */}
+              {/* Mensagem de Status */}
+              {statusMessage && (
+                <div className={`p-3 rounded-xl text-xs border flex items-center gap-2 ${
+                  statusMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    : statusMessage.type === 'error'
+                    ? 'bg-destructive/10 border-destructive/20 text-destructive'
+                    : 'bg-muted/60 border-border text-foreground'
+                }`}>
+                  {statusMessage.type === 'success' ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  ) : statusMessage.type === 'error' ? (
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 shrink-0 animate-spin" />
+                  )}
+                  <span>{statusMessage.text}</span>
+                </div>
+              )}
+
+              {/* Ações e Controles de Sincronização */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   type="button"
@@ -411,25 +492,26 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
                 )}
               </div>
 
-              {/* Mensagem de Status */}
-              {statusMessage && (
-                <div className={`p-3 rounded-xl text-xs border flex items-center gap-2 ${
-                  statusMessage.type === 'success'
-                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                    : statusMessage.type === 'error'
-                    ? 'bg-destructive/10 border-destructive/20 text-destructive'
-                    : 'bg-muted/60 border-border text-foreground'
-                }`}>
-                  {statusMessage.type === 'success' ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  ) : statusMessage.type === 'error' ? (
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 shrink-0 animate-spin" />
-                  )}
-                  <span>{statusMessage.text}</span>
+              {/* Card Destaque: Forçar Leitura Completa do Sheets (Restauração e Checkpoint) */}
+              <div className="p-3.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-bold text-xs">
+                    <RefreshCw className="h-3.5 w-3.5 text-amber-500" /> Forçar Leitura Completa do Sheets
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Importa <strong>TODOS</strong> os dados gravados nas abas da planilha (Landing Pages, Leads, Produtos, etc).
+                  </p>
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={handleForcarLeituraPlanilha}
+                  disabled={syncingDown || !webappUrl.trim()}
+                  className="w-full sm:w-auto px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:opacity-50 shrink-0"
+                >
+                  {syncingDown ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+                  {syncingDown ? "Lendo Sheets..." : "Forçar Leitura Completa"}
+                </button>
+              </div>
 
               {/* Lista de Checkpoints */}
               <div className="space-y-3 pt-2">
@@ -523,13 +605,13 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
 
                       <div className="flex items-center gap-2">
                         <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-bold">SALEAD_DATA</span>
+                        <span className="text-emerald-400 font-bold">APP_DATABASE_SHEETS</span>
                         <span className="text-muted-foreground font-sans text-[10px]">— Planilha com abas: Leads, Usuários, LPs, Pesquisas, etc.</span>
                       </div>
 
                       <div className="flex items-center gap-2 text-purple-400 font-bold pt-1">
                         <span>📁</span> <span>Backups/</span>
-                        <span className="text-muted-foreground font-sans font-normal text-[10px]">— Snapshots diários (ex: SALEAD_14-09-2026) e backups JSON</span>
+                        <span className="text-muted-foreground font-sans font-normal text-[10px]">— Snapshots automáticos diários e backups JSON</span>
                       </div>
 
                       <div className="flex items-center gap-2 text-amber-400 font-bold">
@@ -539,7 +621,7 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
 
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <FileJson className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span>SALEAD_DATA_DD-MM-YYYY_HH-mm.json</span>
+                        <span>checkpoint_YYYY-MM-DD_HH-mm.json</span>
                         <span className="font-sans text-[10px]">— Pontos de restauração manuais</span>
                       </div>
                     </div>

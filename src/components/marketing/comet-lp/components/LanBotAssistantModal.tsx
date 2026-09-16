@@ -52,15 +52,15 @@ export const LanBotAssistantModal: React.FC<LanBotAssistantModalProps> = ({
 
       if (data.success && data.page) {
         onUpdatePage(data.page);
-        toast.success(data.message || "Página atualizada pelo Robô LAN com sucesso!");
+        toast.success(data.message || "Página atualizada pelo LANAI com sucesso!");
         setPrompt("");
         onClose();
       } else {
-        toast.error(data.error || "Não foi possível aplicar a alteração pelo LAN.");
+        toast.error(data.error || "Não foi possível aplicar a alteração pelo LANAI.");
       }
     } catch (err) {
-      console.error("Erro ao comunicar com Robô LAN:", err);
-      toast.error("Ocorreu um erro ao processar seu pedido no LAN.");
+      console.error("Erro ao comunicar com o LANAI:", err);
+      toast.error("Ocorreu um erro ao processar seu pedido no LANAI.");
     } finally {
       setLoading(false);
     }

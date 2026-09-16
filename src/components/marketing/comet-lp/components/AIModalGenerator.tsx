@@ -247,7 +247,7 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
   const [errorMessage, setErrorMessage] = useState("");
 
   const generationSteps = [
-    "LAN analisando briefing, público-alvo e nicho de mercado...",
+    "LANAI analisando briefing, público-alvo e nicho de mercado...",
     "Definindo direção de arte, tema (Claro / Escuro / Midnight) e paleta cromática ideal...",
     "Selecionando o melhor modelo estrutural de Hero e arquitetura do funil...",
     "Redigindo headline agressiva, Quiz de Qualificação e quebra de objeções...",
@@ -728,7 +728,7 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-                LAN • Agente de IA CRO
+                LANAI • Agente de IA CRO
               </h2>
               <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/30">
                 v2.5 High-Ticket
@@ -746,7 +746,7 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
             <div className="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <Lightbulb className="w-4 h-4 text-amber-400" />
-                <span>Modelos Recomendados por LAN (Sugestões Rápidas):</span>
+                <span>Modelos Recomendados pelo LANAI (Sugestões Rápidas):</span>
               </div>
               <span className="text-[10px] text-zinc-400 font-normal">Clique para auto-preencher</span>
             </div>
@@ -1123,7 +1123,7 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
                   <Sparkles className="w-4 h-4 text-purple-400 flex-shrink-0 mt-0.5" />
                   <div className="space-y-1">
                     <p className="font-semibold text-purple-200">
-                      O LAN definirá o melhor design para não criar tudo igual:
+                      O LANAI definirá o melhor design para não criar tudo igual:
                     </p>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
                       O agente analisará o nicho e público-alvo para decidir se a página deve ser{" "}
@@ -1144,7 +1144,7 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
                     </span>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                       {[
-                        { id: "auto", label: "Auto (LAN)", desc: "Inteligente" },
+                        { id: "auto", label: "Auto (LANAI)", desc: "Inteligente" },
                         { id: "dark", label: "Escuro Pro", desc: "Cyber Dark" },
                         { id: "light", label: "Claro Clean", desc: "White Pro" },
                         { id: "midnight", label: "Midnight", desc: "Luxo Black" },
@@ -1178,7 +1178,7 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
                       onChange={(e) => setSelectedHeroModel(e.target.value as any)}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-purple-500 cursor-pointer"
                     >
-                      <option value="auto">✨ Auto (LAN escolhe o melhor modelo para o nicho)</option>
+                      <option value="auto">✨ Auto (LANAI escolhe o melhor modelo para o nicho)</option>
                       <option value="split_image">🖼️ Split com Foto / Mockup Lateral (Produtos & Serviços)</option>
                       <option value="split_video">🎥 Split com Vídeo VSL (Lançamentos & Mentorias)</option>
                       <option value="centered_showcase">💻 Centered Showcase (SaaS & Aplicativos)</option>
@@ -1272,11 +1272,11 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
               className="w-full py-4 sm:py-5 rounded-2xl font-black text-base text-white bg-gradient-to-r from-purple-600 via-fuchsia-600 to-indigo-600 hover:from-purple-500 hover:via-fuchsia-500 hover:to-indigo-500 shadow-xl shadow-purple-950/60 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
             >
               {isGenerating ? (
-                <span>LAN Construindo Sua Landing Page...</span>
+                <span>LANAI Construindo Sua Landing Page...</span>
               ) : (
                 <>
                   <Sparkles className="w-5 h-5" />
-                  <span>Gerar Landing Page com LAN</span>
+                  <span>Gerar Landing Page com LANAI</span>
                   <ArrowRight className="w-5 h-5" />
                 </>
               )}

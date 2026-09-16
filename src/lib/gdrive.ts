@@ -1,6 +1,5 @@
 "use client";
 
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 export interface DriveConfig {
@@ -10,25 +9,25 @@ export interface DriveConfig {
   connected: boolean;
 }
 
+const DRIVE_CONFIG_KEY = "comet_gdrive_config";
+
 export async function getDriveConfig(): Promise<DriveConfig> {
-  const { data } = await supabase.from('drive_config').select('*').single();
-  if (!data) return { clientId: "", apiKey: "", folderId: "", connected: false };
-  return {
-    clientId: data.client_id || "",
-    apiKey: data.api_key || "",
-    folderId: data.folder_id || "",
-    connected: data.connected || false
-  };
+  if (typeof window === "undefined") {
+    return { clientId: "", apiKey: "", folderId: "", connected: false };
+  }
+  try {
+    const raw = localStorage.getItem(DRIVE_CONFIG_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { clientId: "", apiKey: "", folderId: "", connected: false };
 }
 
 export async function saveDriveConfig(config: DriveConfig) {
-  await supabase.from('drive_config').upsert({
-    id: '00000000-0000-0000-0000-000000000000',
-    client_id: config.clientId,
-    api_key: config.apiKey,
-    folder_id: config.folderId,
-    connected: config.connected
-  });
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(DRIVE_CONFIG_KEY, JSON.stringify(config));
+    } catch {}
+  }
 }
 
 // Simulação de conexão (OAuth real exigiria redirecionamento)

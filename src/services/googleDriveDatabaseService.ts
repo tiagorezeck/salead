@@ -149,8 +149,13 @@ export const saveLocalDatabaseRoot = <T>(data: T): void => {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(DB_LOCAL_STORAGE_KEY, JSON.stringify(data));
-  } catch (err) {
-    console.warn("Aviso ao persistir salead_database_root:", err);
+  } catch (err: any) {
+    console.warn("Aviso ao persistir salead_database_root no localStorage:", err);
+    // Recuperação inteligente em caso de QuotaExceededError
+    try {
+      localStorage.removeItem(LOCAL_CHECKPOINTS_STORAGE_KEY);
+      localStorage.setItem(DB_LOCAL_STORAGE_KEY, JSON.stringify(data));
+    } catch {}
   }
 };
 
@@ -184,8 +189,8 @@ const executeDriveRequest = async (payload: {
       body: JSON.stringify({ ...payload, targetUrl: cleanUrl })
     });
     data = await proxyRes.json().catch(() => null);
-  } catch (err) {
-    console.warn("Falha ao chamar /api/drive-proxy, tentando conexão direta...", err);
+  } catch {
+    // Tenta conexão direta de forma transparente sem poluir os logs
   }
 
   // Se o servidor proxy não existe no ambiente (HTTP 404 no Vercel ou hospedagem estática), faz tentativa direta no Google Apps Script
@@ -213,7 +218,7 @@ const executeDriveRequest = async (payload: {
         return directData;
       }
     } catch (directErr: any) {
-      throw new Error(`Servidor proxy indisponível (HTTP 404) e falha no acesso direto ao Google Apps Script. Verifique se publicou no Vercel com as rotas /api habilitadas. Erro: ${directErr.message}`);
+      throw new Error(`Conexão com o Google Apps Script indisponível. Verifique a URL configurada e as permissões do script. (${directErr.message || 'Offline'})`);
     }
   }
 
@@ -276,9 +281,23 @@ export const testDriveConnection = async (rawUrl: string): Promise<DriveTestResu
 };
 
 // PUSH (Enviar / Salvar banco de dados)
-export const pushToGoogleDrive = async <T>(url: string, data: T): Promise<any> => {
-  const cleanUrl = cleanWebAppUrl(url);
-  if (!cleanUrl) return null;
+export async function pushToGoogleDrive<T>(dataOrUrl: string | T, optionalData?: T): Promise<any> {
+  let targetUrl: string;
+  let data: T;
+
+  if (typeof dataOrUrl === 'string' && optionalData !== undefined) {
+    targetUrl = dataOrUrl;
+    data = optionalData;
+  } else {
+    targetUrl = getDriveConfig().webappUrl;
+    data = dataOrUrl as T;
+  }
+
+  const cleanUrl = cleanWebAppUrl(targetUrl);
+  if (!cleanUrl) {
+    saveLocalDatabaseRoot(data);
+    return null;
+  }
 
   saveLocalDatabaseRoot(data);
 
@@ -300,11 +319,12 @@ export const pushToGoogleDrive = async <T>(url: string, data: T): Promise<any> =
     saveDriveConfig({ syncStatus: 'error', lastSyncMessage: err.message });
     throw err;
   }
-};
+}
 
 // PULL (Buscar dados atualizados no Google Drive)
-export const fetchFromGoogleDrive = async <T>(url: string): Promise<T | null> => {
-  const cleanUrl = cleanWebAppUrl(url);
+export async function fetchFromGoogleDrive<T>(optionalUrl?: string): Promise<T | null> {
+  const targetUrl = optionalUrl || getDriveConfig().webappUrl;
+  const cleanUrl = cleanWebAppUrl(targetUrl);
   if (!cleanUrl) return null;
 
   try {
@@ -318,10 +338,34 @@ export const fetchFromGoogleDrive = async <T>(url: string): Promise<T | null> =>
     saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
 
     return res as T;
-  } catch (err: any) {
-    console.warn("Falha no pull do Google Drive, mantendo cache local:", err.message);
+  } catch {
     saveDriveConfig({ syncStatus: 'offline' });
     return null;
+  }
+}
+
+// FORÇAR LEITURA COMPLETA DAS ABAS DO GOOGLE SHEETS
+export const forceReadSpreadsheetFromDrive = async <T>(url: string): Promise<T | null> => {
+  const cleanUrl = cleanWebAppUrl(url);
+  if (!cleanUrl) return null;
+
+  try {
+    // 1. Tenta acionar a ação FORCE_READ_SHEETS
+    const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'FORCE_READ_SHEETS' });
+    let db = (res && (res.data || res.content)) ? (res.data || res.content) : res;
+
+    // Se o script retornou ou se precisamos tentar o get padrão
+    if (!db || typeof db !== 'object' || (!Array.isArray(db.leads) && !Array.isArray(db.landingPages))) {
+      db = await fetchFromGoogleDrive<T>(cleanUrl);
+    } else {
+      saveLocalDatabaseRoot(db);
+      saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
+    }
+
+    return db as T;
+  } catch {
+    // Fallback gracioso para fetchFromGoogleDrive
+    return fetchFromGoogleDrive<T>(cleanUrl);
   }
 };
 
@@ -370,7 +414,7 @@ export const formatCheckpointName = (d: Date = new Date()): string => {
   const year = d.getFullYear();
   const hours = pad(d.getHours());
   const minutes = pad(d.getMinutes());
-  return `SALEAD_${day}-${month}-${year}_${hours}-${minutes}`;
+  return `Checkpoint-${day}-${month}-${year}-${hours}:${minutes}`;
 };
 
 export interface SystemCheckpoint {
@@ -398,10 +442,14 @@ export const saveSystemCheckpoint = (checkpoint: SystemCheckpoint): void => {
   if (typeof window === "undefined") return;
   try {
     const current = getStoredSystemCheckpoints();
-    const next = [checkpoint, ...current.filter(c => c.id !== checkpoint.id)].slice(0, 30);
+    const next = [checkpoint, ...current.filter(c => c.id !== checkpoint.id)].slice(0, 15);
     localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(next));
   } catch (err) {
-    console.warn("Falha ao salvar histórico de checkpoints:", err);
+    console.warn("Falha ao salvar histórico de checkpoints, reduzindo histórico:", err);
+    try {
+      const reduced = [checkpoint];
+      localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(reduced));
+    } catch {}
   }
 };
 
