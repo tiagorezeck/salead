@@ -999,6 +999,100 @@ async function incrementLPVisits(id: string, body: any): Promise<{ success: bool
   return { success: true, visits: updatedVisits };
 }
 
+// Função para incrementar conversões/leads de Landing Pages no servidor, disco e banco
+async function incrementLPConversion(id: string, body?: any): Promise<{ success: boolean; leads: number; conv: number }> {
+  let updatedLeads = 1;
+  let updatedConv = 100;
+  const bodyLpId = body?.lpId || body?.id || body?.slug;
+
+  let page = await findLandingPageAnywhere(id);
+  if (!page && bodyLpId) {
+    page = await findLandingPageAnywhere(bodyLpId);
+  }
+
+  if (page) {
+    const currentLeads = Number(page.leads || page.leads_count) || 0;
+    updatedLeads = currentLeads + 1;
+    page.leads = updatedLeads;
+    page.leads_count = updatedLeads;
+
+    const currentVisits = Math.max(Number(page.visits || page.viewsCount || page.views_count) || 0, updatedLeads);
+    page.visits = currentVisits;
+    page.viewsCount = currentVisits;
+    page.views_count = currentVisits;
+
+    updatedConv = Math.min(100, Math.round((updatedLeads / currentVisits) * 100));
+    page.conv = updatedConv;
+
+    previewPagesStore.set(page.id, page);
+    if (page.slug) previewPagesStore.set(page.slug, page);
+  }
+
+  try {
+    const diskList = readStoredLandingPages();
+    const matchIndex = diskList.findIndex(
+      (p) => p.id === id || p.slug === id || (page && (p.id === page.id || p.slug === page.slug))
+    );
+    if (matchIndex !== -1) {
+      const target = diskList[matchIndex];
+      const newLeads = (Number(target.leads || target.leads_count) || 0) + 1;
+      const currentVisits = Math.max(
+        Number(target.visits || target.viewsCount || target.views_count) || 0,
+        newLeads
+      );
+      const conv = Math.min(100, Math.round((newLeads / currentVisits) * 100));
+      diskList[matchIndex] = {
+        ...target,
+        leads: newLeads,
+        leads_count: newLeads,
+        visits: currentVisits,
+        viewsCount: currentVisits,
+        views_count: currentVisits,
+        conv,
+        updated_at: new Date().toISOString(),
+      };
+      updatedLeads = newLeads;
+      updatedConv = conv;
+      writeStoredLandingPages(diskList);
+    } else if (page) {
+      writeStoredLandingPages([page, ...diskList]);
+    }
+  } catch (diskErr) {
+    console.warn("Express disk conversion increment notice:", diskErr);
+  }
+
+  try {
+    const resolvedUuid = page?.id || (isUUID(id) ? id : (isUUID(bodyLpId) ? bodyLpId : null));
+    if (resolvedUuid) {
+      const { data: dbData } = await supabase
+        .from("landing_pages")
+        .select("leads_count, visits, config")
+        .eq("id", resolvedUuid)
+        .maybeSingle();
+
+      const currentL = dbData ? Number(dbData.leads_count) || 0 : 0;
+      const finalL = Math.max(currentL + 1, updatedLeads);
+      const currentV = dbData ? Math.max(Number(dbData.visits) || 0, finalL) : finalL;
+
+      const updatePayload: Record<string, any> = { leads_count: finalL, visits: currentV };
+      if (dbData?.config && typeof dbData.config === "object") {
+        updatePayload.config = {
+          ...dbData.config,
+          leads: finalL,
+          leads_count: finalL,
+          visits: currentV,
+          conv: Math.min(100, Math.round((finalL / currentV) * 100)),
+        };
+      }
+      await supabase.from("landing_pages").update(updatePayload).eq("id", resolvedUuid);
+    }
+  } catch (sbErr) {
+    console.warn("Supabase conversion increment notice:", sbErr);
+  }
+
+  return { success: true, leads: updatedLeads, conv: updatedConv };
+}
+
 // Endpoint oficial para contabilizar visualizações/visitas de Landing Pages
 cometLpRouter.post("/api/landing-pages/:id/visit", async (req, res) => {
   try {
@@ -1021,6 +1115,32 @@ cometLpRouter.post("/api/landing-pages/visit", async (req, res) => {
     return res.json(result);
   } catch (err: any) {
     console.error("Error incrementing visits alias:", err);
+    return res.status(500).json({ error: err?.message || "Internal error" });
+  }
+});
+
+// Endpoint oficial para contabilizar conversões/leads de Landing Pages
+cometLpRouter.post("/api/landing-pages/:id/conversion", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "ID ausente" });
+    const result = await incrementLPConversion(id, req.body);
+    return res.json(result);
+  } catch (err: any) {
+    console.error("Error incrementing conversion:", err);
+    return res.status(500).json({ error: err?.message || "Internal error" });
+  }
+});
+
+// Alias para POST /api/landing-pages/conversion com lpId no body
+cometLpRouter.post("/api/landing-pages/conversion", async (req, res) => {
+  try {
+    const targetId = req.body?.lpId || req.body?.id || req.body?.slug;
+    if (!targetId) return res.status(400).json({ error: "lpId ausente no body" });
+    const result = await incrementLPConversion(targetId, req.body);
+    return res.json(result);
+  } catch (err: any) {
+    console.error("Error incrementing conversion alias:", err);
     return res.status(500).json({ error: err?.message || "Internal error" });
   }
 });
@@ -1382,6 +1502,13 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       });
     } catch (saveErr) {
       console.error("Error in automatic Supabase background save:", saveErr);
+    }
+
+    // Incrementar contadores de conversão/leads para a Landing Page
+    try {
+      await incrementLPConversion(pageIdStr, req.body);
+    } catch (convErr) {
+      console.warn("Notice: incrementLPConversion background trigger notice:", convErr);
     }
 
     // Auto Drive sync if configured
@@ -2128,6 +2255,40 @@ cometLpRouter.get("/api/landing-pages", async (_req, res) => {
         console.warn("Could not query Supabase for initial landing pages:", err);
       }
     }
+
+    // Recalcula dinamicamente estatísticas garantindo consistência com os leads gravados
+    const storedLeads = readStoredLeads();
+    pages = pages.map((p) => {
+      const pId = p.id?.toLowerCase();
+      const pSlug = p.slug?.toLowerCase();
+      const pName = (p.name || p.title || "").toLowerCase();
+
+      const matchedLeadsCount = storedLeads.filter((l) => {
+        const lPageId = (l.pageId || "").toLowerCase();
+        const lPageTitle = (l.pageTitle || "").toLowerCase();
+        const lCompany = (l.company || "").toLowerCase();
+        const lSource = (l.source || "").toLowerCase();
+
+        if (pId && (lPageId === pId || lPageTitle === pId)) return true;
+        if (pSlug && (lPageId === pSlug || lSource.includes(pSlug))) return true;
+        if (pName && (lPageTitle === pName || lCompany.includes(pName) || lSource.includes(pName))) return true;
+        return false;
+      }).length;
+
+      const effectiveLeads = Math.max(Number(p.leads || p.leads_count) || 0, matchedLeadsCount);
+      const effectiveVisits = Math.max(Number(p.visits || p.viewsCount || p.views_count) || 0, effectiveLeads);
+      const effectiveConv = effectiveVisits > 0 ? Math.min(100, Math.round((effectiveLeads / effectiveVisits) * 100)) : 0;
+
+      return {
+        ...p,
+        visits: effectiveVisits,
+        viewsCount: effectiveVisits,
+        views_count: effectiveVisits,
+        leads: effectiveLeads,
+        leads_count: effectiveLeads,
+        conv: effectiveConv,
+      };
+    });
 
     res.json({ success: true, landingPages: pages });
   } catch (err: any) {
