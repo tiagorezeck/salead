@@ -576,6 +576,17 @@ export const removeDeletedLandingPageId = (id: string) => {
   } catch {}
 };
 
+export const notifyRealtimeSync = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new CustomEvent("salead_database_root_updated"));
+    const bc = new BroadcastChannel("comet_realtime_sync");
+    bc.postMessage({ type: "SYNC_DATA", timestamp: Date.now() });
+    bc.close();
+  } catch {}
+};
+
 export const getLocalLandingPages = (): LandingPage[] => {
   if (typeof window === "undefined") return [];
   try {
@@ -1527,6 +1538,8 @@ export function useData() {
   // 7. LANDING PAGES
   const landingPages = asArray(useQuery({ 
     queryKey: ['landing_pages'], 
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
     queryFn: async () => { 
       const deletedIds = new Set(getDeletedLandingPageIds());
       const isDeleted = (lp: any) => {
@@ -1575,6 +1588,7 @@ export function useData() {
 
       const mergedMap = new Map<string, LandingPage>();
 
+      // Insere primeiro dados locais/drive, e por último o servidor central
       for (const lp of [...driveLps, ...localLps, ...serverLps]) {
         if (!lp || isDeleted(lp)) continue;
         const key = getLpKey(lp);
@@ -1582,14 +1596,16 @@ export function useData() {
           mergedMap.set(key, lp);
         } else {
           const prev = mergedMap.get(key)!;
+          const isServer = serverLps.some(s => s.id === lp.id || (s.slug && lp.slug && s.slug.toLowerCase() === lp.slug.toLowerCase()));
           const bestId = isUUID(prev.id) ? prev.id : (isUUID(lp.id) ? lp.id : (prev.id || lp.id));
           mergedMap.set(key, {
             ...prev,
             ...lp,
             id: bestId,
-            visits: Math.max(Number(prev.visits) || 0, Number(lp.visits) || 0),
-            leads: Math.max(Number(prev.leads) || 0, Number(lp.leads) || 0),
-            conv: Math.max(Number(prev.conv) || 0, Number(lp.conv) || 0),
+            // O servidor central tem autoridade para visitas, leads e conversão para manter sincronia em todas as abas/navegadores
+            visits: isServer ? (Number(lp.visits) || 0) : Math.max(Number(prev.visits) || 0, Number(lp.visits) || 0),
+            leads: isServer ? (Number(lp.leads) || 0) : Math.max(Number(prev.leads) || 0, Number(lp.leads) || 0),
+            conv: isServer ? (Number(lp.conv) || 0) : Math.max(Number(prev.conv) || 0, Number(lp.conv) || 0),
           });
         }
       }
@@ -2041,12 +2057,22 @@ export function useData() {
       queryClient.invalidateQueries();
     };
 
+    let bcChannel: BroadcastChannel | null = null;
     if (typeof window !== "undefined") {
       window.addEventListener('storage', handleStorageChange);
       window.addEventListener('salead_database_root_updated', handleCustomDbUpdate);
+      try {
+        bcChannel = new BroadcastChannel("comet_realtime_sync");
+        bcChannel.onmessage = () => {
+          queryClient.invalidateQueries();
+        };
+      } catch {}
     }
 
     return () => {
+      if (bcChannel) {
+        try { bcChannel.close(); } catch {}
+      }
       if (typeof window !== "undefined") {
         window.removeEventListener('storage', handleStorageChange);
         window.removeEventListener('salead_database_root_updated', handleCustomDbUpdate);
@@ -3127,6 +3153,7 @@ export function useData() {
       }
 
       invalidate('landing_pages');
+      notifyRealtimeSync();
       return item;
     },
 
@@ -3286,6 +3313,7 @@ export function useData() {
       }
 
       invalidate('landing_pages');
+      notifyRealtimeSync();
       return updatedItem;
     },
 
@@ -3365,6 +3393,7 @@ export function useData() {
 
       toast.success("Landing Page excluída com sucesso.");
       invalidate('landing_pages');
+      notifyRealtimeSync();
     },
 
     deleteMultipleLandingPages: async (ids: string[]) => {
