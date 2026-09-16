@@ -128,6 +128,121 @@ function normalizeSlugServer(str?: string): string {
 
 const DEFAULT_INITIAL_LANDING_PAGES: any[] = [
   {
+    id: "da43e674-83f0-499f-b4bc-036304a98b90",
+    name: "Mentoria High-Ticket & CRO",
+    title: "Mentoria High-Ticket & CRO",
+    type: "Gerada por IA",
+    template: "COMET",
+    status: "Ativa",
+    visits: 0,
+    leads: 0,
+    conv: 0,
+    niche: "Mentoria High-Ticket & Infoprodutos",
+    cityOrRegion: "São Paulo, SP",
+    targetAudience: "Infoprodutores, Mentores e Donos de Agência faturando acima de R$ 30k/mês",
+    accentColor: "purple",
+    theme: "dark",
+    slug: "mentoria-high-ticket-cro",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    visibility: {
+      hero: true,
+      socialProof: true,
+      quiz: true,
+      bentoGrid: true,
+      testimonials: true,
+      formSection: true,
+      faq: true,
+      stickyMobileCta: true,
+    },
+    sectionOrder: ["hero", "socialProof", "quiz", "bentoGrid", "testimonials", "formSection", "faq"],
+    hero: {
+      model: "split_image",
+      badgeText: "⚡ Vagas Abertas para São Paulo - Turma VIP",
+      badgeIcon: "Zap",
+      headline: "Escale suas Vendas High-Ticket com Tráfego Direto e Conversão Extrema",
+      subheadline: "O método definitivo para transformar leads qualificados em clientes de alto valor todos os dias com segurança e previsibilidade.",
+      mediaType: "image",
+      imageUrl: "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
+      ctaText: "QUERO ME CANDIDATAR À MENTORIA",
+      ctaSubtext: "⚡ Análise de perfil em menos de 10 minutos via WhatsApp",
+      countdownMinutes: 14,
+      ratingScore: "4.9/5",
+      ratingText: "+14.850 empresários impactados e R$ 48M+ gerados",
+      socialProofAvatars: [
+        { name: "Lucas M.", avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80" },
+        { name: "Beatriz R.", avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80" },
+        { name: "Carlos E.", avatarUrl: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80" },
+      ],
+      b2bMetrics: [
+        { id: "b2b_1", value: "+340%", label: "Crescimento Médio", sublabel: "Em menos de 90 dias" },
+        { id: "b2b_2", value: "99.4%", label: "Satisfação Verificada", sublabel: "Avaliações auditadas" },
+        { id: "b2b_3", value: "10 Min", label: "Tempo de Resposta", sublabel: "Atendimento VIP" },
+      ],
+      scarcityLabel: "Vagas Restantes para São Paulo",
+      scarcityRemainingSlots: 4,
+      scarcityTotalSlots: 15,
+    },
+    socialProof: {
+      marqueeTitle: "EMPRESAS E MENTORADOS QUE APROVAM NOSSO MÉTODO",
+      metrics: [
+        { id: "m1", value: "+R$ 48.7M", label: "Faturamento Gerado", sublabel: "Pelos mentorados em 12 meses", iconName: "TrendingUp" },
+        { id: "m2", value: "3.8x", label: "ROAS Médio", sublabel: "Em tráfego direto de conversão", iconName: "Zap" },
+        { id: "m3", value: "99.4%", label: "Taxa de Aprovação", sublabel: "Avaliações de alta satisfação", iconName: "ShieldCheck" },
+        { id: "m4", value: "+14.850", label: "Negócios Impactados", sublabel: "Em todo território nacional", iconName: "Users" },
+      ],
+      marqueeLogos: ["Forbes Brasil", "Exame", "InfoMoney", "Valor Econômico", "G1 Negócios", "TechCrunch"],
+    },
+    quiz: {
+      badge: "DIAGNÓSTICO PERSONALIZADO",
+      title: "Descubra se o seu negócio está pronto para a Aceleração",
+      subtitle: "Responda 3 perguntas rápidas para liberar sua condição especial.",
+      questions: [
+        {
+          id: "q1",
+          question: "Qual é o seu objetivo de faturamento mensal?",
+          description: "Definimos o ritmo de acordo com sua meta.",
+          options: [
+            { id: "opt_1", label: "Alcançar de R$ 50k a R$ 100k/mês", iconName: "TrendingUp", badge: "Alta Demanda" },
+            { id: "opt_2", label: "Escalar acima de R$ 100k/mês no perpétuo", iconName: "Zap" },
+            { id: "opt_3", label: "Estruturar equipe de vendas e fechar high-ticket", iconName: "Target" },
+          ],
+        },
+      ],
+    },
+    bentoGrid: {
+      badge: "MÉTODO COMET CRO",
+      title: "Os 4 Pilares da Escala Previsível",
+      subtitle: "Engenharia de conversão aplicada para resultados reais.",
+      cards: [
+        { id: "b1", title: "Tráfego Direto de Alta Intenção", description: "Atraia clientes prontos para comprar sem perder tempo com curioso.", iconName: "Target" },
+        { id: "b2", title: "Páginas com Direção de Arte VIP", description: "Design de elite que gera confiança imediata e autoridade indiscutível.", iconName: "Sparkles" },
+        { id: "b3", title: "Qualificação Automática por Quiz", description: "Filtre os melhores clientes antes de enviar para o seu time comercial.", iconName: "Filter" },
+        { id: "b4", title: "Fechamento Rápido no WhatsApp", description: "Roteiros validados e integração nativa com o COMET CRM.", iconName: "MessageCircle" },
+      ],
+    },
+    testimonials: {
+      badge: "PROVA SOCIAL AUDITADA",
+      title: "Resultados Reais de Quem Aplica o Método",
+      subtitle: "Mentorados que escalaram seus negócios com previsibilidade.",
+      cards: [
+        { id: "t1", name: "Ricardo Fonseca", role: "Mentor de Vendas B2B", company: "Fonseca Consultoria", result: "R$ 180k em 45 dias", content: "A estrutura de landing page com o quiz qualificador mudou totalmente o nível dos leads que chegam no meu WhatsApp.", avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80", rating: 5 },
+        { id: "t2", name: "Mariana Costa", role: "Dermatologista & Empresária", company: "Clínica Costa", result: "Agenda lotada por 3 meses", content: "Conseguimos aumentar a taxa de conversão em 4x logo na primeira semana de veiculação das campanhas.", avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80", rating: 5 },
+      ],
+    },
+    formSection: {
+      badge: "VAGAS LIMITADAS",
+      title: "Garanta seu Diagnóstico Gratuito Agora",
+      subtitle: "Preencha abaixo para receber a análise estratégica do seu funil.",
+      ctaButtonText: "SOLICITAR ANÁLISE NO WHATSAPP",
+      guaranteeText: "🔒 Seus dados estão 100% seguros. Atendimento humano e personalizado.",
+    },
+    faq: [
+      { question: "Para quem é indicada esta mentoria?", answer: "Para infoprodutores, mentores, consultores, clínicas e empresários que desejam escalar suas vendas com previsibilidade e tráfego pago de alta conversão." },
+      { question: "Como funciona a aplicação?", answer: "Após preencher o formulário ou responder o quiz, nossa equipe analisará seu perfil e entrará em contato via WhatsApp em até 10 minutos." },
+    ],
+  },
+  {
     id: "lp_ai_mentoria_cro",
     name: "Mentoria High-Ticket & CRO",
     title: "Mentoria High-Ticket & CRO",
@@ -384,6 +499,17 @@ async function getPageFromSupabase(tokenOrId: string) {
           externalUrl: found.config?.externalUrl || found.external_url || undefined,
         };
       }
+      // 4. Se não encontrou no Supabase, tenta buscar na lista de Landing Pages salvas no disco/memória por correspondência de UUID ou ID
+      const diskList = readStoredLandingPages();
+      const matchDisk = diskList.find(
+        (p) =>
+          p.id === tokenOrId ||
+          p.slug === tokenOrId ||
+          p.previewToken === tokenOrId ||
+          p.config?.client_id === tokenOrId ||
+          p.config?.id === tokenOrId
+      );
+      if (matchDisk) return matchDisk;
     }
   } catch (e) {
     console.error("Error fetching page from Supabase in cometRoutes:", e);
