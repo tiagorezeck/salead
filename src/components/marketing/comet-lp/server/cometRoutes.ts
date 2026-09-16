@@ -116,18 +116,149 @@ function writeStoredLeads(leads: any[]) {
   }
 }
 
+function normalizeSlugServer(str?: string): string {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+const DEFAULT_INITIAL_LANDING_PAGES: any[] = [
+  {
+    id: "lp_ai_mentoria_cro",
+    name: "Mentoria High-Ticket & CRO",
+    title: "Mentoria High-Ticket & CRO",
+    type: "Gerada por IA",
+    template: "COMET",
+    status: "Ativa",
+    visits: 0,
+    leads: 0,
+    conv: 0,
+    niche: "Mentoria High-Ticket & Infoprodutos",
+    cityOrRegion: "São Paulo, SP",
+    targetAudience: "Infoprodutores, Mentores e Donos de Agência faturando acima de R$ 30k/mês",
+    accentColor: "purple",
+    theme: "dark",
+    slug: "mentoria-high-ticket-cro",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    visibility: {
+      hero: true,
+      socialProof: true,
+      quiz: true,
+      bentoGrid: true,
+      testimonials: true,
+      formSection: true,
+      faq: true,
+      stickyMobileCta: true,
+    },
+    sectionOrder: ["hero", "socialProof", "quiz", "bentoGrid", "testimonials", "formSection", "faq"],
+    hero: {
+      model: "split_image",
+      badgeText: "⚡ Vagas Abertas para São Paulo - Turma VIP",
+      badgeIcon: "Zap",
+      headline: "Escale suas Vendas High-Ticket com Tráfego Direto e Conversão Extrema",
+      subheadline: "O método definitivo para transformar leads qualificados em clientes de alto valor todos os dias com segurança e previsibilidade.",
+      mediaType: "image",
+      imageUrl: "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
+      ctaText: "QUERO ME CANDIDATAR À MENTORIA",
+      ctaSubtext: "⚡ Análise de perfil em menos de 10 minutos via WhatsApp",
+      countdownMinutes: 14,
+      ratingScore: "4.9/5",
+      ratingText: "+14.850 empresários impactados e R$ 48M+ gerados",
+      socialProofAvatars: [
+        { name: "Lucas M.", avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80" },
+        { name: "Beatriz R.", avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80" },
+        { name: "Carlos E.", avatarUrl: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80" },
+      ],
+      b2bMetrics: [
+        { id: "b2b_1", value: "+340%", label: "Crescimento Médio", sublabel: "Em menos de 90 dias" },
+        { id: "b2b_2", value: "99.4%", label: "Satisfação Verificada", sublabel: "Avaliações auditadas" },
+        { id: "b2b_3", value: "10 Min", label: "Tempo de Resposta", sublabel: "Atendimento VIP" },
+      ],
+      scarcityLabel: "Vagas Restantes para São Paulo",
+      scarcityRemainingSlots: 4,
+      scarcityTotalSlots: 15,
+    },
+    socialProof: {
+      marqueeTitle: "EMPRESAS E MENTORADOS QUE APROVAM NOSSO MÉTODO",
+      metrics: [
+        { id: "m1", value: "+R$ 48.7M", label: "Faturamento Gerado", sublabel: "Pelos mentorados em 12 meses", iconName: "TrendingUp" },
+        { id: "m2", value: "3.8x", label: "ROAS Médio", sublabel: "Em tráfego direto de conversão", iconName: "Zap" },
+        { id: "m3", value: "99.4%", label: "Taxa de Aprovação", sublabel: "Avaliações de alta satisfação", iconName: "ShieldCheck" },
+        { id: "m4", value: "+14.850", label: "Negócios Impactados", sublabel: "Em todo território nacional", iconName: "Users" },
+      ],
+      marqueeLogos: ["Forbes Brasil", "Exame", "InfoMoney", "Valor Econômico", "G1 Negócios", "TechCrunch"],
+    },
+    quiz: {
+      badge: "DIAGNÓSTICO PERSONALIZADO",
+      title: "Descubra se o seu negócio está pronto para a Aceleração",
+      subtitle: "Responda 3 perguntas rápidas para liberar sua condição especial.",
+      questions: [
+        {
+          id: "q1",
+          question: "Qual é o seu objetivo de faturamento mensal?",
+          description: "Definimos o ritmo de acordo com sua meta.",
+          options: [
+            { id: "opt_1", label: "Alcançar de R$ 50k a R$ 100k/mês", iconName: "TrendingUp", badge: "Alta Demanda" },
+            { id: "opt_2", label: "Escalar acima de R$ 100k/mês no perpétuo", iconName: "Zap" },
+            { id: "opt_3", label: "Estruturar equipe de vendas e fechar high-ticket", iconName: "Target" },
+          ],
+        },
+      ],
+    },
+    bentoGrid: {
+      badge: "MÉTODO COMET CRO",
+      title: "Os 4 Pilares da Escala Previsível",
+      subtitle: "Engenharia de conversão aplicada para resultados reais.",
+      cards: [
+        { id: "b1", title: "Tráfego Direto de Alta Intenção", description: "Atraia clientes prontos para comprar sem perder tempo com curioso.", iconName: "Target" },
+        { id: "b2", title: "Páginas com Direção de Arte VIP", description: "Design de elite que gera confiança imediata e autoridade indiscutível.", iconName: "Sparkles" },
+        { id: "b3", title: "Qualificação Automática por Quiz", description: "Filtre os melhores clientes antes de enviar para o seu time comercial.", iconName: "Filter" },
+        { id: "b4", title: "Fechamento Rápido no WhatsApp", description: "Roteiros validados e integração nativa com o COMET CRM.", iconName: "MessageCircle" },
+      ],
+    },
+    testimonials: {
+      badge: "PROVA SOCIAL AUDITADA",
+      title: "Resultados Reais de Quem Aplica o Método",
+      subtitle: "Mentorados que escalaram seus negócios com previsibilidade.",
+      cards: [
+        { id: "t1", name: "Ricardo Fonseca", role: "Mentor de Vendas B2B", company: "Fonseca Consultoria", result: "R$ 180k em 45 dias", content: "A estrutura de landing page com o quiz qualificador mudou totalmente o nível dos leads que chegam no meu WhatsApp.", avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80", rating: 5 },
+        { id: "t2", name: "Mariana Costa", role: "Dermatologista & Empresária", company: "Clínica Costa", result: "Agenda lotada por 3 meses", content: "Conseguimos aumentar a taxa de conversão em 4x logo na primeira semana de veiculação das campanhas.", avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80", rating: 5 },
+      ],
+    },
+    formSection: {
+      badge: "VAGAS LIMITADAS",
+      title: "Garanta seu Diagnóstico Gratuito Agora",
+      subtitle: "Preencha abaixo para receber a análise estratégica do seu funil.",
+      ctaButtonText: "SOLICITAR ANÁLISE NO WHATSAPP",
+      guaranteeText: "🔒 Seus dados estão 100% seguros. Atendimento humano e personalizado.",
+    },
+    faq: [
+      { question: "Para quem é indicada esta mentoria?", answer: "Para infoprodutores, mentores, consultores, clínicas e empresários que desejam escalar suas vendas com previsibilidade e tráfego pago de alta conversão." },
+      { question: "Como funciona a aplicação?", answer: "Após preencher o formulário ou responder o quiz, nossa equipe analisará seu perfil e entrará em contato via WhatsApp em até 10 minutos." },
+    ],
+  }
+];
+
 function readStoredLandingPages(): any[] {
   try {
     ensureDataDir();
     if (fs.existsSync(LP_DATA_FILE)) {
       const raw = fs.readFileSync(LP_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
+    // Salva a lista padrão inicial no disco físico do servidor se estiver ausente
+    writeStoredLandingPages(DEFAULT_INITIAL_LANDING_PAGES);
+    return DEFAULT_INITIAL_LANDING_PAGES;
   } catch (e) {
     console.error("Failed to read stored landing pages:", e);
   }
-  return [];
+  return DEFAULT_INITIAL_LANDING_PAGES;
 }
 
 function writeStoredLandingPages(pages: any[]) {
@@ -260,54 +391,90 @@ async function getPageFromSupabase(tokenOrId: string) {
   return null;
 }
 
-// Unified resolver: busca no armazenamento persistente do disco, memória, Supabase e presets
+// Unified resolver: busca no armazenamento persistente do disco, memória, Supabase, Google Drive e presets
 export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | null> {
   if (!tokenOrId) return null;
-  const normId = tokenOrId.toLowerCase().trim();
+  const rawId = tokenOrId.trim();
+  const normId = rawId.toLowerCase();
+  const slugId = normalizeSlugServer(rawId);
+
+  const matches = (p: any) => {
+    if (!p) return false;
+    if (p.id === rawId || p.id === normId || p.id === slugId) return true;
+    if (p.slug === rawId || p.slug === normId || p.slug === slugId) return true;
+    if (p.previewToken === rawId || p.previewToken === normId || p.previewToken === slugId) return true;
+    if (p.config && (p.config.slug === rawId || p.config.slug === normId || p.config.slug === slugId || p.config.client_id === rawId)) return true;
+    
+    const pNameNorm = normalizeSlugServer(p.name || p.title);
+    if (pNameNorm && slugId && (pNameNorm === slugId || pNameNorm.includes(slugId) || slugId.includes(pNameNorm))) return true;
+    
+    return false;
+  };
 
   // 1. Memória (preview store)
-  let page = previewPagesStore.get(tokenOrId) ||
-    Array.from(previewPagesStore.values()).find(
-      (p) =>
-        p.id === tokenOrId ||
-        p.slug === tokenOrId ||
-        p.previewToken === tokenOrId ||
-        (p.name && p.name.toLowerCase() === normId) ||
-        (p.title && p.title.toLowerCase() === normId)
-    );
+  let page = previewPagesStore.get(rawId) ||
+    previewPagesStore.get(normId) ||
+    previewPagesStore.get(slugId) ||
+    Array.from(previewPagesStore.values()).find(matches);
   if (page) return page;
 
   // 2. Disco persistente do servidor
   const diskPages = readStoredLandingPages();
-  const fromDisk = diskPages.find(
-    (p) =>
-      p.id === tokenOrId ||
-      p.slug === tokenOrId ||
-      p.previewToken === tokenOrId ||
-      (p.name && p.name.toLowerCase() === normId) ||
-      (p.title && p.title.toLowerCase() === normId) ||
-      (p.config && (p.config.slug === tokenOrId || p.config.client_id === tokenOrId))
-  );
+  const fromDisk = diskPages.find(matches);
   if (fromDisk) {
     previewPagesStore.set(fromDisk.id, fromDisk);
+    if (fromDisk.slug) previewPagesStore.set(fromDisk.slug, fromDisk);
     return fromDisk;
   }
 
-  // 3. Supabase com service role key (bypassa qualquer restrição)
+  // 3. Fallback no Google Drive (se configurado WebApp URL)
+  const driveUrl = getSystemDriveUrl();
+  if (driveUrl && driveUrl.startsWith("http")) {
+    try {
+      const resp = await fetch(driveUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "GET_DATABASE" }),
+        redirect: "follow",
+      });
+      if (resp.ok) {
+        const driveData = await resp.json();
+        const driveLps = Array.isArray(driveData?.landingPages) 
+          ? driveData.landingPages 
+          : (Array.isArray(driveData?.landing_pages) 
+            ? driveData.landing_pages 
+            : (Array.isArray(driveData?.data?.landingPages) ? driveData.data.landingPages : []));
+        if (Array.isArray(driveLps) && driveLps.length > 0) {
+          const fromDrive = driveLps.find(matches);
+          if (fromDrive) {
+            // Sincroniza no disco local do servidor para próximas requisições instantâneas
+            const currentDisk = readStoredLandingPages();
+            writeStoredLandingPages([fromDrive, ...currentDisk.filter(p => p.id !== fromDrive.id)]);
+            previewPagesStore.set(fromDrive.id, fromDrive);
+            if (fromDrive.slug) previewPagesStore.set(fromDrive.slug, fromDrive);
+            return fromDrive;
+          }
+        }
+      }
+    } catch (dErr) {
+      console.warn("Notice: Drive fetch fallback in findLandingPageAnywhere:", dErr);
+    }
+  }
+
+  // 4. Supabase com service role key
   const fromSb = await getPageFromSupabase(tokenOrId);
   if (fromSb) {
     previewPagesStore.set(fromSb.id, fromSb);
     return fromSb;
   }
 
-  // 4. Presets pré-configurados
-  const fromPreset = PRESET_TEMPLATES.find(
-    (p) =>
-      p.id === tokenOrId ||
-      p.slug === tokenOrId ||
-      (p.title && p.title.toLowerCase() === normId)
-  );
-  if (fromPreset) return fromPreset;
+  // 5. Presets e LPs de inicialização padrão
+  const fromPreset = PRESET_TEMPLATES.find(matches) || DEFAULT_INITIAL_LANDING_PAGES.find(matches);
+  if (fromPreset) {
+    previewPagesStore.set(fromPreset.id, fromPreset);
+    if (fromPreset.slug) previewPagesStore.set(fromPreset.slug, fromPreset);
+    return fromPreset;
+  }
 
   return null;
 }
