@@ -16,6 +16,7 @@ import {
 import { THEME_CONFIGS } from "../utils/theme";
 import { LandingPageRenderer } from "./LandingPageRenderer";
 import { generateStandaloneHtml } from "../utils/htmlExporter";
+import { saveLandingPageToStorage, syncPageWithServerPreview } from "../utils/storage";
 import { DynamicIcon } from "./DynamicIcon";
 import { ImagePickerModal } from "./ImagePickerModal";
 import { LogoManagerModal } from "./LogoManagerModal";
@@ -282,7 +283,13 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
   const handleSave = () => {
     setSaveStatus("saving");
-    onSave(page);
+    const updatedPageWithTimestamp = {
+      ...page,
+      updatedAt: new Date().toISOString(),
+    };
+    saveLandingPageToStorage(updatedPageWithTimestamp);
+    syncPageWithServerPreview(updatedPageWithTimestamp).catch(() => {});
+    onSave(updatedPageWithTimestamp);
     setTimeout(() => {
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
@@ -724,7 +731,13 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
           {/* Link Teste (Network Preview / Share Modal) */}
           <button
             onClick={() => {
-              onSave(page);
+              const updatedPageWithTimestamp = {
+                ...page,
+                updatedAt: new Date().toISOString(),
+              };
+              saveLandingPageToStorage(updatedPageWithTimestamp);
+              syncPageWithServerPreview(updatedPageWithTimestamp).catch(() => {});
+              onSave(updatedPageWithTimestamp);
               setIsNetworkPreviewOpen(true);
             }}
             className="px-3 py-2 rounded-xl bg-purple-950/60 border border-purple-500/40 hover:bg-purple-900/80 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-purple-950/40"

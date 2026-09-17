@@ -129,6 +129,8 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
         });
         setConfig(getDriveConfig());
         loadCheckpoints(cleanUrl);
+        // Lê os dados da planilha imediatamente
+        forceReadSpreadsheetFromDrive(cleanUrl).catch(() => {});
       } else {
         toast.error("Falha ao conectar:", { description: res.message });
       }
@@ -171,25 +173,18 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
         setConfig(getDriveConfig());
         loadCheckpoints(cleanUrl);
 
-        // Envia o banco local inicial para criar as abas no Sheets e a pasta no Drive
+        // LÊ IMEDIATAMENTE TODOS OS DADOS DA PLANILHA SHEETS E DRIVE (NÃO SOBRESCREVE A PLANILHA DO USUÁRIO)
         try {
-          const currentDb = {
-            leads: data.leads,
-            users: data.users,
-            landingPages: data.landingPages,
-            products: data.products,
-            surveys: data.surveys,
-            tasks: data.tasks,
-            pipelines: data.pipelines,
-            playbooks: data.playbooks,
-            company: data.company,
-            exportedAt: new Date().toISOString()
-          };
-          await pushToGoogleDrive(cleanUrl, currentDb);
-          toast.success("Dados locais sincronizados no Google Sheets e Drive com sucesso!");
+          const remoteDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
+          const leadsCount = Array.isArray(remoteDb?.leads) ? remoteDb.leads.length : (Array.isArray(remoteDb?.data?.leads) ? remoteDb.data.leads.length : 0);
+          const pagesCount = Array.isArray(remoteDb?.landingPages) ? remoteDb.landingPages.length : (Array.isArray(remoteDb?.data?.landingPages) ? remoteDb.data.landingPages.length : 0);
+          
+          toast.success("Dados lidos do Google Sheets com sucesso!", {
+            description: `${leadsCount} leads e ${pagesCount} landing pages importados em tempo real.`
+          });
           setConfig(getDriveConfig());
         } catch (syncErr: any) {
-          console.warn("Aviso na sincronização inicial:", syncErr.message);
+          console.warn("Aviso na leitura inicial do Sheets:", syncErr.message);
         }
       } else {
         toast.error("Falha na validação do link:", { description: res.message });

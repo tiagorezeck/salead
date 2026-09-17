@@ -909,7 +909,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
 
     try {
       if (page.webhookUrl) {
-        await fetch(page.webhookUrl, {
+        fetch(page.webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -921,18 +921,18 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
       // 1. Notifica callback da página se disponível, ou executa submissão direta
       if (onLeadSubmit) {
         try {
-          await onLeadSubmit(payload);
+          onLeadSubmit(payload);
         } catch (e) {
           console.warn("onLeadSubmit callback notice:", e);
         }
       } else {
         // Submissão direta se a página for renderizada isoladamente
         try {
-          await fetch("/api/submit-lead", {
+          fetch("/api/submit-lead", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-          });
+          }).catch(() => {});
         } catch (apiErr) {
           console.warn("Direct database API lead save notice:", apiErr);
         }

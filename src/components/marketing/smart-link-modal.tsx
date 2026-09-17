@@ -1,22 +1,25 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { X, Copy, Check, QrCode, Link as LinkIcon, Share2, Globe, Target, Sparkles, ExternalLink } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { SMART_LINK_SOURCES, generateSmartUrl } from "@/lib/link-generator";
 import { cn } from "@/lib/utils";
+import { saveLandingPageToStorage, syncPageWithServerPreview, loadSavedLandingPages } from "./comet-lp/utils/storage";
 
 interface SmartLinkModalProps {
   lpId: string;
   lpName: string;
+  slug?: string;
+  lp?: any;
   isExternal?: boolean;
   externalUrl?: string;
   surveyId?: string | null;
   onClose: () => void;
 }
 
-export function SmartLinkModal({ lpId, lpName, isExternal, externalUrl, surveyId, onClose }: SmartLinkModalProps) {
+export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl, surveyId, onClose }: SmartLinkModalProps) {
   const [linkType, setLinkType] = useState<"traffic" | "action">("traffic");
   const [form, setForm] = useState({
     source: SMART_LINK_SOURCES[0], // "Instagram"
@@ -27,10 +30,47 @@ export function SmartLinkModal({ lpId, lpName, isExternal, externalUrl, surveyId
   
   const [copied, setCheckCopied] = useState(false);
 
+  // Identifica e sincroniza o objeto real e editado da LP
+  const resolvedLP = useMemo(() => {
+    if (lp) return lp;
+    if (typeof window !== "undefined") {
+      try {
+        const activeRaw = localStorage.getItem("active_preview_page");
+        if (activeRaw) {
+          const active = JSON.parse(activeRaw);
+          if (active && (active.id === lpId || (slug && active.slug === slug) || active.slug === lpId)) {
+            return active;
+          }
+        }
+        const saved = loadSavedLandingPages();
+        const found = saved.find((p: any) => p.id === lpId || (slug && p.slug === slug) || p.slug === lpId);
+        if (found) return found;
+      } catch {}
+    }
+    return null;
+  }, [lp, lpId, slug]);
+
+  // Garante que a LP editada atual esteja salva e sincronizada no servidor de preview ao abrir o modal
+  useEffect(() => {
+    const target = resolvedLP || lp;
+    if (target) {
+      try {
+        saveLandingPageToStorage(target);
+        syncPageWithServerPreview(target).catch(() => {});
+        fetch(`/api/landing-pages/${encodeURIComponent(target.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(target),
+        }).catch(() => {});
+      } catch {}
+    }
+  }, [resolvedLP, lp]);
+
   const baseUrl = useMemo(() => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    return `${origin}/lp/${lpId}`;
-  }, [lpId]);
+    const targetIdentifier = resolvedLP?.slug || lp?.slug || slug || lpId;
+    return `${origin}/lp/${targetIdentifier}`;
+  }, [lpId, slug, lp, resolvedLP]);
 
   const generatedUrl = useMemo(() => {
     try {
@@ -232,6 +272,23 @@ export function SmartLinkModal({ lpId, lpName, isExternal, externalUrl, surveyId
                 >
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   <span>{copied ? "Copiado!" : "Copiar"}</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    if (lp) {
+                      try {
+                        saveLandingPageToStorage(lp);
+                        syncPageWithServerPreview(lp).catch(() => {});
+                      } catch {}
+                    }
+                    window.open(generatedUrl, "_blank");
+                  }}
+                  className="px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 bg-muted hover:bg-muted/80 text-foreground border border-border transition-all cursor-pointer shadow-sm shrink-0"
+                  title="Abrir e testar no navegador em nova aba"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 text-primary" />
+                  <span>Testar</span>
                 </button>
               </div>
 

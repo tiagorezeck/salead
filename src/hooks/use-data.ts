@@ -38,6 +38,7 @@ import {
   getDriveConfig, 
   fetchFromGoogleDrive, 
   pushToGoogleDrive,
+  forceReadSpreadsheetFromDrive,
   clearLpTestDataInDrive,
   deleteLandingPageFromDrive,
   deleteLeadFromDrive,
@@ -47,7 +48,9 @@ import {
   cleanDatabaseKeepOneInDrive,
   createCheckpoint,
   saveSystemCheckpoint,
-  formatCheckpointName
+  formatCheckpointName,
+  startRealtimeCloudSyncEngine,
+  triggerInstantCloudSync
 } from "@/services/googleDriveDatabaseService";
 import { getCurrentUser, getRegisteredUsers, removeRegisteredUser, DEFAULT_REGISTERED_ADMIN, SYSTEM_STANDBY_ADMIN } from "@/lib/auth-service";
 
@@ -604,7 +607,10 @@ export const getLocalLandingPages = (): LandingPage[] => {
 export const saveLocalLandingPages = (lps: LandingPage[]) => {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(LOCAL_LP_STORAGE_KEY, JSON.stringify(lps));
+    const raw = JSON.stringify(lps);
+    localStorage.setItem(LOCAL_LP_STORAGE_KEY, raw);
+    localStorage.setItem("people_cro_landing_pages_v1", raw);
+    localStorage.setItem("app:lps:v1", raw);
   } catch (err) {
     console.warn("Falha ao salvar landing pages no localStorage:", err);
   }
@@ -883,31 +889,69 @@ export function useData() {
   const queryClient = useQueryClient();
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
 
-  // Sincronizador Automático com Google Drive & Google Sheets
+  // Sincronizador Automático com Google Drive & Google Sheets (Tempo Real + Polling de 10s)
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // Sincroniza e recarrega dados quando a configuração do Google Drive é alterada
-    const handleDriveConfigUpdate = async () => {
-      const cfg = getDriveConfig();
-      if (cfg.webappUrl) {
+    const invalidateAll = () => {
+      invalidate('leads');
+      invalidate('landing_pages');
+      invalidate('tasks');
+      invalidate('products');
+      invalidate('surveys');
+      invalidate('survey_responses');
+      invalidate('pipelines');
+      invalidate('playbooks');
+    };
+
+    // Sincronização completa de leitura do Sheets
+    const syncFromDrive = async (isBackground = false) => {
+      let cfg = getDriveConfig();
+      if (!cfg.webappUrl) {
         try {
-          const remote = await fetchFromGoogleDrive(cfg.webappUrl);
-          if (remote) {
-            invalidate('leads');
-            invalidate('landing_pages');
-            invalidate('tasks');
-            invalidate('products');
-            invalidate('surveys');
+          const srvRes = await fetch('/api/system/drive-config');
+          if (srvRes.ok) {
+            const srvData = await srvRes.json();
+            if (srvData?.webappUrl) {
+              cfg = saveDriveConfig({ webappUrl: srvData.webappUrl, autoSync: true });
+            }
           }
         } catch {}
       }
+
+      if (cfg.webappUrl) {
+        try {
+          if (!isBackground) {
+            saveDriveConfig({ syncStatus: 'syncing' });
+          }
+          const remote = await forceReadSpreadsheetFromDrive(cfg.webappUrl);
+          if (remote) {
+            invalidateAll();
+          }
+        } catch (err) {
+          console.info("Aviso no ciclo de sincronização com Sheets:", err);
+        }
+      }
     };
 
+    // 1. Executa leitura completa imediatamente ao abrir o sistema
+    syncFromDrive(false);
+
+    // 2. Timer de atualização automática de 10 segundos (Tempo Real contínuo)
+    const syncInterval = setInterval(() => {
+      syncFromDrive(true);
+    }, 10000);
+
+    const handleDriveConfigUpdate = () => syncFromDrive(false);
+    const handleDriveSynced = () => invalidateAll();
+
     window.addEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
+    window.addEventListener('salead_drive_synced', handleDriveSynced);
 
     return () => {
+      clearInterval(syncInterval);
       window.removeEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
+      window.removeEventListener('salead_drive_synced', handleDriveSynced);
     };
   }, []);
 
@@ -937,22 +981,31 @@ export function useData() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    // Inicializa motor de sincronização automática e contínua em tempo real com Google Drive / Sheets
+    startRealtimeCloudSyncEngine();
+
     const handleVisitIncremented = () => {
       invalidate('landing_pages');
     };
 
     const handleStorageChange = (e: StorageEvent) => {
-      if (!e.key || e.key.includes("landing") || e.key.includes("preview") || e.key.includes("cro")) {
-        invalidate('landing_pages');
+      if (!e.key || e.key.includes("landing") || e.key.includes("preview") || e.key.includes("cro") || e.key.includes("database") || e.key.includes("lead")) {
+        queryClient.invalidateQueries();
       }
+    };
+
+    const handleDriveSynced = () => {
+      queryClient.invalidateQueries();
     };
 
     window.addEventListener("lp_visit_incremented", handleVisitIncremented);
     window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("salead_drive_synced", handleDriveSynced);
 
     return () => {
       window.removeEventListener("lp_visit_incremented", handleVisitIncremented);
       window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("salead_drive_synced", handleDriveSynced);
     };
   }, []);
 
@@ -1737,24 +1790,34 @@ export function useData() {
         ? serverLps.filter(s => driveLps.some(d => d.id === s.id || (d.slug && s.slug && d.slug.toLowerCase() === s.slug.toLowerCase())) || !s.id.startsWith("lp_adaptive_"))
         : serverLps;
 
-      // Insere primeiro dados locais/drive, e por último o servidor central
-      for (const lp of [...driveLps, ...localLps, ...filteredServerLps]) {
+      // Insere primeiro dados do drive e servidor, e por último o local para dar prioridade às edições mais recentes
+      for (const lp of [...driveLps, ...filteredServerLps, ...localLps]) {
         if (!lp || isDeleted(lp)) continue;
         const key = getLpKey(lp);
         if (!mergedMap.has(key)) {
           mergedMap.set(key, lp);
         } else {
           const prev = mergedMap.get(key)!;
-          const isServer = serverLps.some(s => s.id === lp.id || (s.slug && lp.slug && s.slug.toLowerCase() === lp.slug.toLowerCase()));
+          const prevTime = new Date((prev as any).updatedAt || (prev as any).updated_at || (prev as any).createdAt || 0).getTime();
+          const lpTime = new Date((lp as any).updatedAt || (lp as any).updated_at || (lp as any).createdAt || 0).getTime();
+          
+          const base = lpTime >= prevTime ? { ...prev, ...lp } : { ...lp, ...prev };
           const bestId = isUUID(prev.id) ? prev.id : (isUUID(lp.id) ? lp.id : (prev.id || lp.id));
+          const mergedVisits = Math.max(Number(prev.visits) || 0, Number(lp.visits) || 0);
+          const mergedLeads = Math.max(Number(prev.leads) || 0, Number(lp.leads) || 0);
+          const mergedConv = mergedVisits > 0 
+            ? Math.min(100, Math.round((mergedLeads / mergedVisits) * 100)) 
+            : Math.max(Number(prev.conv) || 0, Number(lp.conv) || 0);
+
           mergedMap.set(key, {
-            ...prev,
-            ...lp,
+            ...base,
             id: bestId,
-            // O servidor central tem autoridade para visitas, leads e conversão para manter sincronia em todas as abas/navegadores
-            visits: isServer ? (Number(lp.visits) || 0) : Math.max(Number(prev.visits) || 0, Number(lp.visits) || 0),
-            leads: isServer ? (Number(lp.leads) || 0) : Math.max(Number(prev.leads) || 0, Number(lp.leads) || 0),
-            conv: isServer ? (Number(lp.conv) || 0) : Math.max(Number(prev.conv) || 0, Number(lp.conv) || 0),
+            visits: mergedVisits,
+            viewsCount: mergedVisits,
+            views_count: mergedVisits,
+            leads: mergedLeads,
+            leads_count: mergedLeads,
+            conv: mergedConv,
           });
         }
       }

@@ -114,6 +114,67 @@ export const initializeSharedDriveConfig = async (): Promise<DriveConfig> => {
   return getDriveConfig();
 };
 
+let syncIntervalId: any = null;
+let isSyncingNow = false;
+
+export const triggerInstantCloudSync = async (forceReadSheets = true): Promise<any> => {
+  if (typeof window === "undefined" || isSyncingNow) return null;
+  const cfg = getDriveConfig();
+  if (!cfg.webappUrl) return null;
+  
+  try {
+    isSyncingNow = true;
+    let data: any = null;
+    if (forceReadSheets) {
+      data = await forceReadSpreadsheetFromDrive(cfg.webappUrl);
+    } else {
+      data = await fetchFromGoogleDrive(cfg.webappUrl);
+    }
+    if (data && typeof data === 'object') {
+      window.dispatchEvent(new CustomEvent('salead_drive_synced', { detail: data }));
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('lp_visit_incremented'));
+    }
+    return data;
+  } catch (err) {
+    console.warn("Auto-sync background error:", err);
+    return null;
+  } finally {
+    isSyncingNow = false;
+  }
+};
+
+export const startRealtimeCloudSyncEngine = () => {
+  if (typeof window === "undefined") return;
+  if (syncIntervalId) return;
+
+  // Sincronização inicial automática imediata
+  initializeSharedDriveConfig().then((cfg) => {
+    if (cfg && cfg.webappUrl) {
+      triggerInstantCloudSync(true).catch(() => {});
+    }
+  }).catch(() => {});
+
+  // Loop contínuo a cada 10 segundos
+  syncIntervalId = setInterval(() => {
+    const cfg = getDriveConfig();
+    if (cfg.webappUrl && cfg.autoSync !== false) {
+      triggerInstantCloudSync(true).catch(() => {});
+    }
+  }, 10000);
+
+  // Sincronização ao focar na janela / aba
+  window.addEventListener('focus', () => {
+    const cfg = getDriveConfig();
+    if (cfg.webappUrl) triggerInstantCloudSync(true).catch(() => {});
+  });
+
+  window.addEventListener('online', () => {
+    const cfg = getDriveConfig();
+    if (cfg.webappUrl) triggerInstantCloudSync(true).catch(() => {});
+  });
+};
+
 export const cleanWebAppUrl = (rawUrl: string): string => {
   if (!rawUrl) return '';
   let url = rawUrl.trim().replace(/^["']|["']$/g, '');
@@ -196,7 +257,7 @@ const executeDriveRequest = async (payload: {
   // Se o servidor proxy não existe no ambiente (HTTP 404 no Vercel ou hospedagem estática), faz tentativa direta no Google Apps Script
   if ((!proxyRes || proxyRes.status === 404) && typeof window !== "undefined") {
     try {
-      if (payload.action === "ping" || payload.action === "get" || payload.action === "list_files" || payload.action === "get_file") {
+      if (payload.action === "ping" || payload.action === "get" || payload.action === "list_files" || payload.action === "get_file" || payload.action === "FORCE_READ_SHEETS" || payload.action === "force_read") {
         const directUrl = new URL(cleanUrl);
         directUrl.searchParams.set("action", payload.action);
         if (payload.fileName) directUrl.searchParams.set("fileName", payload.fileName);
@@ -357,16 +418,75 @@ export const forceReadSpreadsheetFromDrive = async <T>(url: string): Promise<T |
     // Se o script retornou ou se precisamos tentar o get padrão
     if (!db || typeof db !== 'object' || (!Array.isArray(db.leads) && !Array.isArray(db.landingPages))) {
       db = await fetchFromGoogleDrive<T>(cleanUrl);
-    } else {
+    }
+
+    if (db && typeof db === 'object') {
       saveLocalDatabaseRoot(db);
       saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('salead_drive_synced', { detail: db }));
+      }
     }
 
     return db as T;
   } catch {
     // Fallback gracioso para fetchFromGoogleDrive
-    return fetchFromGoogleDrive<T>(cleanUrl);
+    const fallbackDb = await fetchFromGoogleDrive<T>(cleanUrl);
+    if (fallbackDb && typeof fallbackDb === 'object') {
+      saveLocalDatabaseRoot(fallbackDb);
+      saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('salead_drive_synced', { detail: fallbackDb }));
+      }
+    }
+    return fallbackDb;
   }
+};
+
+// REGISTRAR VISITA DE LANDING PAGE NO DRIVE E SHEETS (TEMPO REAL)
+export const recordLpVisitToDrive = async (params: {
+  lpId?: string;
+  id?: string;
+  slug?: string;
+  pageTitle?: string;
+  title?: string;
+}): Promise<{ success: boolean; visits?: number; conv?: number }> => {
+  const config = getDriveConfig();
+  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  if (!cleanUrl) return { success: false };
+
+  try {
+    // 1. Tenta POST via proxy / executeDriveRequest
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: 'RECORD_LP_VISIT',
+      data: {
+        lpId: params.lpId || params.id,
+        slug: params.slug,
+        title: params.pageTitle || params.title
+      }
+    });
+
+    if (res && res.status === 'success') {
+      return { success: true, visits: res.visits, conv: res.conv };
+    }
+  } catch (err) {
+    console.warn("Aviso ao registrar visita no Drive via POST, tentando GET...", err);
+  }
+
+  // 2. Fallback resiliente: requisição GET com query params (funciona perfeitamente sem bloqueios de CORS)
+  try {
+    const urlObj = new URL(cleanUrl);
+    urlObj.searchParams.set('action', 'RECORD_LP_VISIT');
+    if (params.lpId || params.id) urlObj.searchParams.set('id', params.lpId || params.id || '');
+    if (params.slug) urlObj.searchParams.set('slug', params.slug);
+    if (params.pageTitle || params.title) urlObj.searchParams.set('title', params.pageTitle || params.title || '');
+
+    await fetch(urlObj.toString(), { method: 'GET', mode: 'no-cors' });
+    return { success: true };
+  } catch {}
+
+  return { success: false };
 };
 
 // CRIAR CHECKPOINT (PONTO DE RESTAURAÇÃO)

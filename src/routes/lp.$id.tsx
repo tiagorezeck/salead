@@ -35,7 +35,13 @@ import { LPTrackingCapture, getStoredTracking } from "@/components/marketing/lp-
 import { PublicRenderer } from "@/modules/landing-pages/renderer/PublicRenderer";
 import { getLPModule, parseUtm } from "@/modules/landing-pages";
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
-import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
+import { 
+  submitLpLeadToDrive, 
+  recordLpVisitToDrive, 
+  forceReadSpreadsheetFromDrive, 
+  getDriveConfig, 
+  getLocalDatabaseRoot 
+} from "@/services/googleDriveDatabaseService";
 
 const SURVEY_PRESETS: any[] = [
   {
@@ -210,12 +216,28 @@ function PublicLPPage() {
           }
         }
 
-        // 3. Notifica o Servidor Express (API do Backend)
+        // 3. Notifica o Servidor Express e Vercel Serverless (API do Backend)
         try {
           fetch(`/api/landing-pages/${encodeURIComponent(targetId)}/visit`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ lpId: targetLp.id, id, slug: targetLp.slug })
+            body: JSON.stringify({ lpId: targetLp.id, id, slug: targetLp.slug, title: targetLp.title || targetLp.name })
+          }).catch(() => {});
+          
+          fetch(`/api/landing-pages/visit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lpId: targetLp.id, id, slug: targetLp.slug, title: targetLp.title || targetLp.name })
+          }).catch(() => {});
+        } catch {}
+
+        // 3b. Sincroniza visita diretamente com o Google Drive e Google Sheets (em tempo real)
+        try {
+          recordLpVisitToDrive({
+            lpId: targetLp.id,
+            id: String(id),
+            slug: targetLp.slug,
+            pageTitle: targetLp.title || targetLp.name
           }).catch(() => {});
         } catch {}
 
@@ -237,37 +259,32 @@ function PublicLPPage() {
 
       try {
         // =====================================================================
-        // PASSO 1: BUSCA NO SERVIDOR EXPRESS / API (PERSISTENTE E EM MEMÓRIA)
+        // PASSO 1: BUSCA SÍNCRONA NO ARMAZENAMENTO LOCAL (0ms - MÁXIMA VELOCIDADE)
         // =====================================================================
+        let foundLocally: any = null;
         try {
-          const serverPage = await fetchPageFromServerPreview(id);
-          if (serverPage && !deletedIds.has(serverPage.id) && isMounted) {
-            setLp(serverPage);
-            setLoading(false);
-            await recordVisitForLP(serverPage);
-            return;
-          }
-        } catch (srvErr) {
-          console.info("Server fetch notice:", srvErr);
-        }
-
-        // =====================================================================
-        // PASSO 2: BUSCA NO ARMAZENAMENTO LOCAL (SE FOR ACESSADO NA MESMA SESSÃO)
-        // =====================================================================
-        try {
-          const localKeys = ["active_preview_page", "people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
-          for (const key of localKeys) {
-            const rawLocal = localStorage.getItem(key);
-            if (!rawLocal) continue;
-
-            let parsed = JSON.parse(rawLocal);
-            if (!parsed) continue;
-
-            if (!Array.isArray(parsed)) {
-              parsed = [parsed];
+          // 1a. Verifica active_preview_page primeiro
+          const activeRaw = localStorage.getItem("active_preview_page");
+          if (activeRaw) {
+            const activeObj = JSON.parse(activeRaw);
+            if (activeObj && !deletedIds.has(activeObj.id) && !deletedIds.has(activeObj.slug)) {
+              if (activeObj.id === id || activeObj.slug === id || activeObj.previewToken === id || (activeObj.name && normalizeSlug(activeObj.name) === normId) || (activeObj.title && normalizeSlug(activeObj.title) === normId)) {
+                foundLocally = activeObj;
+              }
             }
+          }
 
-            if (Array.isArray(parsed)) {
+          // 1b. Verifica coleções locais
+          if (!foundLocally) {
+            const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
+            for (const key of localKeys) {
+              const rawLocal = localStorage.getItem(key);
+              if (!rawLocal) continue;
+
+              let parsed = JSON.parse(rawLocal);
+              if (!parsed) continue;
+              if (!Array.isArray(parsed)) parsed = [parsed];
+
               const localMatch = parsed.find((p: any) => {
                 if (!p) return false;
                 if (deletedIds.has(p.id) || deletedIds.has(p.slug)) return false;
@@ -277,43 +294,108 @@ function PublicLPPage() {
                 return false;
               });
 
-              if (localMatch && isMounted) {
-                setLp(localMatch);
-                setLoading(false);
-                await recordVisitForLP(localMatch);
-                return;
+              if (localMatch) {
+                foundLocally = localMatch;
+                break;
               }
             }
           }
         } catch {}
 
+        if (foundLocally && isMounted) {
+          setLp(foundLocally);
+          setLoading(false);
+          recordVisitForLP(foundLocally).catch(() => {});
+
+          // Revalidação em background com o servidor sem bloquear o carregamento
+          fetchPageFromServerPreview(id).then((serverPage) => {
+            if (serverPage && !deletedIds.has(serverPage.id) && isMounted) {
+              const localTime = new Date((foundLocally as any).updatedAt || (foundLocally as any).updated_at || (foundLocally as any).createdAt || 0).getTime();
+              const serverTime = new Date((serverPage as any).updatedAt || (serverPage as any).updated_at || (serverPage as any).createdAt || 0).getTime();
+              
+              if (serverTime > localTime) {
+                setLp(serverPage);
+              } else if (localTime > serverTime) {
+                // Se o local for mais novo que o servidor, atualiza o servidor em background
+                syncPageWithServerPreview(foundLocally).catch(() => {});
+              }
+            }
+          }).catch(() => {});
+          return;
+        }
+
         // =====================================================================
-        // PASSO 3: RESOLUÇÃO EM TEMPLATES PRÉ-CONFIGURADOS (PRESETS & AI LPs)
+        // PASSO 2: BUSCA NO SERVIDOR EXPRESS / API (PARA OUTROS DISPOSITIVOS E NAVEGADORES)
+        // =====================================================================
+        try {
+          const serverPage = await fetchPageFromServerPreview(id);
+          if (serverPage && !deletedIds.has(serverPage.id) && isMounted) {
+            setLp(serverPage);
+            setLoading(false);
+            recordVisitForLP(serverPage).catch(() => {});
+            return;
+          }
+        } catch (srvErr) {
+          console.info("Server fetch notice:", srvErr);
+        }
+
+        // =====================================================================
+        // PASSO 3: RESOLUÇÃO NO CACHE LOCAL DO GOOGLE DRIVE / SHEETS
+        // =====================================================================
+        try {
+          const driveRoot: any = getLocalDatabaseRoot();
+          let candidateLps = Array.isArray(driveRoot?.landingPages) 
+            ? driveRoot.landingPages 
+            : (Array.isArray(driveRoot?.data?.landingPages) ? driveRoot.data.landingPages : []);
+
+          if (Array.isArray(candidateLps) && candidateLps.length > 0) {
+            const driveMatch = candidateLps.find((p: any) => {
+              if (!p) return false;
+              if (deletedIds.has(p.id) || deletedIds.has(p.slug)) return false;
+              if (p.id === id || p.slug === id || p.previewToken === id) return true;
+              if (p.name && normalizeSlug(p.name) === normId) return true;
+              if (p.title && normalizeSlug(p.title) === normId) return true;
+              return false;
+            });
+
+            if (driveMatch && isMounted) {
+              setLp(driveMatch);
+              setLoading(false);
+              recordVisitForLP(driveMatch).catch(() => {});
+              return;
+            }
+          }
+        } catch (driveErr) {
+          console.info("Drive LP lookup notice:", driveErr);
+        }
+
+        // =====================================================================
+        // PASSO 4: RESOLUÇÃO EM TEMPLATES PRÉ-CONFIGURADOS (APENAS SE ID EXATO)
         // =====================================================================
         const presetMatch = PRESET_TEMPLATES.find((p) => {
           if (p.id === id || p.slug === id) return true;
-          if (normalizeSlug(p.id) === normId || normalizeSlug(p.title) === normId) return true;
+          if (normalizeSlug(p.id) === normId) return true;
           return false;
         });
 
         if (presetMatch && isMounted) {
           setLp(presetMatch);
           setLoading(false);
-          await recordVisitForLP(presetMatch);
+          recordVisitForLP(presetMatch).catch(() => {});
           return;
         }
 
         const aiTemplates = getInitialAILandingPages();
         const aiMatch = aiTemplates.find((p) => {
           if (p.id === id || p.slug === id) return true;
-          if (normalizeSlug(p.id) === normId || normalizeSlug(p.title || p.name) === normId) return true;
+          if (normalizeSlug(p.id) === normId) return true;
           return false;
         });
 
         if (aiMatch && isMounted) {
           setLp(aiMatch);
           setLoading(false);
-          await recordVisitForLP(aiMatch);
+          recordVisitForLP(aiMatch).catch(() => {});
           return;
         }
 
@@ -671,9 +753,9 @@ function PublicLPPage() {
                     },
                   };
 
-                  // 1. Grava diretamente no banco de dados e sincroniza com Google Sheets / Drive
-                  try {
-                    await fetch("/api/submit-lead", {
+                  // 1. Grava diretamente no banco de dados e sincroniza com Google Sheets / Drive em background
+                  Promise.allSettled([
+                    fetch("/api/submit-lead", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -687,13 +769,11 @@ function PublicLPPage() {
                         source: effectiveSource,
                         isTest: lp.status === "Teste",
                       }),
-                    });
-
+                    }),
                     fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
                       method: "POST",
-                    }).catch(() => {});
-
-                    await submitLpLeadToDrive({
+                    }),
+                    submitLpLeadToDrive({
                       landingPageId: lp.id,
                       landingPageTitle: lp.name || lp.title || "Landing Page",
                       name: leadName,
@@ -704,10 +784,10 @@ function PublicLPPage() {
                       utm,
                       answers: answers || {},
                       isTest: lp.status === "Teste",
-                    });
-                  } catch (dbErr) {
-                    console.warn("Direct database lead submission notice:", dbErr);
-                  }
+                    })
+                  ]).catch((dbErr) => {
+                    console.warn("Background lead submission notice:", dbErr);
+                  });
 
                   try {
                     fetch("/api/surveys/responses", {
@@ -1108,23 +1188,25 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         }
       }
 
-      // 2. Sincroniza diretamente com o banco de dados do Google Drive / Google Sheets
-      try {
-        await submitLpLeadToDrive({
-          landingPageId: lp.id,
-          landingPageTitle: lp.name || lp.title || "Landing Page",
-          name: name.trim(),
-          email: email.trim(),
-          whatsapp: whatsapp.trim(),
-          company: notes.trim() || `${name.trim()} (LP: ${lp.name || lp.title})`,
-          source: effectiveSource,
-          utm,
-          answers: { observacoes: notes.trim() },
-          isTest: lp.status === "Teste",
-        });
-      } catch (gErr) {
+      // 2. Sincroniza em background com o Google Drive / Google Sheets e API
+      submitLpLeadToDrive({
+        landingPageId: lp.id,
+        landingPageTitle: lp.name || lp.title || "Landing Page",
+        name: name.trim(),
+        email: email.trim(),
+        whatsapp: whatsapp.trim(),
+        company: notes.trim() || `${name.trim()} (LP: ${lp.name || lp.title})`,
+        source: effectiveSource,
+        utm,
+        answers: { observacoes: notes.trim() },
+        isTest: lp.status === "Teste",
+      }).catch((gErr) => {
         console.warn("Google Drive direct sync notice:", gErr);
-      }
+      });
+
+      fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
+        method: "POST",
+      }).catch(() => {});
 
       // 3. Analytics
       try {

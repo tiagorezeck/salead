@@ -38,7 +38,7 @@ function LPPage() {
   } = useData();
   
   const [editingLP, setEditingLP] = useState<any | null>(null);
-  const [smartLinkLP, setSmartLinkLP] = useState<{ id: string; name: string } | null>(null);
+  const [smartLinkLP, setSmartLinkLP] = useState<{ id: string; name: string; slug?: string; lp?: any } | null>(null);
   const [showAIGenerator, setShowAIGenerator] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showExternalModal, setShowExternalModal] = useState(false);
@@ -328,9 +328,9 @@ function LPPage() {
     });
     // Abre modal de Smart Links para facilitar compartilhamento
     if (savedLP) {
-      setSmartLinkLP({ id: savedLP.id, name: savedLP.name });
+      setSmartLinkLP({ id: savedLP.id, name: savedLP.name, slug: (savedLP as any).slug, lp: savedLP });
     } else {
-      setSmartLinkLP({ id: newExternalLP.id, name: newExternalLP.name });
+      setSmartLinkLP({ id: newExternalLP.id, name: newExternalLP.name, slug: newExternalLP.slug, lp: newExternalLP });
     }
   };
 
@@ -707,7 +707,7 @@ function LPPage() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSmartLinkLP({ id: selectedLP.id, name: selectedLP.name });
+                          setSmartLinkLP({ id: selectedLP.id, name: selectedLP.name, slug: selectedLP.slug, lp: selectedLP });
                         }}
                         className="px-3.5 py-2 rounded-xl bg-zinc-900/90 border border-zinc-700 text-white font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-800 transition-colors cursor-pointer"
                       >
@@ -1110,7 +1110,7 @@ function LPPage() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSmartLinkLP({ id: lp.id, name: lp.name });
+                        setSmartLinkLP({ id: lp.id, name: lp.name, slug: lp.slug, lp });
                       }}
                       className="h-8 px-2.5 rounded-xl border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground grid place-items-center transition-colors cursor-pointer shadow-sm"
                       title="Gerar Links de Rastreamento (UTMs para Instagram, WhatsApp, Ads, etc.)"
@@ -1248,6 +1248,8 @@ function LPPage() {
         <SmartLinkModal 
           lpId={smartLinkLP.id} 
           lpName={smartLinkLP.name} 
+          slug={smartLinkLP.slug}
+          lp={smartLinkLP.lp}
           onClose={() => setSmartLinkLP(null)} 
         />
       )}

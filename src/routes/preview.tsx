@@ -73,7 +73,7 @@ export function PreviewPage() {
 
     async function resolvePage() {
       if (!targetId) {
-        // Se nenhum ID for passado, tenta pegar a página ativa ou primeira disponível
+        // Se nenhum ID for passado, tenta pegar a última página editada ativa
         try {
           const activeRaw = localStorage.getItem("active_preview_page");
           if (activeRaw) {
@@ -85,7 +85,7 @@ export function PreviewPage() {
             }
           }
 
-          const localKeys = ["people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
+          const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
           for (const key of localKeys) {
             const raw = localStorage.getItem(key);
             if (raw) {
@@ -114,55 +114,81 @@ export function PreviewPage() {
         return;
       }
 
-      setLoading(true);
       setErrorMsg(null);
 
-      // 1. Tenta buscar no endpoint de preview do servidor
+      // PASSO 1: Busca síncrona imediata no localStorage local (0ms para o navegador atual)
+      let localFound: any = null;
       try {
-        const serverPage = await fetchPageFromServerPreview(targetId);
-        if (serverPage && isMounted) {
-          setPage(serverPage);
-          setLoading(false);
-          return;
-        }
-      } catch {}
-
-      // 2. Tenta buscar no localStorage local (múltiplas chaves)
-      try {
-        const localKeys = ["active_preview_page", "people_cro_landing_pages_v1", "comet_local_landing_pages", "app:lps:v1"];
         const normTarget = normalizeSlug(targetId);
 
-        for (const key of localKeys) {
-          const rawLocal = localStorage.getItem(key);
-          if (!rawLocal) continue;
-          
-          let parsed = JSON.parse(rawLocal);
-          if (!parsed) continue;
-
-          // Se for objeto individual (ex: active_preview_page)
-          if (!Array.isArray(parsed)) {
-            parsed = [parsed];
-          }
-
-          if (Array.isArray(parsed)) {
-            const found = parsed.find((p: any) => {
-              if (!p) return false;
-              if (p.id === targetId || p.slug === targetId || p.previewToken === targetId) return true;
-              if (p.name && normalizeSlug(p.name) === normTarget) return true;
-              if (p.title && normalizeSlug(p.title) === normTarget) return true;
-              return false;
-            });
-
-            if (found && isMounted) {
-              setPage(found);
+        // 1a. Verifica active_preview_page primeiro
+        const activeRaw = localStorage.getItem("active_preview_page");
+        if (activeRaw) {
+          const activeObj = JSON.parse(activeRaw);
+          if (activeObj && (activeObj.id === targetId || activeObj.slug === targetId || activeObj.previewToken === targetId || (activeObj.name && normalizeSlug(activeObj.name) === normTarget) || (activeObj.title && normalizeSlug(activeObj.title) === normTarget))) {
+            localFound = activeObj;
+            if (isMounted) {
+              setPage(activeObj);
               setLoading(false);
-              return;
+            }
+          }
+        }
+
+        // 1b. Verifica listas locais
+        if (!localFound) {
+          const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
+          for (const key of localKeys) {
+            const rawLocal = localStorage.getItem(key);
+            if (!rawLocal) continue;
+            
+            let parsed = JSON.parse(rawLocal);
+            if (!parsed) continue;
+            if (!Array.isArray(parsed)) parsed = [parsed];
+
+            if (Array.isArray(parsed)) {
+              const found = parsed.find((p: any) => {
+                if (!p) return false;
+                if (p.id === targetId || p.slug === targetId || p.previewToken === targetId) return true;
+                if (p.name && normalizeSlug(p.name) === normTarget) return true;
+                if (p.title && normalizeSlug(p.title) === normTarget) return true;
+                return false;
+              });
+
+              if (found) {
+                localFound = found;
+                if (isMounted) {
+                  setPage(found);
+                  setLoading(false);
+                }
+                break;
+              }
             }
           }
         }
       } catch {}
 
-      // 4. Fallback em PRESET_TEMPLATES e AILandingPages
+      // PASSO 2: Busca no servidor Express / Supabase / Vercel API (para outros navegadores e dispositivos)
+      try {
+        const serverPage = await fetchPageFromServerPreview(targetId);
+        if (serverPage && isMounted) {
+          const localTime = new Date((localFound as any)?.updatedAt || (localFound as any)?.updated_at || (localFound as any)?.createdAt || 0).getTime();
+          const serverTime = new Date((serverPage as any)?.updatedAt || (serverPage as any)?.updated_at || (serverPage as any)?.createdAt || 0).getTime();
+
+          if (!localFound || serverTime >= localTime) {
+            setPage(serverPage);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {}
+
+      // PASSO 3: Se já encontramos localmente, encerra
+      if (localFound && isMounted) {
+        setLoading(false);
+        return;
+      }
+
+      // PASSO 4: Fallback apenas se corresponder estritamente pelo ID de template pré-configurado
       const normTarget = normalizeSlug(targetId);
       const presetFound = PRESET_TEMPLATES.find((p) => {
         if (p.id === targetId || p.slug === targetId) return true;
@@ -190,13 +216,7 @@ export function PreviewPage() {
       }
 
       if (isMounted) {
-        // Se ainda não encontrou, exibe o primeiro preset para nunca dar tela em branco
-        if (PRESET_TEMPLATES.length > 0) {
-          setPage(PRESET_TEMPLATES[0]);
-          setErrorMsg(`Página com ID "${targetId}" não foi encontrada. Exibindo modelo de referência.`);
-        } else {
-          setErrorMsg(`A Landing Page com ID ou Token "${targetId}" não foi encontrada.`);
-        }
+        setErrorMsg(`A Landing Page solicitada ("${targetId}") ainda não foi sincronizada ou não foi encontrada.`);
         setLoading(false);
       }
     }

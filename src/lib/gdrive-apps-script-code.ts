@@ -94,6 +94,65 @@ function doGet(e) {
       return jsonResponse({ status: "error", message: "Arquivo não encontrado: " + targetFileName });
     }
 
+    // 3b. REGISTRAR VISITA VIA GET (Suporte universal sem restrição de CORS em qualquer navegador)
+    if (action === "RECORD_LP_VISIT" || action === "INCREMENT_LP_VISIT" || action === "lp_visit") {
+      var getLpId = params.lpId || params.id || params.pageId || params.slug;
+      var getLpTitle = params.landingPageTitle || params.pageTitle || params.title;
+      var ssVisit = getOrCreateSpreadsheet(folder);
+      var lpVisits = 1;
+      var lpConv = 0;
+
+      var sheetLp = ssVisit.getSheetByName("Landing_Pages");
+      if (sheetLp) {
+        var vData = sheetLp.getDataRange().getValues();
+        for (var vi = 1; vi < vData.length; vi++) {
+          var rId = String(vData[vi][0] || "");
+          var rTitle = String(vData[vi][1] || "");
+          var rSlug = String(vData[vi][2] || "");
+          if ((getLpId && (rId === String(getLpId) || rSlug === String(getLpId))) || (getLpTitle && rTitle === String(getLpTitle))) {
+            var currVisits = Number(vData[vi][4] || 0) + 1;
+            var currLeads = Number(vData[vi][5] || 0);
+            lpVisits = currVisits;
+            lpConv = currVisits > 0 ? Math.round((currLeads / currVisits) * 100) : 0;
+            sheetLp.getRange(vi + 1, 5).setValue(currVisits);
+            sheetLp.getRange(vi + 1, 7).setValue(lpConv + "%");
+            break;
+          }
+        }
+      }
+
+      try {
+        var rFs = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rFs.hasNext()) {
+          var rFileItem = rFs.next();
+          var dbRootObj = JSON.parse(rFileItem.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbRootObj.landingPages)) {
+            dbRootObj.landingPages.forEach(function(lp) {
+              if (lp.id === getLpId || lp.slug === getLpId || (getLpTitle && lp.title === getLpTitle)) {
+                lp.visits = (Number(lp.visits) || 0) + 1;
+                lp.viewsCount = lp.visits;
+                lp.views_count = lp.visits;
+                var leads = Number(lp.leads || lp.leads_count) || 0;
+                lp.conv = Math.round((leads / lp.visits) * 100);
+                lpVisits = lp.visits;
+                lpConv = lp.conv;
+              }
+            });
+            var delF = folder.getFilesByName(ROOT_FILE_NAME);
+            while (delF.hasNext()) { delF.next().setTrashed(true); }
+            folder.createFile(ROOT_FILE_NAME, JSON.stringify(dbRootObj, null, 2), MimeType.PLAIN_TEXT);
+          }
+        }
+      } catch (eGetVisit) {}
+
+      return jsonResponse({
+        status: "success",
+        visits: lpVisits,
+        conv: lpConv,
+        message: "Visita computada com sucesso no Sheets!"
+      });
+    }
+
     // 4. GET PADRÃO (RETORNA O BANCO COMPLETO E MERGEC COM ABA LANDING_PAGES)
     var dbData = {};
     var rootFiles = folder.getFilesByName(ROOT_FILE_NAME);
@@ -384,57 +443,93 @@ function doPost(e) {
         try { forcedData = JSON.parse(rFiles.next().getBlob().getDataAsString("UTF-8")) || {}; } catch (eF) { forcedData = {}; }
       }
       if (!Array.isArray(forcedData.leads)) forcedData.leads = [];
+      if (!Array.isArray(forcedData.landingPages)) forcedData.landingPages = [];
+      if (!Array.isArray(forcedData.surveys)) forcedData.surveys = [];
+      if (!Array.isArray(forcedData.surveyResponses)) forcedData.surveyResponses = [];
+      if (!Array.isArray(forcedData.products)) forcedData.products = [];
+      if (!Array.isArray(forcedData.tasks)) forcedData.tasks = [];
+      if (!Array.isArray(forcedData.playbooks)) forcedData.playbooks = [];
 
-      // 1. Lê aba Leads
-      var fLeadsSheet = spreadsheet.getSheetByName("Leads");
-      if (fLeadsSheet) {
-        var fLValues = fLeadsSheet.getDataRange().getValues();
-        if (fLValues && fLValues.length > 1) {
-          var fKeys = {};
-          forcedData.leads.forEach(function(l) { if (l && l.id) fKeys[String(l.id)] = true; });
+      var allSheets = spreadsheet.getSheets();
 
-          for (var fli = 1; fli < fLValues.length; fli++) {
-            var flr = fLValues[fli];
-            if (!flr || (!flr[0] && !flr[1] && !flr[3])) continue;
-            var fId = String(flr[0] || ("lead_sheet_" + fli));
-            if (!fKeys[fId]) {
-              fKeys[fId] = true;
-              var fName = String(flr[1] || "").trim();
-              forcedData.leads.push({
-                id: fId,
-                name: fName || "Lead Planilha",
-                company: String(flr[2] || (fName ? fName + " (Planilha)" : "Empresa")).trim(),
-                email: String(flr[3] || "").trim(),
-                whatsapp: String(flr[4] || "").trim(),
-                value: Number(flr[5]) || 0,
-                stage: String(flr[6] || "Leads").trim(),
-                owner: String(flr[7] || "").trim(),
-                temperature: String(flr[8] || "Quente").trim(),
-                source: String(flr[9] || "Google Sheets").trim(),
-                score: Number(flr[10]) || 85,
-                tags: Array.isArray(flr[11]) ? flr[11] : (flr[11] ? String(flr[11]).split(",").map(function(t){ return t.trim(); }).filter(Boolean) : ["Planilha"]),
-                createdAt: flr[12] ? (typeof flr[12].toISOString === "function" ? flr[12].toISOString() : String(flr[12])) : new Date().toISOString(),
-                lastInteraction: String(flr[13] || "Importado da Planilha")
-              });
-            }
-          }
-        }
+      // Função utilitária para normalizar nomes de cabeçalhos
+      function normH(val) {
+        return String(val || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
       }
 
-      // 2. Lê aba Leads_LandingPages
-      var fLpSheet = spreadsheet.getSheetByName("Leads_LandingPages");
-      if (fLpSheet) {
-        var fLpValues = fLpSheet.getDataRange().getValues();
-        if (fLpValues && fLpValues.length > 1) {
-          var fLpKeys = {};
-          forcedData.leads.forEach(function(l) { if (l && l.id) fLpKeys[String(l.id)] = true; });
+      for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
+        var curSheet = allSheets[sIdx];
+        var sName = curSheet.getName();
+        var sNameNorm = normH(sName);
+        var sValues = curSheet.getDataRange().getValues();
+        if (!sValues || sValues.length < 2) continue;
 
-          for (var flpi = 1; flpi < fLpValues.length; flpi++) {
-            var flpr = fLpValues[flpi];
+        var headerRow = sValues[0] || [];
+        var headersNorm = headerRow.map(normH);
+
+        // A. Aba de Landing Pages
+        if (sNameNorm.indexOf("landing") !== -1 || sNameNorm.indexOf("pagina") !== -1 || sNameNorm === "lps") {
+          var lpKeys = {};
+          forcedData.landingPages.forEach(function(p) { if (p && p.id) lpKeys[String(p.id)] = true; if (p && p.slug) lpKeys[String(p.slug)] = true; });
+
+          var colId = headersNorm.indexOf("id");
+          var colTitle = headersNorm.indexOf("titulo") !== -1 ? headersNorm.indexOf("titulo") : (headersNorm.indexOf("nome") !== -1 ? headersNorm.indexOf("nome") : 1);
+          var colSlug = headersNorm.indexOf("slug") !== -1 ? headersNorm.indexOf("slug") : 2;
+          var colStatus = headersNorm.indexOf("status") !== -1 ? headersNorm.indexOf("status") : 3;
+          var colVisits = headersNorm.indexOf("visitas") !== -1 ? headersNorm.indexOf("visitas") : (headersNorm.indexOf("visualizacoes") !== -1 ? headersNorm.indexOf("visualizacoes") : 4);
+          var colLeads = headersNorm.indexOf("conversoes") !== -1 ? headersNorm.indexOf("conversoes") : (headersNorm.indexOf("leads") !== -1 ? headersNorm.indexOf("leads") : 5);
+          var colConv = headersNorm.indexOf("taxa conversao") !== -1 ? headersNorm.indexOf("taxa conversao") : (headersNorm.indexOf("taxa") !== -1 ? headersNorm.indexOf("taxa") : 6);
+
+          for (var rIdx = 1; rIdx < sValues.length; rIdx++) {
+            var row = sValues[rIdx];
+            if (!row || (!row[0] && !row[colTitle])) continue;
+            var pId = String((colId !== -1 ? row[colId] : row[0]) || ("lp_sheet_" + rIdx));
+            var pTitle = String(row[colTitle] || "Landing Page");
+            var pSlug = String((colSlug !== -1 ? row[colSlug] : "") || pTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+            var pVisits = Number((colVisits !== -1 ? row[colVisits] : row[4]) || 0);
+            var pLeads = Number((colLeads !== -1 ? row[colLeads] : row[5]) || 0);
+            var pConv = Number(String((colConv !== -1 ? row[colConv] : row[6]) || "0").replace("%", "")) || (pVisits > 0 ? Math.round((pLeads / pVisits) * 100) : 0);
+
+            var existingIndex = forcedData.landingPages.findIndex(function(p) { return p.id === pId || (pSlug && p.slug === pSlug); });
+            var pageObj = {
+              id: pId,
+              title: pTitle,
+              name: pTitle,
+              slug: pSlug,
+              status: String((colStatus !== -1 ? row[colStatus] : row[3]) || "Ativa"),
+              visits: pVisits,
+              viewsCount: pVisits,
+              views_count: pVisits,
+              leads: pLeads,
+              leads_count: pLeads,
+              conv: pConv,
+              type: "COMET CRO",
+              updated_at: new Date().toISOString()
+            };
+
+            if (existingIndex !== -1) {
+              forcedData.landingPages[existingIndex] = Object.assign({}, forcedData.landingPages[existingIndex], pageObj, {
+                visits: Math.max(Number(forcedData.landingPages[existingIndex].visits || 0), pVisits),
+                leads: Math.max(Number(forcedData.landingPages[existingIndex].leads || 0), pLeads)
+              });
+            } else {
+              forcedData.landingPages.push(pageObj);
+            }
+          }
+          continue;
+        }
+
+        // B. Aba de Leads de Landing Pages específicas
+        if (sNameNorm.indexOf("leads_landing") !== -1 || sNameNorm === "leads_lps") {
+          var lpLeadKeys = {};
+          forcedData.leads.forEach(function(l) { if (l && l.id) lpLeadKeys[String(l.id)] = true; });
+
+          for (var flpi = 1; flpi < sValues.length; flpi++) {
+            var flpr = sValues[flpi];
             if (!flpr || (!flpr[1] && !flpr[4] && !flpr[6])) continue;
             var fLpId = String(flpr[1] || ("lead_lp_sheet_" + flpi));
-            if (!fLpKeys[fLpId]) {
-              fLpKeys[fLpId] = true;
+            if (!lpLeadKeys[fLpId]) {
+              lpLeadKeys[fLpId] = true;
               var flpName = String(flpr[4] || "").trim();
               var flpTitle = String(flpr[2] || "Landing Page").trim();
               forcedData.leads.push({
@@ -455,6 +550,54 @@ function doPost(e) {
               });
             }
           }
+          continue;
+        }
+
+        // C. Aba de Leads Principal ou Qualquer aba com colunas de contatos
+        var isLeadSheet = sNameNorm.indexOf("lead") !== -1 || sNameNorm.indexOf("cliente") !== -1 || sNameNorm.indexOf("contato") !== -1 || headersNorm.indexOf("whatsapp") !== -1 || headersNorm.indexOf("telefone") !== -1;
+        if (isLeadSheet) {
+          var fKeys = {};
+          forcedData.leads.forEach(function(l) { if (l && l.id) fKeys[String(l.id)] = true; });
+
+          var cId = headersNorm.indexOf("id") !== -1 ? headersNorm.indexOf("id") : 0;
+          var cNome = headersNorm.indexOf("nome") !== -1 ? headersNorm.indexOf("nome") : (headersNorm.indexOf("name") !== -1 ? headersNorm.indexOf("name") : (headersNorm.indexOf("contato") !== -1 ? headersNorm.indexOf("contato") : 1));
+          var cEmpresa = headersNorm.indexOf("empresa") !== -1 ? headersNorm.indexOf("empresa") : (headersNorm.indexOf("company") !== -1 ? headersNorm.indexOf("company") : 2);
+          var cEmail = headersNorm.indexOf("email") !== -1 ? headersNorm.indexOf("email") : (headersNorm.indexOf("e-mail") !== -1 ? headersNorm.indexOf("e-mail") : 3);
+          var cWhats = headersNorm.indexOf("whatsapp") !== -1 ? headersNorm.indexOf("whatsapp") : (headersNorm.indexOf("telefone") !== -1 ? headersNorm.indexOf("telefone") : (headersNorm.indexOf("phone") !== -1 ? headersNorm.indexOf("phone") : 4));
+          var cValor = headersNorm.indexOf("valor") !== -1 ? headersNorm.indexOf("valor") : (headersNorm.indexOf("value") !== -1 ? headersNorm.indexOf("value") : 5);
+          var cEtapa = headersNorm.indexOf("fase / etapa") !== -1 ? headersNorm.indexOf("fase / etapa") : (headersNorm.indexOf("etapa") !== -1 ? headersNorm.indexOf("etapa") : (headersNorm.indexOf("stage") !== -1 ? headersNorm.indexOf("stage") : 6));
+          var cResp = headersNorm.indexOf("responsavel") !== -1 ? headersNorm.indexOf("responsavel") : (headersNorm.indexOf("owner") !== -1 ? headersNorm.indexOf("owner") : 7);
+          var cTemp = headersNorm.indexOf("temperatura") !== -1 ? headersNorm.indexOf("temperatura") : (headersNorm.indexOf("temperature") !== -1 ? headersNorm.indexOf("temperature") : 8);
+          var cOrigem = headersNorm.indexOf("origem") !== -1 ? headersNorm.indexOf("origem") : (headersNorm.indexOf("source") !== -1 ? headersNorm.indexOf("source") : 9);
+          var cScore = headersNorm.indexOf("score") !== -1 ? headersNorm.indexOf("score") : 10;
+          var cTags = headersNorm.indexOf("tags") !== -1 ? headersNorm.indexOf("tags") : 11;
+          var cData = headersNorm.indexOf("data cadastro") !== -1 ? headersNorm.indexOf("data cadastro") : (headersNorm.indexOf("data / hora") !== -1 ? headersNorm.indexOf("data / hora") : (headersNorm.indexOf("data") !== -1 ? headersNorm.indexOf("data") : 12));
+
+          for (var fli = 1; fli < sValues.length; fli++) {
+            var flr = sValues[fli];
+            if (!flr || (!flr[cId] && !flr[cNome] && !flr[cWhats] && !flr[cEmail])) continue;
+            var fId = String((cId !== -1 ? flr[cId] : flr[0]) || ("lead_" + sNameNorm + "_" + fli));
+            if (!fKeys[fId]) {
+              fKeys[fId] = true;
+              var fName = String((cNome !== -1 ? flr[cNome] : flr[1]) || "").trim();
+              forcedData.leads.push({
+                id: fId,
+                name: fName || "Lead Planilha",
+                company: String((cEmpresa !== -1 ? flr[cEmpresa] : flr[2]) || (fName ? fName + " (" + sName + ")" : "Empresa")).trim(),
+                email: String((cEmail !== -1 ? flr[cEmail] : flr[3]) || "").trim(),
+                whatsapp: String((cWhats !== -1 ? flr[cWhats] : flr[4]) || "").trim(),
+                value: Number((cValor !== -1 ? flr[cValor] : flr[5])) || 0,
+                stage: String((cEtapa !== -1 ? flr[cEtapa] : flr[6]) || "Leads").trim(),
+                owner: String((cResp !== -1 ? flr[cResp] : flr[7]) || "").trim(),
+                temperature: String((cTemp !== -1 ? flr[cTemp] : flr[8]) || "Quente").trim(),
+                source: String((cOrigem !== -1 ? flr[cOrigem] : flr[9]) || sName).trim(),
+                score: Number((cScore !== -1 ? flr[cScore] : flr[10])) || 85,
+                tags: (cTags !== -1 && flr[cTags]) ? (Array.isArray(flr[cTags]) ? flr[cTags] : String(flr[cTags]).split(",").map(function(t){ return t.trim(); }).filter(Boolean)) : [sName],
+                createdAt: (cData !== -1 && flr[cData]) ? (typeof flr[cData].toISOString === "function" ? flr[cData].toISOString() : String(flr[cData])) : new Date().toISOString(),
+                lastInteraction: "Importado da aba [" + sName + "]"
+              });
+            }
+          }
         }
       }
 
@@ -465,9 +608,73 @@ function doPost(e) {
 
       return jsonResponse({
         status: "success",
-        message: "Todas as abas da planilha foram lidas com sucesso! " + forcedData.leads.length + " leads consolidados.",
+        message: "Todas as abas da planilha foram lidas com sucesso! " + forcedData.leads.length + " leads e " + forcedData.landingPages.length + " páginas sincronizados.",
         leadsCount: forcedData.leads.length,
+        pagesCount: forcedData.landingPages.length,
+        spreadsheetName: spreadsheet.getName(),
+        spreadsheetUrl: spreadsheet.getUrl(),
         data: forcedData
+      });
+    }
+
+    // =========================================================================
+    // REGISTRAR VISITA DE LANDING PAGE
+    // =========================================================================
+    if (action === "RECORD_LP_VISIT" || action === "INCREMENT_LP_VISIT" || action === "lp_visit") {
+      var targetId = payload.lpId || payload.id || payload.pageId || payload.slug;
+      var targetTitle = payload.landingPageTitle || payload.pageTitle || payload.title;
+      var newVisits = 1;
+      var newConv = 0;
+
+      var lpSheet = spreadsheet.getSheetByName("Landing_Pages");
+      if (lpSheet) {
+        var data = lpSheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+          var rowId = String(data[i][0] || "");
+          var rowTitle = String(data[i][1] || "");
+          var rowSlug = String(data[i][2] || "");
+          if ((targetId && (rowId === String(targetId) || rowSlug === String(targetId))) || (targetTitle && rowTitle === String(targetTitle))) {
+            var currentVisits = Number(data[i][4] || 0) + 1;
+            var currentLeads = Number(data[i][5] || 0);
+            newVisits = currentVisits;
+            newConv = currentVisits > 0 ? Math.round((currentLeads / currentVisits) * 100) : 0;
+            lpSheet.getRange(i + 1, 5).setValue(currentVisits);
+            lpSheet.getRange(i + 1, 7).setValue(newConv + "%");
+            break;
+          }
+        }
+      }
+
+      // Atualiza também no ROOT_FILE_NAME (JSON no Drive)
+      try {
+        var rootFiles = folder.getFilesByName(ROOT_FILE_NAME);
+        if (rootFiles.hasNext()) {
+          var rf = rootFiles.next();
+          var dbObj = JSON.parse(rf.getBlob().getDataAsString("UTF-8")) || {};
+          if (Array.isArray(dbObj.landingPages)) {
+            dbObj.landingPages.forEach(function(lp) {
+              if (lp.id === targetId || lp.slug === targetId || (targetTitle && lp.title === targetTitle)) {
+                lp.visits = (Number(lp.visits) || 0) + 1;
+                lp.viewsCount = lp.visits;
+                lp.views_count = lp.visits;
+                var leads = Number(lp.leads || lp.leads_count) || 0;
+                lp.conv = Math.round((leads / lp.visits) * 100);
+                newVisits = lp.visits;
+                newConv = lp.conv;
+              }
+            });
+            var toDel = folder.getFilesByName(ROOT_FILE_NAME);
+            while (toDel.hasNext()) { toDel.next().setTrashed(true); }
+            folder.createFile(ROOT_FILE_NAME, JSON.stringify(dbObj, null, 2), MimeType.PLAIN_TEXT);
+          }
+        }
+      } catch (eDb) {}
+
+      return jsonResponse({
+        status: "success",
+        visits: newVisits,
+        conv: newConv,
+        message: "Visita registrada com sucesso na planilha!"
       });
     }
     if (action === "SUBMIT_LP_LEAD") {
@@ -1490,11 +1697,38 @@ function incrementSurveyCompletion(folder, surveyId) {
   } catch(e) {}
 }
 
-function getOrCreateSpreadsheet(folder) {
-  var files = folder.getFilesByName(SPREADSHEET_BASE_NAME);
-  if (files.hasNext()) {
-    return SpreadsheetApp.openById(files.next().getId());
+function getOrCreateSpreadsheet(folder, customSpreadsheetId) {
+  // 1. Prioridade Máxima: Planilha Ativa (onde o script foi aberto/vinculado via Extensões > Apps Script)
+  try {
+    var activeSs = SpreadsheetApp.getActiveSpreadsheet();
+    if (activeSs) {
+      return activeSs;
+    }
+  } catch (eActive) {}
+
+  // 2. ID ou URL explícito passado na requisição
+  if (customSpreadsheetId) {
+    try {
+      if (String(customSpreadsheetId).indexOf("docs.google.com") !== -1) {
+        return SpreadsheetApp.openByUrl(String(customSpreadsheetId));
+      }
+      return SpreadsheetApp.openById(String(customSpreadsheetId));
+    } catch (eCustom) {}
   }
+
+  // 3. Procura no Drive pelo nome padrão ou qualquer planilha na pasta
+  try {
+    var files = folder.getFilesByName(SPREADSHEET_BASE_NAME);
+    if (files.hasNext()) {
+      return SpreadsheetApp.openById(files.next().getId());
+    }
+    var sheetFiles = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+    if (sheetFiles.hasNext()) {
+      return SpreadsheetApp.openById(sheetFiles.next().getId());
+    }
+  } catch (eSearch) {}
+
+  // 4. Cria nova planilha caso não exista nenhuma
   var newSs = SpreadsheetApp.create(SPREADSHEET_BASE_NAME);
   var ssFile = DriveApp.getFileById(newSs.getId());
   try {
