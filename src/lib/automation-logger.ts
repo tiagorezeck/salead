@@ -1,37 +1,20 @@
 "use client";
 
 import { type AutomationLog } from "./automation-types";
+import { cloudStore } from "@/services/cloudStorageService";
 
-const STORAGE_KEY = "comet_automation_logs";
-
-function getInitialLogs(): AutomationLog[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-let logsCache: AutomationLog[] = getInitialLogs();
 let listeners: (() => void)[] = [];
 
-const notify = () => {
-  listeners.forEach(fn => fn());
-  if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(logsCache.slice(0, 100)));
-    } catch {}
-  }
-};
+if (typeof window !== "undefined") {
+  cloudStore.subscribe(() => {
+    listeners.forEach(fn => fn());
+  });
+}
 
 export const AutomationLogger = {
   getLogs: (): AutomationLog[] => {
-    if (logsCache.length === 0 && typeof window !== "undefined") {
-      logsCache = getInitialLogs();
-    }
-    return logsCache;
+    const logs = cloudStore.getState().automationLogs;
+    return Array.isArray(logs) ? (logs as AutomationLog[]) : [];
   },
 
   addLog: async (log: Omit<AutomationLog, 'id' | 'timestamp'>) => {
@@ -40,8 +23,11 @@ export const AutomationLogger = {
       id: `log-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       timestamp: new Date().toISOString()
     };
-    logsCache = [newLog, ...logsCache].slice(0, 100);
-    notify();
+    cloudStore.mutate((draft) => {
+      const current = Array.isArray(draft.automationLogs) ? draft.automationLogs : [];
+      draft.automationLogs = [newLog, ...current].slice(0, 100);
+    });
+    listeners.forEach(fn => fn());
   },
 
   subscribe: (fn: () => void) => {
@@ -50,7 +36,9 @@ export const AutomationLogger = {
   },
 
   clearLogs: async () => {
-    logsCache = [];
-    notify();
+    cloudStore.mutate((draft) => {
+      draft.automationLogs = [];
+    });
+    listeners.forEach(fn => fn());
   }
 };

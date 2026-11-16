@@ -26,8 +26,14 @@ export function SurveyResults({ survey, onBack }: SurveyResultsProps) {
   const [selectedResponseId, setSelectedResponseId] = useState<string | null>(null);
 
   const responses = useMemo(() => 
-    surveyResponses.filter(r => r.surveyId === survey.id),
-    [surveyResponses, survey.id]
+    surveyResponses.filter(r => 
+      r.surveyId === survey.id || 
+      (r as any).survey_id === survey.id ||
+      (r as any).survey_name === survey.name ||
+      (r as any).surveyTitle === survey.name ||
+      ((survey as any).slug && (r.surveyId === (survey as any).slug || (r as any).survey_id === (survey as any).slug))
+    ),
+    [surveyResponses, survey.id, survey.name, (survey as any).slug]
   );
 
   const stats = useMemo(() => {
@@ -56,7 +62,15 @@ export function SurveyResults({ survey, onBack }: SurveyResultsProps) {
 
   const respondentLead = useMemo(() => {
     if (!selectedResponse) return null;
-    return leads.find(l => l.id === selectedResponse.leadId);
+    const rLeadId = selectedResponse.leadId || (selectedResponse as any).lead_id;
+    const rEmail = selectedResponse.leadEmail ? selectedResponse.leadEmail.trim().toLowerCase() : "";
+    const rPhone = selectedResponse.leadWhatsapp ? selectedResponse.leadWhatsapp.replace(/\D/g, "") : "";
+
+    return leads.find(l => 
+      (rLeadId && l.id === rLeadId) ||
+      (rEmail && l.email && l.email.trim().toLowerCase() === rEmail) ||
+      (rPhone && l.whatsapp && l.whatsapp.replace(/\D/g, "") === rPhone)
+    );
   }, [leads, selectedResponse]);
 
   return (

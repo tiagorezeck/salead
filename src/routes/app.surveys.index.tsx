@@ -18,27 +18,39 @@ export const Route = createFileRoute("/app/surveys/")({
 
 export function SurveysPage() {
   const navigate = useNavigate();
-  const { surveys, addSurvey, updateSurvey, deleteSurvey, initialized } = useData();
+  const { surveys, surveyResponses = [], addSurvey, updateSurvey, deleteSurvey, initialized } = useData();
   const [search, setSearch] = useState("");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
   const [editingSurvey, setEditingSurvey] = useState<Survey | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const getCompletionsCount = (s: Survey) => {
+    const matching = surveyResponses.filter((r: any) => 
+      r.surveyId === s.id || 
+      r.survey_id === s.id || 
+      r.survey_name === s.name || 
+      r.surveyTitle === s.name ||
+      ((s as any).slug && (r.surveyId === (s as any).slug || r.survey_id === (s as any).slug))
+    );
+    return Math.max(s.completions || 0, matching.length);
+  };
+
   const filtered = surveys.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
   const selectedSurvey = surveys.find(s => s.id === selectedSurveyId);
 
   const stats = useMemo(() => {
-    const totalCompletions = surveys.reduce((acc, s) => acc + s.completions, 0);
-    const totalVisits = surveys.reduce((acc, s) => acc + s.visits, 0);
-    const avgConv = totalVisits > 0 ? (totalCompletions / totalVisits) * 100 : 0;
+    const totalCompletions = surveys.reduce((acc, s) => acc + getCompletionsCount(s), 0);
+    const totalVisits = surveys.reduce((acc, s) => acc + (s.visits || 0), 0);
+    const effectiveVisits = Math.max(totalVisits, totalCompletions);
+    const avgConv = effectiveVisits > 0 ? (totalCompletions / effectiveVisits) * 100 : 0;
     
     return {
-      completions: totalCompletions,
+      completions: Math.max(totalCompletions, surveyResponses.length),
       active: surveys.filter(s => s.status === 'active').length,
       conversion: avgConv.toFixed(1)
     };
-  }, [surveys]);
+  }, [surveys, surveyResponses]);
 
   const handleCopyLink = (surveyId: string) => {
     const url = `${window.location.origin}/survey/${surveyId}`;
@@ -241,7 +253,7 @@ export function SurveysPage() {
                     </button>
                   </td>
                   <td className="px-3 py-4 text-right font-display font-black text-primary text-base">
-                    {s.completions}
+                    {getCompletionsCount(s)}
                   </td>
                   <td className="px-5 py-4 text-right relative">
                     <div className="flex items-center justify-end gap-1.5">

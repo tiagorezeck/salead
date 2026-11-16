@@ -14,6 +14,8 @@ import {
   type SurveyResponse, 
   type Pipeline, 
   type PipelineStage, 
+  type PipelineMovementHistory,
+  type StageType,
   type Objection, 
   type Playbook,
   type SLA,
@@ -33,10 +35,7 @@ import { calculateLeadScore, calculateLeadTemperature } from "@/lib/scoring";
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { normalizePhone, validateEmail, parseCurrencyBR } from "@/lib/validators";
 import { 
-  getLocalDatabaseRoot, 
-  saveLocalDatabaseRoot,
   getDriveConfig, 
-  fetchFromGoogleDrive, 
   pushToGoogleDrive,
   forceReadSpreadsheetFromDrive,
   clearLpTestDataInDrive,
@@ -49,10 +48,16 @@ import {
   createCheckpoint,
   saveSystemCheckpoint,
   formatCheckpointName,
-  startRealtimeCloudSyncEngine,
-  triggerInstantCloudSync
+  saveDriveConfig
 } from "@/services/googleDriveDatabaseService";
-import { getCurrentUser, getRegisteredUsers, removeRegisteredUser, DEFAULT_REGISTERED_ADMIN, SYSTEM_STANDBY_ADMIN } from "@/lib/auth-service";
+import { cloudStore, purgeLegacyBusinessLocalStorage } from "@/services/cloudStorageService";
+import { getCurrentUser, getRegisteredUsers, saveRegisteredUser, saveRegisteredUsers, removeRegisteredUser, DEFAULT_REGISTERED_ADMIN, SYSTEM_STANDBY_ADMIN } from "@/lib/auth-service";
+import { 
+  type LeadRoutingConfig, 
+  DEFAULT_LEAD_ROUTING_CONFIG, 
+  checkLeadClaimEligibility,
+  isContactMadeStage 
+} from "@/lib/lead-rules";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -84,44 +89,23 @@ export const DEFAULT_SURVEYS: Survey[] = SURVEY_PRESETS.map(p => ({
 }));
 
 const getLocalSurveys = (): Survey[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem("comet_crm_surveys");
-    if (raw) return JSON.parse(raw);
-    const rawCrm = localStorage.getItem("comet_crm_data");
-    if (rawCrm) {
-      const parsed = JSON.parse(rawCrm);
-      if (Array.isArray(parsed.surveys)) return parsed.surveys;
-    }
-  } catch {}
-  return [];
+  return Array.isArray(cloudStore.getState().surveys) ? cloudStore.getState().surveys : [];
 };
 
 const saveLocalSurveys = (surveys: Survey[]) => {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem("comet_crm_surveys", JSON.stringify(surveys));
-    const rawCrm = localStorage.getItem("comet_crm_data");
-    const parsed = rawCrm ? JSON.parse(rawCrm) : {};
-    parsed.surveys = surveys;
-    localStorage.setItem("comet_crm_data", JSON.stringify(parsed));
-  } catch {}
+  cloudStore.mutate((draft) => {
+    draft.surveys = surveys;
+  });
 };
 
 const getLocalSurveyResponses = (): SurveyResponse[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem("comet_crm_survey_responses");
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return [];
+  return Array.isArray(cloudStore.getState().surveyResponses) ? cloudStore.getState().surveyResponses : [];
 };
 
 const saveLocalSurveyResponses = (responses: SurveyResponse[]) => {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem("comet_crm_survey_responses", JSON.stringify(responses));
-  } catch {}
+  cloudStore.mutate((draft) => {
+    draft.surveyResponses = responses;
+  });
 };
 
 export type GoalType = 'money' | 'conversion' | 'loss' | 'ticket_count' | 'avg_ticket' | 'sla_min';
@@ -268,8 +252,6 @@ const isUUID = (str?: string): boolean => {
   if (!str || typeof str !== 'string') return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 };
-
-import { parseLegacyMinScore } from "@/lib/min-qualification";
 
 export const mapLeadFromDb = (row: any): Lead => ({
   id: row.id,
@@ -550,70 +532,52 @@ export const DELETED_LP_STORAGE_KEY = "comet_deleted_lp_ids";
 export const LP_SEED_INITIALIZED_KEY = "comet_lp_seed_initialized";
 
 export const getDeletedLandingPageIds = (): string[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(DELETED_LP_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const list = cloudStore.getState().deletedLpIds;
+  return Array.isArray(list) ? list : [];
 };
 
 export const addDeletedLandingPageId = (id: string) => {
-  if (typeof window === "undefined" || !id) return;
-  try {
-    const ids = getDeletedLandingPageIds();
-    if (!ids.includes(id)) {
-      ids.push(id);
-      localStorage.setItem(DELETED_LP_STORAGE_KEY, JSON.stringify(ids));
-    }
-  } catch {}
+  if (!id) return;
+  const current = getDeletedLandingPageIds();
+  if (!current.includes(id)) {
+    cloudStore.mutate((draft) => {
+      draft.deletedLpIds = [...(draft.deletedLpIds || []), id];
+    });
+  }
 };
 
 export const removeDeletedLandingPageId = (id: string) => {
-  if (typeof window === "undefined" || !id) return;
-  try {
-    const ids = getDeletedLandingPageIds();
-    const filtered = ids.filter((item) => item !== id);
-    localStorage.setItem(DELETED_LP_STORAGE_KEY, JSON.stringify(filtered));
-  } catch {}
+  if (!id) return;
+  const current = getDeletedLandingPageIds();
+  if (current.includes(id)) {
+    cloudStore.mutate((draft) => {
+      draft.deletedLpIds = (draft.deletedLpIds || []).filter((item) => item !== id);
+    });
+  }
 };
 
 export const notifyRealtimeSync = () => {
   if (typeof window === "undefined") return;
   try {
-    window.dispatchEvent(new Event("storage"));
     window.dispatchEvent(new CustomEvent("salead_database_root_updated"));
     const bc = new BroadcastChannel("comet_realtime_sync");
-    bc.postMessage({ type: "SYNC_DATA", timestamp: Date.now() });
+    bc.postMessage({ type: "CLOUD_INVALIDATE", timestamp: Date.now() });
     bc.close();
   } catch {}
 };
 
 export const getLocalLandingPages = (): LandingPage[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(LOCAL_LP_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const list = cloudStore.getState().landingPages;
+  return Array.isArray(list) ? list : [];
 };
 
-export const saveLocalLandingPages = (lps: LandingPage[]) => {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = JSON.stringify(lps);
-    localStorage.setItem(LOCAL_LP_STORAGE_KEY, raw);
-    localStorage.setItem("people_cro_landing_pages_v1", raw);
-    localStorage.setItem("app:lps:v1", raw);
-  } catch (err) {
-    console.warn("Falha ao salvar landing pages no localStorage:", err);
-  }
+export const saveLocalLandingPages = (lps: LandingPage[], skipPush = true) => {
+  cloudStore.mutate(
+    (draft) => {
+      draft.landingPages = Array.isArray(lps) ? lps : [];
+    },
+    { skipPush }
+  );
 };
 
 export const getInitialAILandingPages = (): LandingPage[] => [
@@ -739,13 +703,45 @@ export const getInitialAILandingPages = (): LandingPage[] => [
 
 export const mapLPFromDb = (row: any): LandingPage => {
   if (!row || typeof row !== 'object') return { id: '', title: 'Landing Page', name: 'Landing Page' } as any;
-  const config = typeof row.config === 'object' && row.config !== null ? row.config : {};
+  
+  let config: any = {};
+  if (typeof row.config === 'object' && row.config !== null) {
+    config = row.config;
+  } else if (typeof row.config === 'string') {
+    try { config = JSON.parse(row.config); } catch {}
+  } else if (typeof row["Config"] === 'string') {
+    try { config = JSON.parse(row["Config"]); } catch {}
+  }
+
+  let content: any = {};
+  if (typeof row.content === 'object' && row.content !== null) {
+    content = row.content;
+  } else if (typeof row.content === 'string') {
+    try { content = JSON.parse(row.content); } catch {}
+  }
+
   const lpId = row.id || config.id || config.client_id || row.client_id || row.slug;
   const lpTitle = row.title || row.name || config.title || config.name || "Landing Page";
   const lpName = row.name || row.title || config.name || config.title || "Landing Page";
   const lpSlug = row.slug || config.slug || (lpTitle ? lpTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "");
 
+  const rawVisits = Number(row.visits) || Number(config.visits) || 0;
+  const leadsCount = Number(row.leads_count ?? row.leads ?? config.leads) || 0;
+  const actualVisits = Math.max(rawVisits, leadsCount);
+  const conversionRate = actualVisits > 0 ? Math.min(100, Math.round((leadsCount / actualVisits) * 100)) : 0;
+
+  const heroModel = row.heroModel || row.hero?.model || config.heroModel || config.hero?.model || content.heroModel || content.hero?.model || row.hero_model || config.hero_model;
+  const rawHero = (row.hero && Object.keys(row.hero).length > 0)
+    ? row.hero
+    : (config.hero || content.hero || row.hero);
+
+  const hero = rawHero ? {
+    ...rawHero,
+    model: heroModel || rawHero.model || "split_image",
+  } : undefined;
+
   return {
+    ...content,
     ...config,
     ...row,
     id: lpId,
@@ -755,27 +751,32 @@ export const mapLPFromDb = (row: any): LandingPage => {
     slug: lpSlug,
     template: row.template || config.template || "Modern",
     status: row.status || config.status || "Ativa",
-    visits: Number(row.visits) || Number(config.visits) || 0,
-    leads: Number(row.leads_count ?? row.leads ?? config.leads) || 0,
-    conv: (Number(row.visits) > 0 && Number(row.leads_count ?? row.leads) > 0) 
-      ? Math.round((Number(row.leads_count ?? row.leads) / Number(row.visits)) * 100) 
-      : 0,
+    visits: actualVisits,
+    leads: leadsCount,
+    conv: conversionRate,
     type: row.type || config.type || "COMET CRO",
     surveyId: row.surveyId || config.surveyId || row.survey_id || undefined,
     externalUrl: row.externalUrl || config.externalUrl || row.external_url || undefined,
+    heroModel: heroModel || hero?.model,
+    hero,
   };
 };
 
 export const mapLPToDb = (lp: Partial<LandingPage> & Record<string, any>) => {
   const { id, name, template, status, visits, leads, leads_count, created_at, updated_at, conv, ...config } = lp;
+  const heroModel = lp.hero?.model || lp.heroModel || (config && config.heroModel) || (config && config.hero?.model) || "split_image";
   const payload: Record<string, any> = {
     name: name || lp.title || "Nova Landing Page",
     template: template || "Modern",
     status: status || "Ativa",
     visits: visits !== undefined ? Number(visits) : 0,
     leads_count: (leads_count ?? leads) !== undefined ? Number(leads_count ?? leads) : 0,
+    hero_model: heroModel,
+    heroModel: heroModel,
     config: {
       ...(config || {}),
+      hero: lp.hero || config.hero,
+      heroModel: heroModel,
       client_id: id || (config && config.id) || (config && config.client_id),
       slug: lp.slug || (config && config.slug) || (lp.title || name ? (lp.title || name).toLowerCase().replace(/[^a-z0-9]+/g, "-") : undefined),
       surveyId: lp.surveyId || (config && config.surveyId),
@@ -821,13 +822,7 @@ export const mapAutomationToDb = (a: Partial<Automation> & Record<string, any>) 
 };
 
 export const getStoredUserCustomPerms = (): Record<string, { enabled: boolean; modules: string[] }> => {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem("comet_user_module_permissions");
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return cloudStore.getState().userModulePermissions || {};
 };
 
 export const mapUserFromDb = (row: any): User => {
@@ -882,131 +877,67 @@ export const mapUserToDb = (u: Partial<User> & Record<string, any>) => {
 };
 
 // ==========================================
-// MAIN HOOK
+// MAIN HOOK (ZERO-LOCALSTORAGE CLOUD ARCHITECTURE)
 // ==========================================
+
+let isGlobalSyncInitialized = false;
+let initialCheckpointCreated = false;
+
+function setupGlobalRealtimeSync(queryClient: any) {
+  if (typeof window === "undefined" || isGlobalSyncInitialized) return;
+  isGlobalSyncInitialized = true;
+
+  purgeLegacyBusinessLocalStorage();
+
+  let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedInvalidateAll = () => {
+    if (invalidateTimer) clearTimeout(invalidateTimer);
+    invalidateTimer = setTimeout(() => {
+      queryClient.invalidateQueries();
+    }, 180);
+  };
+
+  cloudStore.subscribe(() => {
+    debouncedInvalidateAll();
+  });
+
+  cloudStore.startRealtimeEngine();
+
+  window.addEventListener("salead_drive_synced", debouncedInvalidateAll);
+  window.addEventListener("lp_visit_incremented", () => {
+    cloudStore.pullNow(false).catch(() => {});
+    debouncedInvalidateAll();
+  });
+  window.addEventListener("salead_database_root_updated", debouncedInvalidateAll);
+}
 
 export function useData() {
   const queryClient = useQueryClient();
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
 
-  // Sincronizador Automático com Google Drive & Google Sheets (Tempo Real + Polling de 10s)
+  // Sincronizador Global Unificado em Tempo Real (Singleton CloudStore)
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    setupGlobalRealtimeSync(queryClient);
+  }, [queryClient]);
 
-    const invalidateAll = () => {
-      invalidate('leads');
-      invalidate('landing_pages');
-      invalidate('tasks');
-      invalidate('products');
-      invalidate('surveys');
-      invalidate('survey_responses');
-      invalidate('pipelines');
-      invalidate('playbooks');
-    };
-
-    // Sincronização completa de leitura do Sheets
-    const syncFromDrive = async (isBackground = false) => {
-      let cfg = getDriveConfig();
-      if (!cfg.webappUrl) {
-        try {
-          const srvRes = await fetch('/api/system/drive-config');
-          if (srvRes.ok) {
-            const srvData = await srvRes.json();
-            if (srvData?.webappUrl) {
-              cfg = saveDriveConfig({ webappUrl: srvData.webappUrl, autoSync: true });
-            }
-          }
-        } catch {}
-      }
-
-      if (cfg.webappUrl) {
-        try {
-          if (!isBackground) {
-            saveDriveConfig({ syncStatus: 'syncing' });
-          }
-          const remote = await forceReadSpreadsheetFromDrive(cfg.webappUrl);
-          if (remote) {
-            invalidateAll();
-          }
-        } catch (err) {
-          console.info("Aviso no ciclo de sincronização com Sheets:", err);
-        }
-      }
-    };
-
-    // 1. Executa leitura completa imediatamente ao abrir o sistema
-    syncFromDrive(false);
-
-    // 2. Timer de atualização automática de 10 segundos (Tempo Real contínuo)
-    const syncInterval = setInterval(() => {
-      syncFromDrive(true);
-    }, 10000);
-
-    const handleDriveConfigUpdate = () => syncFromDrive(false);
-    const handleDriveSynced = () => invalidateAll();
-
-    window.addEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
-    window.addEventListener('salead_drive_synced', handleDriveSynced);
-
-    return () => {
-      clearInterval(syncInterval);
-      window.removeEventListener('salead_drive_config_updated', handleDriveConfigUpdate);
-      window.removeEventListener('salead_drive_synced', handleDriveSynced);
-    };
-  }, []);
-
-  // Checkpoint Inicial Automático ao abrir a primeira URL
+  // Checkpoint Inicial Automático em RAM ao iniciar sessão
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const alreadyCreated = localStorage.getItem("salead_initial_checkpoint_created");
-      if (!alreadyCreated) {
-        try {
-          const now = new Date();
-          const checkpointName = formatCheckpointName(now);
-          saveSystemCheckpoint({
-            id: `cp_initial_${Date.now()}`,
-            name: checkpointName,
-            timestamp: now.toISOString(),
-            leadsCount: 0,
-            data: { version: "2.0.0", type: "initial_checkpoint", exportedAt: now.toISOString() }
-          });
-          localStorage.setItem("salead_initial_checkpoint_created", "true");
-        } catch (err) {
-          console.warn("Aviso ao criar checkpoint inicial:", err);
-        }
+    if (typeof window !== "undefined" && !initialCheckpointCreated) {
+      initialCheckpointCreated = true;
+      try {
+        const now = new Date();
+        const checkpointName = formatCheckpointName(now);
+        saveSystemCheckpoint({
+          id: `cp_initial_${Date.now()}`,
+          name: checkpointName,
+          timestamp: now.toISOString(),
+          leadsCount: (cloudStore.getState().leads || []).length,
+          data: { version: "3.0.0", type: "initial_checkpoint", exportedAt: now.toISOString() }
+        });
+      } catch (err) {
+        console.warn("Aviso ao criar checkpoint inicial:", err);
       }
     }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    // Inicializa motor de sincronização automática e contínua em tempo real com Google Drive / Sheets
-    startRealtimeCloudSyncEngine();
-
-    const handleVisitIncremented = () => {
-      invalidate('landing_pages');
-    };
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (!e.key || e.key.includes("landing") || e.key.includes("preview") || e.key.includes("cro") || e.key.includes("database") || e.key.includes("lead")) {
-        queryClient.invalidateQueries();
-      }
-    };
-
-    const handleDriveSynced = () => {
-      queryClient.invalidateQueries();
-    };
-
-    window.addEventListener("lp_visit_incremented", handleVisitIncremented);
-    window.addEventListener("storage", handleStorageChange);
-    window.addEventListener("salead_drive_synced", handleDriveSynced);
-
-    return () => {
-      window.removeEventListener("lp_visit_incremented", handleVisitIncremented);
-      window.removeEventListener("storage", handleStorageChange);
-      window.removeEventListener("salead_drive_synced", handleDriveSynced);
-    };
   }, []);
 
   const { data: session } = useQuery({
@@ -1147,178 +1078,62 @@ export function useData() {
         }
       } catch {}
 
-      // 1c. Filas locais do browser (comet_inbound_leads_queue e people_cro_leads_v1)
-      let queueLeads: Lead[] = [];
-      if (typeof window !== "undefined") {
-        try {
-          const rawQ1 = localStorage.getItem("comet_inbound_leads_queue");
-          const rawQ2 = localStorage.getItem("people_cro_leads_v1");
-          const combinedQ = [
-            ...(rawQ1 ? JSON.parse(rawQ1) : []),
-            ...(rawQ2 ? JSON.parse(rawQ2) : []),
-          ];
-
-          if (Array.isArray(combinedQ) && combinedQ.length > 0) {
-            queueLeads = (combinedQ.map((item: any) => {
-              const raw = item.rawLead || item.lead || item;
-              const name = raw.name || item.name || "Lead Capturado";
-              const email = raw.email || item.email || "";
-              const whatsapp = raw.whatsapp || item.whatsapp || "";
-              const pageTitle = item.pageTitle || item.landingPage || raw.landingPage || "Landing Page";
-              const source = item.source || raw.source || "Landing Page";
-              const { minQual, minScore, temperature, score } = parseLeadMinAndScore({ ...item, ...raw });
-
-              return {
-                id: item.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                name,
-                company: item.company || `${name} (LP: ${pageTitle})`,
-                email,
-                whatsapp,
-                value: Number(item.value || raw.value) || 0,
-                stage: item.stage || "Leads",
-                owner: item.owner || "Inbound LP",
-                source: item.source || `LP: ${pageTitle} [${source}]`,
-                classification: item.classification || "Lead",
-                temperature,
-                type: item.type || "Inbound",
-                strategy: item.strategy || "CRO Auto",
-                decisionRole: item.decisionRole || "Decisor",
-                minScore,
-                minQualification: minQual,
-                landingPage: pageTitle,
-                tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
-                score,
-                sla: item.sla || "ok",
-                lastInteraction: item.lastInteraction || "Capturado via LP",
-                createdAt: item.capturedAt || item.createdAt || item.submittedAt || new Date().toISOString(),
-                activities: Array.isArray(item.activities) ? item.activities : [],
-                completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
-                status: item.status || "Ativo",
-                personType: item.personType || "PJ",
-                role: item.role || "",
-                revenue: item.revenue || "",
-                capag: item.capag || "",
-                lpVisits: Number(item.lpVisits) || 1,
-                isCustomer: Boolean(item.isCustomer),
-                isRecurring: Boolean(item.isRecurring),
-                metadata: item
-              };
-            }) as any);
-          }
-        } catch {}
-      }
-
-      // 1d. Leads criados localmente quando offline (comet_local_leads)
-      let localLeads: Lead[] = [];
-      if (typeof window !== "undefined") {
-        try {
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          if (rawLoc) {
-            const parsed = JSON.parse(rawLoc);
-            if (Array.isArray(parsed)) {
-              localLeads = parsed.map((item: any) => {
-                const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
-                return {
-                  ...item,
-                  minQualification: minQual,
-                  minScore,
-                  temperature,
-                  score
-                };
-              });
-            }
-          }
-        } catch {}
-      }
-
-      // 1e. comet_crm_data em localStorage (usado por pesquisas e diagnósticos)
-      let crmDataLeads: Lead[] = [];
-      if (typeof window !== "undefined") {
-        try {
-          const rawCrm = localStorage.getItem("comet_crm_data");
-          if (rawCrm) {
-            const parsed = JSON.parse(rawCrm);
-            if (Array.isArray(parsed.leads)) {
-              crmDataLeads = parsed.leads.map((item: any) => {
-                const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
-                return {
-                  ...item,
-                  minQualification: minQual,
-                  minScore,
-                  temperature,
-                  score
-                };
-              });
-            }
-          }
-        } catch {}
-      }
-
-      // 1f. Google Drive / Sheets Sync (capturados na planilha do Google Drive)
+      // 1c. Nuvem Google Drive / Google Sheets via cloudStore (Zero-LocalStorage)
       let driveLeads: Lead[] = [];
-      if (typeof window !== "undefined") {
-        try {
-          const driveConfig = getDriveConfig();
-          const driveRoot: any = getLocalDatabaseRoot();
-          if (driveRoot) {
-            const rawDriveLeads = Array.isArray(driveRoot.leads) 
-              ? driveRoot.leads 
-              : (Array.isArray(driveRoot.data?.leads) ? driveRoot.data.leads : []);
-            const rawDriveLpLeads = Array.isArray(driveRoot.leads_landing_pages) 
-              ? driveRoot.leads_landing_pages 
-              : (Array.isArray(driveRoot.data?.leads_landing_pages) ? driveRoot.data.leads_landing_pages : []);
+      try {
+        const cloudDb = cloudStore.getState();
+        const rawDriveLeads = Array.isArray(cloudDb?.leads) ? cloudDb.leads : [];
+        const rawDriveLpLeads = Array.isArray(cloudDb?.leads_landing_pages) ? cloudDb.leads_landing_pages : [];
 
-            const mappedDriveLeads = [...rawDriveLeads, ...rawDriveLpLeads].map((item: any) => {
-              const name = item.name || item.Nome || item["Nome"] || "Lead Capturado";
-              const email = item.email || item.Email || item["Email"] || "";
-              const whatsapp = item.whatsapp || item.WhatsApp || item["WhatsApp"] || "";
-              const pageTitle = item.landingPageTitle || item["Landing Page (Título)"] || item.landingPage || item.landing_page || item.pageTitle || "Landing Page";
-              const pageId = item.landingPageId || item["ID Landing Page"] || item.pageId || item.landing_page_id || "";
-              const source = item.source || item.Origem || `LP: ${pageTitle}`;
-              const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
+        const mappedDriveLeads = [...rawDriveLeads, ...rawDriveLpLeads].map((item: any) => {
+          const name = item.name || item.Nome || item["Nome"] || "Lead Capturado";
+          const email = item.email || item.Email || item["Email"] || "";
+          const whatsapp = item.whatsapp || item.WhatsApp || item["WhatsApp"] || "";
+          const pageTitle = item.landingPageTitle || item["Landing Page (Título)"] || item.landingPage || item.landing_page || item.pageTitle || "Landing Page";
+          const pageId = item.landingPageId || item["ID Landing Page"] || item.pageId || item.landing_page_id || "";
+          const source = item.source || item.Origem || `LP: ${pageTitle}`;
+          const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
 
-              return {
-                id: item.id || item["ID Lead"] || item["ID"] || `drive_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                name,
-                company: item.company || item.Empresa || `${name} (LP: ${pageTitle})`,
-                email,
-                whatsapp,
-                value: Number(item.value || item.Valor) || 0,
-                stage: item.stage || item["Fase / Etapa"] || "Leads",
-                owner: item.owner || item.Responsável || "Inbound LP",
-                source,
-                classification: item.classification || item.Classificação || "Lead",
-                temperature,
-                type: "Inbound",
-                strategy: "CRO Auto",
-                decisionRole: "Decisor",
-                minScore,
-                minQualification: minQual,
-                landingPage: pageTitle,
-                landingPageId: pageId,
-                tags: Array.isArray(item.tags) ? item.tags : (typeof item.Tags === "string" ? item.Tags.split(",") : ["inbound", "gdrive"]),
-                score,
-                sla: "ok",
-                lastInteraction: item.lastInteraction || item["Última Interação"] || "Sincronizado via Google Sheets",
-                createdAt: item.createdAt || item.created_at || item["Data Cadastro"] || item["Data / Hora"] || new Date().toISOString(),
-                activities: [],
-                completedCheckpoints: [],
-                status: "Ativo",
-                personType: "PJ",
-                role: "",
-                revenue: "",
-                capag: "",
-                metadata: item
-              };
-            });
-            driveLeads = mappedDriveLeads as any;
-          }
-        } catch (err) {
-          console.warn("Aviso ao processar leads do Google Drive/Sheets:", err);
-        }
+          return {
+            ...item,
+            id: item.id || item["ID Lead"] || item["ID"] || `drive_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            name,
+            company: item.company || item.Empresa || `${name} (LP: ${pageTitle})`,
+            email,
+            whatsapp,
+            value: Number(item.value || item.Valor) || 0,
+            stage: item.stage || item["Fase / Etapa"] || "Leads",
+            owner: item.owner || item.Responsável || "Inbound LP",
+            source,
+            classification: item.classification || item.Classificação || "Lead",
+            temperature,
+            type: item.type || "Inbound",
+            strategy: item.strategy || "CRO Auto",
+            decisionRole: item.decisionRole || "Decisor",
+            minScore,
+            minQualification: minQual,
+            landingPage: pageTitle,
+            landingPageId: pageId,
+            tags: Array.isArray(item.tags) ? item.tags : (typeof item.Tags === "string" ? item.Tags.split(",").map((t: string) => t.trim()).filter(Boolean) : ["inbound", "gdrive"]),
+            score,
+            sla: item.sla || "ok",
+            lastInteraction: item.lastInteraction || item["Última Interação"] || "Sincronizado via Google Sheets",
+            createdAt: item.createdAt || item.created_at || item["Data Cadastro"] || item["Data / Hora"] || new Date().toISOString(),
+            activities: Array.isArray(item.activities) ? item.activities : [],
+            completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
+            status: item.status || "Ativo",
+            personType: item.personType || "PJ",
+            role: item.role || "",
+            revenue: item.revenue || "",
+            capag: item.capag || "",
+            metadata: item.metadata || item
+          };
+        });
+        driveLeads = mappedDriveLeads as any;
+      } catch (err) {
+        console.warn("Aviso ao processar leads do Google Drive/Sheets:", err);
       }
 
-      // Consolidação e desduplicação por Union-Find (e-mail, WhatsApp, nome/empresa e ID)
       const isFictitiousLead = (l: any) => {
         if (!l) return true;
         const id = String(l.id || "");
@@ -1330,23 +1145,7 @@ export function useData() {
         return false;
       };
 
-      // Limpeza de segurança no localStorage de leads fictícios
-      if (typeof window !== "undefined") {
-        try {
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          if (rawLoc) {
-            const parsed = JSON.parse(rawLoc);
-            if (Array.isArray(parsed)) {
-              const cleaned = parsed.filter(l => !isFictitiousLead(l));
-              if (cleaned.length !== parsed.length) {
-                localStorage.setItem("comet_local_leads", JSON.stringify(cleaned));
-              }
-            }
-          }
-        } catch {}
-      }
-
-      const allRawLeads: Lead[] = [...dbLeads, ...queueLeads, ...apiLeads, ...localLeads, ...crmDataLeads, ...driveLeads].filter(l => !isFictitiousLead(l));
+      const allRawLeads: Lead[] = [...dbLeads, ...apiLeads, ...driveLeads].filter(l => !isFictitiousLead(l));
 
       function mergeSourcesStr(...sources: (string | undefined)[]): string {
         const set = new Set<string>();
@@ -1383,40 +1182,76 @@ export function useData() {
           }
         }
 
-        const emailIdx = new Map<string, number>();
-        const phoneIdx = new Map<string, number>();
-        const nameIdx = new Map<string, number>();
         const idIdx = new Map<string, number>();
+        const emailIdx = new Map<string, number>();
 
+        // 1. Agrupamento estrito por ID e por E-mail exato
         for (let i = 0; i < n; i++) {
           const l = rawList[i];
           if (!l) continue;
 
-          const normEmail = l.email && l.email.trim() ? l.email.trim().toLowerCase() : "";
-          const cleanPhone = l.whatsapp && l.whatsapp.trim() ? l.whatsapp.replace(/\D/g, "") : "";
-          const cleanName = (l.name || "").trim().toLowerCase();
-          const cleanComp = (l.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
-
+          // Mescla por ID idêntico
           if (l.id) {
-            if (idIdx.has(l.id)) unionNodes(i, idIdx.get(l.id)!);
-            else idIdx.set(l.id, i);
+            const cleanId = String(l.id).trim();
+            if (idIdx.has(cleanId)) {
+              unionNodes(i, idIdx.get(cleanId)!);
+            } else {
+              idIdx.set(cleanId, i);
+            }
           }
 
-          if (normEmail) {
-            if (emailIdx.has(normEmail)) unionNodes(i, emailIdx.get(normEmail)!);
-            else emailIdx.set(normEmail, i);
+          // Mescla por E-mail idêntico (apenas quando não vazio e válido)
+          const normEmail = l.email && l.email.trim() ? l.email.trim().toLowerCase() : "";
+          if (normEmail && normEmail.includes("@")) {
+            if (emailIdx.has(normEmail)) {
+              unionNodes(i, emailIdx.get(normEmail)!);
+            } else {
+              emailIdx.set(normEmail, i);
+            }
           }
+        }
 
-          if (cleanPhone && cleanPhone.length >= 8) {
-            if (phoneIdx.has(cleanPhone)) unionNodes(i, phoneIdx.get(cleanPhone)!);
-            else phoneIdx.set(cleanPhone, i);
+        // 2. Agrupamento otimizado por Telefone em O(N) (apenas quando e-mails e nomes são compatíveis)
+        const phoneIdx = new Map<string, number[]>();
+        for (let i = 0; i < n; i++) {
+          const l = rawList[i];
+          if (!l) continue;
+          const phone = l.whatsapp && l.whatsapp.trim() ? l.whatsapp.replace(/\D/g, "") : "";
+          if (phone && phone.length >= 8) {
+            if (!phoneIdx.has(phone)) phoneIdx.set(phone, []);
+            phoneIdx.get(phone)!.push(i);
           }
+        }
 
-          const isGeneric = !cleanName || cleanName === "novo lead" || cleanName === "lead" || cleanName === "sem nome" || cleanName.length < 3;
-          if (!isGeneric) {
-            const nameKey = (cleanComp && cleanComp !== cleanName) ? `${cleanName}__${cleanComp}` : cleanName;
-            if (nameIdx.has(nameKey)) unionNodes(i, nameIdx.get(nameKey)!);
-            else nameIdx.set(nameKey, i);
+        for (const indices of phoneIdx.values()) {
+          if (indices.length <= 1) continue;
+          const firstIdx = indices[0];
+          for (let k = 1; k < indices.length; k++) {
+            const i = firstIdx;
+            const j = indices[k];
+            const l1 = rawList[i];
+            const l2 = rawList[j];
+            if (!l1 || !l2) continue;
+
+            const email1 = l1.email && l1.email.trim() ? l1.email.trim().toLowerCase() : "";
+            const email2 = l2.email && l2.email.trim() ? l2.email.trim().toLowerCase() : "";
+            const name1 = (l1.name || "").trim().toLowerCase();
+            const name2 = (l2.name || "").trim().toLowerCase();
+
+            // Se ambos têm e-mails e são diferentes, NUNCA MESCLA!
+            if (email1 && email2 && email1 !== email2) continue;
+
+            // Se têm nomes e são totalmente diferentes e não-genéricos, NUNCA MESCLA!
+            const isGeneric1 = !name1 || name1 === "novo lead" || name1 === "lead" || name1 === "sem nome" || name1.length < 3;
+            const isGeneric2 = !name2 || name2 === "novo lead" || name2 === "lead" || name2 === "sem nome" || name2.length < 3;
+
+            if (!isGeneric1 && !isGeneric2) {
+              const areNamesCompatible = name1 === name2 || name1.includes(name2) || name2.includes(name1);
+              if (!areNamesCompatible) continue;
+            }
+
+            // Telefones iguais, e-mails compatíveis e nomes compatíveis -> Unifica!
+            unionNodes(i, j);
           }
         }
 
@@ -1453,15 +1288,32 @@ export function useData() {
           const primaryUuid = group.find(x => isUUID(x.id));
           const primaryId = primaryUuid ? primaryUuid.id : group[0].id;
 
-          const sortedNames = group
+          // Seleção inteligente do melhor nome (prioriza nomes de pessoa reais ao invés de nomes genéricos)
+          const candidateNames = group
             .map(x => (x.name || "").trim())
-            .filter(n => n && n !== "Novo Lead" && n !== "Lead")
-            .sort((a, b) => b.length - a.length);
-          const bestName = sortedNames[0] || group[0].name || "Novo Lead";
+            .filter(n => {
+              if (!n) return false;
+              const lower = n.toLowerCase();
+              return lower !== "novo lead" && lower !== "lead" && lower !== "sem nome" && lower !== "lead lp" && lower !== "lead planilha" && lower !== "empresa";
+            });
 
-          const bestComp = group.map(x => x.company).find(c => c && c.trim()) || "";
-          const bestEmail = group.map(x => x.email).find(e => e && e.trim()) || "";
-          const bestPhone = group.map(x => x.whatsapp).find(w => w && w.trim()) || "";
+          // Se tiver um nome que não seja nome puramente corporativo quando há nome pessoal
+          const personalNames = candidateNames.filter(n => {
+            const lower = n.toLowerCase();
+            return !lower.includes("ltda") && !lower.includes("consultoria") && !lower.includes("mentoria") && !lower.includes("treinamento") && !lower.includes("sistemas");
+          });
+
+          const bestName = personalNames[0] || candidateNames[0] || group[0].name || "Novo Lead";
+
+          // Seleção da melhor empresa (que não seja a repetição do nome nem sufixo de LP)
+          const companyCandidates = group
+            .map(x => (x.company || "").replace(/\s*\(LP:.*?\)/gi, "").replace(/\s*\(Planilha\)/gi, "").trim())
+            .filter(c => c && c.toLowerCase() !== "empresa" && c.toLowerCase() !== bestName.toLowerCase());
+          
+          const bestComp = companyCandidates[0] || group.map(x => x.company).find(c => c && c.trim()) || "";
+
+          const bestEmail = group.map(x => (x.email || "").trim()).find(e => e && e.includes("@")) || "";
+          const bestPhone = group.map(x => (x.whatsapp || "").trim()).find(w => w && w.replace(/\D/g, "").length >= 8) || "";
 
           const mergedSource = mergeSourcesStr(...group.map(x => x.source));
 
@@ -1475,11 +1327,19 @@ export function useData() {
             }
           }
 
+          const isTestLead = group.some(x => 
+            x.classification === "Lead Teste" || 
+            x.status === "lead_teste" || 
+            (Array.isArray(x.tags) && (x.tags.includes("leadtest") || x.tags.includes("modo-teste") || x.tags.includes("teste"))) ||
+            x.source?.toLowerCase().includes("[modo-teste]") ||
+            x.source?.toLowerCase().includes("[teste]")
+          );
+
           const visitSum = group.reduce((sum, item) => sum + (Number(item.lpVisits) || 1), 0);
           const calculatedVisits = Math.max(group.length, visitSum);
 
-          const isCust = group.some(x => x.isCustomer || x.classification === "Cliente" || x.stage === "Ganho" || x.stage === "Recebimento");
-          const isRec = group.length > 1 || calculatedVisits > 1 || isCust || group.some(x => x.isRecurring || x.type === "Recorrente");
+          const isCust = !isTestLead && group.some(x => x.isCustomer || x.classification === "Cliente" || x.stage === "Ganho" || x.stage === "Recebimento");
+          const isRec = !isTestLead && (group.length > 1 || calculatedVisits > 1 || isCust || group.some(x => x.isRecurring || x.type === "Recorrente"));
 
           const mergedTagsSet = new Set<string>();
           group.forEach(g => {
@@ -1487,6 +1347,10 @@ export function useData() {
           });
           if (isCust) mergedTagsSet.add("cliente");
           if (isRec) mergedTagsSet.add("recorrência");
+          if (isTestLead) {
+            mergedTagsSet.add("leadtest");
+            mergedTagsSet.add("modo-teste");
+          }
 
           const activitiesMap = new Map<string, Activity>();
           group.forEach(g => {
@@ -1514,12 +1378,14 @@ export function useData() {
             lpVisits: calculatedVisits,
             isCustomer: isCust,
             isRecurring: isRec,
-            classification: isCust ? "Cliente" : "Lead",
-            type: isRec ? "Recorrente" : "Novo",
+            classification: isTestLead ? "Lead Teste" : (isCust ? "Cliente" : "Lead"),
+            type: isTestLead ? "Novo" : (isRec ? "Recorrente" : "Novo"),
             tags: Array.from(mergedTagsSet),
             activities: Array.from(activitiesMap.values()),
             createdAt: earliestDate,
-            lastInteraction: `Recorrente / Capturas Unificadas (${group.length}x)`,
+            lastInteraction: isTestLead 
+              ? `Capturado em Modo Teste (${group.length}x)`
+              : `Recorrente / Capturas Unificadas (${group.length}x)`,
           };
 
           result.push(merged);
@@ -1540,24 +1406,8 @@ export function useData() {
   const tasks = asArray(useQuery({ 
     queryKey: ['tasks'], 
     queryFn: async () => { 
-      let dbTasks: any[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveTasks = Array.isArray(driveRoot?.tasks) ? driveRoot.tasks : (Array.isArray(driveRoot?.data?.tasks) ? driveRoot.data.tasks : []);
-        if (driveTasks.length > 0) {
-          dbTasks = driveTasks.map(mapTaskFromDb);
-        }
-      } catch {}
-
-      if (dbTasks.length === 0 && typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_tasks");
-          if (raw) dbTasks = JSON.parse(raw);
-        } catch {}
-      }
-
-      return dbTasks;
+      const driveTasks = cloudStore.getState().tasks || [];
+      return driveTasks.map(mapTaskFromDb);
     } 
   }).data);
 
@@ -1565,8 +1415,8 @@ export function useData() {
   const usersRaw = asArray(useQuery({ 
     queryKey: ['users'], 
     queryFn: async () => { 
-      const localAuthUsers = getRegisteredUsers();
-      return localAuthUsers.map(u => ({
+      const cloudUsers = getRegisteredUsers();
+      return cloudUsers.map(u => ({
         id: u.id,
         name: u.name,
         email: u.email,
@@ -1591,10 +1441,8 @@ export function useData() {
     "bc70c5d1"
   ];
 
-  // 1. Expurgar fantasmas e ocultar o standby admin da listagem de usuários do sistema
   const cleanUsers = mappedUsers.filter(u => {
     if (!u) return false;
-    // O Administrador Standby (ADMIN) nunca aparece nos usuários do sistema
     if ((u as any).isStandbyAdmin || u.id === "system-standby-admin" || u.email?.toLowerCase() === "admin@comet.com") {
       return false;
     }
@@ -1610,7 +1458,6 @@ export function useData() {
     return true;
   });
 
-  // 2. Garante a presença do Admin Titular cadastrado (Tiago Rezeck)
   const tiagoIdx = cleanUsers.findIndex(u => 
     u.email?.toLowerCase() === "tiagorezeck@hotmail.com" || 
     u.name?.toLowerCase().includes("tiago rezeck") ||
@@ -1642,14 +1489,11 @@ export function useData() {
     };
   }
 
-  // 3. Garantia Rígida: APENAS 1 ADMIN CADASTRADO NO SISTEMA (Tiago Rezeck)
-  // Os outros membros, para terem acesso amplo, assumem o perfil de Gestor (onde o admin pode liberar tudo ou partes)
   const users = cleanUsers.map(u => {
     const isTiago = u.email?.toLowerCase() === "tiagorezeck@hotmail.com" || u.id === "327399fb-3511-41a4-bd01-cf3b803aa859";
     if (isTiago) {
       return u.role === "Admin Geral" ? u : { ...u, role: "Admin Geral" };
     }
-    // Qualquer outro usuário cadastrado que estivesse como Admin Geral passa para Gestor
     if (u.role === "Admin Geral" || u.role === "Admin") {
       return { ...u, role: "Gestor" };
     }
@@ -1660,24 +1504,7 @@ export function useData() {
   const products = asArray(useQuery({ 
     queryKey: ['products'], 
     queryFn: async () => { 
-      let dbProducts: any[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveProds = Array.isArray(driveRoot?.products) ? driveRoot.products : (Array.isArray(driveRoot?.data?.products) ? driveRoot.data.products : []);
-        if (driveProds.length > 0) {
-          dbProducts = driveProds.map(mapProductFromDb);
-        }
-      } catch {}
-
-      if (dbProducts.length === 0 && typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_products");
-          if (raw) dbProducts = JSON.parse(raw);
-        } catch {}
-      }
-
-      return dbProducts;
+      return (cloudStore.getState().products || []).map(mapProductFromDb);
     } 
   }).data);
 
@@ -1685,24 +1512,7 @@ export function useData() {
   const objections = asArray(useQuery({ 
     queryKey: ['objections'], 
     queryFn: async () => { 
-      let dbObjections: any[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveObjs = Array.isArray(driveRoot?.objections) ? driveRoot.objections : (Array.isArray(driveRoot?.data?.objections) ? driveRoot.data.objections : []);
-        if (driveObjs.length > 0) {
-          dbObjections = driveObjs;
-        }
-      } catch {}
-
-      if (dbObjections.length === 0 && typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_objections");
-          if (raw) dbObjections = JSON.parse(raw);
-        } catch {}
-      }
-
-      return dbObjections;
+      return cloudStore.getState().objections || [];
     } 
   }).data);
 
@@ -1710,31 +1520,14 @@ export function useData() {
   const marketingInvestments = asArray(useQuery({ 
     queryKey: ['marketing_investments'], 
     queryFn: async () => { 
-      let dbInvestments: any[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveInv = Array.isArray(driveRoot?.marketing_investments) ? driveRoot.marketing_investments : (Array.isArray(driveRoot?.marketingInvestments) ? driveRoot.marketingInvestments : (Array.isArray(driveRoot?.data?.marketing_investments) ? driveRoot.data.marketing_investments : []));
-        if (driveInv.length > 0) {
-          dbInvestments = driveInv;
-        }
-      } catch {}
-
-      if (dbInvestments.length === 0 && typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_investments");
-          if (raw) dbInvestments = JSON.parse(raw);
-        } catch {}
-      }
-
-      return dbInvestments;
+      return cloudStore.getState().marketingInvestments || [];
     } 
   }).data);
 
-  // 7. LANDING PAGES
+  // 7. LANDING PAGES (100% Cloud + RAM, zero localStorage)
   const landingPages = asArray(useQuery({ 
     queryKey: ['landing_pages'], 
-    refetchInterval: 5000,
+    refetchInterval: 8000,
     refetchOnWindowFocus: true,
     queryFn: async () => { 
       const deletedIds = new Set(getDeletedLandingPageIds());
@@ -1745,37 +1538,22 @@ export function useData() {
         return false;
       };
 
+      const cloudDb = cloudStore.getState();
+      const cloudLps: LandingPage[] = (cloudDb.landingPages || [])
+        .map(mapLPFromDb)
+        .filter((lp) => !isDeleted(lp));
+
       let serverLps: LandingPage[] = [];
       try {
-        const resp = await fetch('/api/landing-pages');
+        const resp = await fetch('/api/landing-pages', { cache: 'no-store' });
         if (resp.ok) {
           const json = await resp.json();
           if (json && Array.isArray(json.landingPages)) {
-            serverLps = json.landingPages.filter(lp => !isDeleted(lp));
+            serverLps = json.landingPages.map(mapLPFromDb).filter((lp: LandingPage) => !isDeleted(lp));
           }
-        }
-      } catch (err) {
-        console.warn("Erro ao buscar landing pages da API do servidor:", err);
-      }
-
-      const localLps = getLocalLandingPages().filter(lp => !isDeleted(lp));
-
-      let driveLps: LandingPage[] = [];
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const rawDriveLps = Array.isArray(driveRoot?.landingPages) 
-          ? driveRoot.landingPages 
-          : (Array.isArray(driveRoot?.landing_pages) 
-            ? driveRoot.landing_pages 
-            : (Array.isArray(driveRoot?.data?.landingPages) 
-              ? driveRoot.data.landingPages 
-              : (Array.isArray(driveRoot?.data?.landing_pages) ? driveRoot.data.landing_pages : [])));
-        if (Array.isArray(rawDriveLps) && rawDriveLps.length > 0) {
-          driveLps = rawDriveLps.map(mapLPFromDb).filter(lp => !isDeleted(lp));
         }
       } catch {}
 
-      // Mescla todas as fontes mantendo autonomia total por id ou slug exclusivo
       const getLpKey = (lp: LandingPage) => {
         if (lp.id) return `id:${lp.id}`;
         if (lp.slug) return `slug:${lp.slug.trim().toLowerCase()}`;
@@ -1784,14 +1562,7 @@ export function useData() {
 
       const mergedMap = new Map<string, LandingPage>();
 
-      // Se o Google Drive / Sheets já possui Landing Pages oficiais cadastradas,
-      // evitamos reintroduzir páginas de template/demo geradas no servidor
-      const filteredServerLps = (driveLps.length > 0)
-        ? serverLps.filter(s => driveLps.some(d => d.id === s.id || (d.slug && s.slug && d.slug.toLowerCase() === s.slug.toLowerCase())) || !s.id.startsWith("lp_adaptive_"))
-        : serverLps;
-
-      // Insere primeiro dados do drive e servidor, e por último o local para dar prioridade às edições mais recentes
-      for (const lp of [...driveLps, ...filteredServerLps, ...localLps]) {
+      for (const lp of [...serverLps, ...cloudLps]) {
         if (!lp || isDeleted(lp)) continue;
         const key = getLpKey(lp);
         if (!mergedMap.has(key)) {
@@ -1800,109 +1571,61 @@ export function useData() {
           const prev = mergedMap.get(key)!;
           const prevTime = new Date((prev as any).updatedAt || (prev as any).updated_at || (prev as any).createdAt || 0).getTime();
           const lpTime = new Date((lp as any).updatedAt || (lp as any).updated_at || (lp as any).createdAt || 0).getTime();
-          
           const base = lpTime >= prevTime ? { ...prev, ...lp } : { ...lp, ...prev };
-          const bestId = isUUID(prev.id) ? prev.id : (isUUID(lp.id) ? lp.id : (prev.id || lp.id));
-          const mergedVisits = Math.max(Number(prev.visits) || 0, Number(lp.visits) || 0);
-          const mergedLeads = Math.max(Number(prev.leads) || 0, Number(lp.leads) || 0);
-          const mergedConv = mergedVisits > 0 
-            ? Math.min(100, Math.round((mergedLeads / mergedVisits) * 100)) 
-            : Math.max(Number(prev.conv) || 0, Number(lp.conv) || 0);
-
+          const richSource = (lp.hero || (lp as any).heroModel) ? lp : prev;
+          const heroModel = base.heroModel || base.hero?.model || (richSource as any).heroModel || richSource.hero?.model || "split_image";
           mergedMap.set(key, {
             ...base,
-            id: bestId,
-            visits: mergedVisits,
-            viewsCount: mergedVisits,
-            views_count: mergedVisits,
-            leads: mergedLeads,
-            leads_count: mergedLeads,
-            conv: mergedConv,
+            id: isUUID(prev.id) ? prev.id : (isUUID(lp.id) ? lp.id : (prev.id || lp.id)),
+            heroModel,
+            hero: (base.hero && base.hero.model) ? base.hero : (richSource.hero ? { ...richSource.hero, model: heroModel } : base.hero),
+            quiz: base.quiz || richSource.quiz,
+            bentoGrid: base.bentoGrid || richSource.bentoGrid,
+            testimonials: base.testimonials || richSource.testimonials,
+            formSection: base.formSection || richSource.formSection,
+            photoGrid: base.photoGrid || richSource.photoGrid,
+            visibility: base.visibility || richSource.visibility,
+            sectionOrder: base.sectionOrder || richSource.sectionOrder,
+            customElementStyles: base.customElementStyles || richSource.customElementStyles,
+            floatingImages: base.floatingImages || richSource.floatingImages,
+            faq: base.faq || richSource.faq,
           });
         }
       }
 
       let result = Array.from(mergedMap.values()).filter(lp => !isDeleted(lp));
 
-      // Background Sync / Self-Healing: Garante que toda LP salva no banco de dados Supabase ou cache local 
-      // também esteja persistida fisicamente no arquivo landing_pages.json do servidor Express.
-      // Isso resolve o problema de LPs não abrirem em outros navegadores ou dispositivos devido a RLS ou cache local.
-      if (result.length > 0) {
-        setTimeout(async () => {
-          try {
-            // 1. Sincronização Server-Side (Garante arquivos físicos no disco do Express)
-            for (const lp of result) {
-              const matchedServer = serverLps.find(s => s.id === lp.id || (lp.slug && s.slug === lp.slug));
-              
-              const lpTime = lp.updated_at ? new Date(lp.updated_at).getTime() : 0;
-              const serverTime = matchedServer?.updated_at ? new Date(matchedServer.updated_at).getTime() : 0;
-
-              // Se a página não existir no servidor local do Express ou se a versão do banco/local for mais recente
-              if (!matchedServer || lpTime > serverTime + 5000) {
-                console.info(`[Self-Healing] Sincronizando landing page "${lp.name || lp.title}" para persistência física no servidor...`);
-                await fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(lp),
-                });
-              }
-            }
-
-          } catch (syncErr) {
-            console.warn("Erro ao executar self-healing de landing pages:", syncErr);
-          }
-        }, 1500);
-      }
-
-      // Se todas as fontes estiverem vazias e nenhum ID foi deletado pelo usuário, semeia os dados padrões
-      if (result.length === 0 && deletedIds.size === 0) {
+      if (result.length === 0 && deletedIds.size === 0 && !cloudStore.getStatus().loadedFromCloud) {
         result = getInitialAILandingPages().filter(lp => !isDeleted(lp));
       }
 
-      // Normaliza métricas de Visitas, Leads e Taxa de Conversão garantindo consistência
+      const allLeads = [
+        ...(cloudDb.leads || []),
+        ...(cloudDb.leads_landing_pages || []),
+      ];
+
       result = result.map((lp) => {
-        let crmLeadsCount = 0;
-        try {
-          const rawL = localStorage.getItem("comet_local_leads") || "[]";
-          const rawQ1 = localStorage.getItem("comet_inbound_leads_queue") || "[]";
-          const rawQ2 = localStorage.getItem("people_cro_leads_v1") || "[]";
-          const driveRoot: any = getLocalDatabaseRoot();
-          const driveLeadsList = Array.isArray(driveRoot?.leads) ? driveRoot.leads : (Array.isArray(driveRoot?.data?.leads) ? driveRoot.data.leads : []);
-          const driveLpLeadsList = Array.isArray(driveRoot?.leads_landing_pages) ? driveRoot.leads_landing_pages : (Array.isArray(driveRoot?.data?.leads_landing_pages) ? driveRoot.data.leads_landing_pages : []);
+        const normLpName = (lp.name || lp.title || "").trim().toLowerCase();
+        const normLpSlug = (lp.slug || "").trim().toLowerCase();
+        const normLpId = (lp.id || "").trim().toLowerCase();
 
-          const allLeads = [
-            ...JSON.parse(rawL),
-            ...JSON.parse(rawQ1),
-            ...JSON.parse(rawQ2),
-            ...driveLeadsList,
-            ...driveLpLeadsList
-          ];
+        const crmLeadsCount = allLeads.filter((lead: any) => {
+          const leadLp = String(lead.landing_page || lead.landingPage || lead["Landing Page (Título)"] || lead.landingPageTitle || lead.pageTitle || lead.metadata?.pageTitle || "").trim().toLowerCase();
+          const leadIdStr = String(lead.landingPageId || lead["ID Landing Page"] || lead.pageId || lead.metadata?.pageId || "").trim().toLowerCase();
+          const leadCompany = String(lead.company || lead.Empresa || "").trim().toLowerCase();
+          const leadSource = String(lead.source || lead.Origem || "").trim().toLowerCase();
 
-          const normLpName = (lp.name || lp.title || "").trim().toLowerCase();
-          const normLpSlug = (lp.slug || "").trim().toLowerCase();
-          const normLpId = (lp.id || "").trim().toLowerCase();
-
-          crmLeadsCount = allLeads.filter((lead: any) => {
-            const leadLp = String(lead.landing_page || lead.landingPage || lead["Landing Page (Título)"] || lead.landingPageTitle || lead.pageTitle || lead.metadata?.pageTitle || "").trim().toLowerCase();
-            const leadIdStr = String(lead.landingPageId || lead["ID Landing Page"] || lead.pageId || lead.metadata?.pageId || "").trim().toLowerCase();
-            const leadCompany = String(lead.company || lead.Empresa || "").trim().toLowerCase();
-            const leadSource = String(lead.source || lead.Origem || "").trim().toLowerCase();
-
-            if (normLpId && (leadIdStr === normLpId || leadLp === normLpId)) return true;
-            if (normLpName && (leadLp === normLpName || leadCompany.includes(normLpName) || leadSource.includes(normLpName))) return true;
-            if (normLpSlug && (leadLp === normLpSlug || leadSource.includes(normLpSlug))) return true;
-            return false;
-          }).length;
-        } catch {}
+          if (normLpId && (leadIdStr === normLpId || leadLp === normLpId)) return true;
+          if (normLpName && (leadLp === normLpName || leadCompany.includes(normLpName) || leadSource.includes(normLpName))) return true;
+          if (normLpSlug && (leadLp === normLpSlug || leadSource.includes(normLpSlug))) return true;
+          return false;
+        }).length;
 
         const effectiveLeads = Math.max(Number(lp.leads) || 0, Number(lp.leads_count) || 0, crmLeadsCount);
-        // Cada lead obrigatoriamente representa ao menos 1 visita na página
         const recordedVisits = Math.max(Number(lp.visits) || 0, Number(lp.viewsCount) || 0);
         const effectiveVisits = Math.max(recordedVisits, effectiveLeads);
-        
-        // Fórmula de Conversão: (Leads / Visitas) * 100 com teto de 100%
-        const effectiveConv = effectiveVisits > 0 
-          ? Math.min(100, Math.round((effectiveLeads / effectiveVisits) * 100)) 
+        const effectiveConv = effectiveVisits > 0
+          ? Math.min(100, Math.round((effectiveLeads / effectiveVisits) * 100))
           : 0;
 
         return {
@@ -1915,9 +1638,6 @@ export function useData() {
         };
       });
 
-      // Mantém o cache local sincronizado
-      saveLocalLandingPages(result);
-
       return result;
     } 
   }).data);
@@ -1926,33 +1646,70 @@ export function useData() {
   const pipelinesRaw = asArray(useQuery({ 
     queryKey: ['pipelines'], 
     queryFn: async () => { 
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const drivePipelines = Array.isArray(driveRoot?.pipelines) ? driveRoot.pipelines : (Array.isArray(driveRoot?.data?.pipelines) ? driveRoot.data.pipelines : []);
-        if (drivePipelines.length > 0) return drivePipelines;
-      } catch {}
-      return []; 
+      return cloudStore.getState().pipelines || [];
     } 
   }).data);
   
   const pipelines = useMemo(() => {
-    const fromDb = (pipelinesRaw || []).map(p => ({ 
-      ...p, 
-      stages: Array.isArray((p as any).stages) ? (p as any).stages.sort((a: any, b: any) => (a.position || 0) - (b.position || 0)) : [] 
-    }));
-    const filteredDb = fromDb.filter(db => !DEFAULT_PIPELINES.some(def => def.name === db.name));
-    return [...DEFAULT_PIPELINES, ...filteredDb];
+    const sourceList = pipelinesRaw || [];
+    const mergedList: Pipeline[] = DEFAULT_PIPELINES.map(def => {
+      const found = sourceList.find((p: any) => 
+        p.id === def.id || 
+        (p.code && def.code && p.code.toLowerCase() === def.code.toLowerCase()) || 
+        (p.name && def.name && p.name.trim().toUpperCase() === def.name.trim().toUpperCase())
+      );
+      if (found) {
+        return {
+          ...def,
+          ...found,
+          stages: Array.isArray(found.stages) && found.stages.length > 0 ? found.stages : def.stages
+        };
+      }
+      return def;
+    });
+
+    sourceList.forEach((p: any) => {
+      const isDefault = DEFAULT_PIPELINES.some(def => 
+        def.id === p.id || 
+        (p.code && def.code && p.code.toLowerCase() === def.code.toLowerCase()) || 
+        (p.name && def.name && p.name.trim().toUpperCase() === p.name.trim().toUpperCase())
+      );
+      if (!isDefault && p.id && !mergedList.some(m => m.id === p.id)) {
+        mergedList.push({
+          ...p,
+          stages: Array.isArray(p.stages) ? p.stages : []
+        });
+      }
+    });
+
+    return mergedList.sort((a, b) => (a.order || 99) - (b.order || 99));
   }, [pipelinesRaw]);
+
+  // 8.1 HISTÓRICO DE MOVIMENTAÇÃO DE PIPELINES
+  const pipelineHistory = asArray(useQuery({
+    queryKey: ['pipeline_history'],
+    queryFn: async () => {
+      return cloudStore.getState().historico_pipeline || [];
+    }
+  }).data) as PipelineMovementHistory[];
 
   // 9. STAGE WORKFLOWS
   const stageWorkflows = asArray(useQuery({ 
     queryKey: ['stage_workflows'], 
     queryFn: async () => { 
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveWf = Array.isArray(driveRoot?.stage_workflows) ? driveRoot.stage_workflows : (Array.isArray(driveRoot?.data?.stage_workflows) ? driveRoot.data.stage_workflows : []);
-        if (driveWf.length > 0) return driveWf as StageWorkflow[];
-      } catch {}
+      const raw = cloudStore.getState().stageWorkflows;
+      if (Array.isArray(raw)) return raw as StageWorkflow[];
+      if (raw && typeof raw === "object") {
+        return Object.entries(raw).map(([key, val]: [string, any]) => {
+          const [pipelineId, ...rest] = key.split("_");
+          return {
+            pipelineId: val?.pipelineId || pipelineId,
+            stageName: val?.stageName || rest.join("_"),
+            rules: Array.isArray(val?.rules) ? val.rules : [],
+            ...val,
+          } as StageWorkflow;
+        });
+      }
       return [] as StageWorkflow[]; 
     } 
   }).data);
@@ -1961,12 +1718,7 @@ export function useData() {
   const handoffRules = asArray(useQuery({ 
     queryKey: ['handoff_rules'], 
     queryFn: async () => { 
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveRules = Array.isArray(driveRoot?.handoff_rules) ? driveRoot.handoff_rules : (Array.isArray(driveRoot?.data?.handoff_rules) ? driveRoot.data.handoff_rules : []);
-        if (driveRules.length > 0) return driveRules as HandoffRule[];
-      } catch {}
-      return [] as HandoffRule[]; 
+      return (cloudStore.getState().handoffRules || []) as HandoffRule[];
     } 
   }).data);
 
@@ -1974,24 +1726,7 @@ export function useData() {
   const automations = asArray(useQuery({ 
     queryKey: ['automations'], 
     queryFn: async () => { 
-      let dbAutomations: any[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveAutos = Array.isArray(driveRoot?.automations) ? driveRoot.automations : (Array.isArray(driveRoot?.data?.automations) ? driveRoot.data.automations : []);
-        if (driveAutos.length > 0) {
-          dbAutomations = driveAutos.map(mapAutomationFromDb);
-        }
-      } catch {}
-
-      if (dbAutomations.length === 0 && typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_automations");
-          if (raw) dbAutomations = JSON.parse(raw);
-        } catch {}
-      }
-
-      return dbAutomations;
+      return (cloudStore.getState().automations || []).map(mapAutomationFromDb);
     } 
   }).data);
 
@@ -1999,33 +1734,13 @@ export function useData() {
   const surveys = asArray(useQuery({ 
     queryKey: ['surveys'], 
     queryFn: async () => { 
-      const localSurveys = getLocalSurveys();
-      let dbSurveys: Survey[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveSurveys = Array.isArray(driveRoot?.surveys) ? driveRoot.surveys : (Array.isArray(driveRoot?.data?.surveys) ? driveRoot.data.surveys : []);
-        if (driveSurveys.length > 0) {
-          dbSurveys = driveSurveys;
-        }
-      } catch {}
-
+      const cloudSurveys = cloudStore.getState().surveys || [];
       const map = new Map<string, Survey>();
       for (const s of DEFAULT_SURVEYS) {
         map.set(s.id, { ...s, questions: s.questions ? JSON.parse(JSON.stringify(s.questions)) : [] });
       }
-      for (const s of dbSurveys) {
-        if (s.id) {
-          const prev = map.get(s.id);
-          map.set(s.id, { 
-            ...(prev || {}), 
-            ...s, 
-            questions: (Array.isArray(s.questions) && s.questions.length > 0) ? s.questions : (prev?.questions || []) 
-          });
-        }
-      }
-      for (const s of localSurveys) {
-        if (s.id) {
+      for (const s of cloudSurveys) {
+        if (s && s.id) {
           const prev = map.get(s.id);
           map.set(s.id, { 
             ...(prev || {}), 
@@ -2041,20 +1756,10 @@ export function useData() {
   const surveysResponses = asArray(useQuery({ 
     queryKey: ['survey_responses'], 
     queryFn: async () => { 
-      const localResp = getLocalSurveyResponses();
-      let dbResp: SurveyResponse[] = [];
+      let dbResp: SurveyResponse[] = [...(cloudStore.getState().surveyResponses || [])];
 
       try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const driveResp = Array.isArray(driveRoot?.survey_responses) ? driveRoot.survey_responses : (Array.isArray(driveRoot?.data?.survey_responses) ? driveRoot.data.survey_responses : []);
-        if (driveResp.length > 0) {
-          dbResp = driveResp;
-        }
-      } catch {}
-
-      // Tenta buscar também da rota local da API Express
-      try {
-        const apiRes = await fetch("/api/surveys/responses");
+        const apiRes = await fetch("/api/surveys/responses", { cache: "no-store" });
         if (apiRes.ok) {
           const apiData = await apiRes.json();
           if (Array.isArray(apiData)) {
@@ -2068,12 +1773,6 @@ export function useData() {
         const key = r.id || `${r.survey_id || r.surveyId}_${r.lead_id || r.leadId}_${r.created_at || r.completedAt}`;
         map.set(key, r);
       }
-      for (const r of localResp) {
-        const key = r.id || `${r.survey_id || r.surveyId}_${r.lead_id || r.leadId}_${r.created_at || r.completedAt}`;
-        if (!map.has(key)) {
-          map.set(key, r);
-        }
-      }
       return Array.from(map.values()); 
     } 
   }).data);
@@ -2082,33 +1781,22 @@ export function useData() {
   const workingDays = asArray(useQuery({ 
     queryKey: ['working_days'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_working_days") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return [1,2,3,4,5]; 
+      return cloudStore.getState().workingDays || [1, 2, 3, 4, 5]; 
     } 
   }).data) as number[];
 
   const holidays = asArray(useQuery({ 
     queryKey: ['holidays'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_holidays") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return []; 
+      return cloudStore.getState().holidays || []; 
     } 
   }).data) as string[];
 
   const funnelTypes = asArray(useQuery({ 
     queryKey: ['funnel_types'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_funnel_types") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return ["Voucher", "Ebook", "Webinar", "Diagnóstico"]; 
+      const list = cloudStore.getState().funnelTypes;
+      return Array.isArray(list) && list.length > 0 ? list : ["Voucher", "Ebook", "Webinar", "Diagnóstico"]; 
     } 
   }).data) as string[];
 
@@ -2116,24 +1804,7 @@ export function useData() {
   const playbooksDb = asArray(useQuery({ 
     queryKey: ['playbooks'], 
     queryFn: async () => { 
-      let dbPbs: any[] = [];
-
-      try {
-        const driveRoot: any = getLocalDatabaseRoot();
-        const drivePbs = Array.isArray(driveRoot?.playbooks) ? driveRoot.playbooks : (Array.isArray(driveRoot?.data?.playbooks) ? driveRoot.data.playbooks : []);
-        if (drivePbs.length > 0) {
-          dbPbs = drivePbs.map(mapPlaybookFromDb);
-        }
-      } catch {}
-
-      if (dbPbs.length === 0 && typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_playbooks");
-          if (raw) dbPbs = JSON.parse(raw);
-        } catch {}
-      }
-
-      return dbPbs;
+      return (cloudStore.getState().playbooks || []).map(mapPlaybookFromDb);
     } 
   }).data);
 
@@ -2147,41 +1818,38 @@ export function useData() {
   const rolePermissionsRaw = useQuery({ 
     queryKey: ['role_permissions'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_role_stage_permissions") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return []; 
+      return cloudStore.getState().rolePermissions || {};
     } 
   }).data;
 
   const rolePermissions = useMemo(() => {
-    const dbPerms = (rolePermissionsRaw || []).reduce((acc: any, r: any) => { 
-      acc[r.role] = r.stages; 
-      return acc; 
-    }, {});
-    return { ...DEFAULT_ROLE_PERMISSIONS, ...dbPerms };
+    if (Array.isArray(rolePermissionsRaw)) {
+      const dbPerms = rolePermissionsRaw.reduce((acc: any, r: any) => { 
+        acc[r.role] = r.stages; 
+        return acc; 
+      }, {});
+      return { ...DEFAULT_ROLE_PERMISSIONS, ...dbPerms };
+    }
+    return { ...DEFAULT_ROLE_PERMISSIONS, ...(rolePermissionsRaw || {}) };
   }, [rolePermissionsRaw]);
 
-  // 15.1 ROLE MODULE PERMISSIONS (Configurações dinâmicas de módulos por cargo)
-  const [localRoleModules, setLocalRoleModules] = useState<Record<string, string[]>>(() => {
-    if (typeof window === "undefined") return DEFAULT_ROLE_MODULES;
-    try {
-      const saved = localStorage.getItem("comet_role_module_permissions");
-      if (saved) return { ...DEFAULT_ROLE_MODULES, ...JSON.parse(saved) };
-    } catch {}
-    return DEFAULT_ROLE_MODULES;
+  // 15.1 ROLE MODULE PERMISSIONS (Nuvem + RAM)
+  const roleModulePermissionsQuery = useQuery({
+    queryKey: ['role_module_permissions'],
+    queryFn: async () => {
+      return { ...DEFAULT_ROLE_MODULES, ...(cloudStore.getState().roleModulePermissions || {}) };
+    }
   });
+  const localRoleModules = roleModulePermissionsQuery.data ?? DEFAULT_ROLE_MODULES;
 
   const updateRoleModulePermissions = async (role: string, modules: string[]) => {
     const next = { ...localRoleModules, [role]: modules };
-    setLocalRoleModules(next);
-    try {
-      localStorage.setItem("comet_role_module_permissions", JSON.stringify(next));
-    } catch (err) {
-      console.warn("Aviso ao salvar permissões de módulos:", err);
-    }
-    toast.success(`Módulos liberados para ${role} atualizados!`);
+    cloudStore.mutate((draft) => {
+      draft.roleModulePermissions = next;
+    }, { immediate: true });
+    queryClient.setQueryData(['role_module_permissions'], next);
+    invalidate('role_module_permissions');
+    toast.success(`Módulos liberados para ${role} atualizados na nuvem!`);
   };
 
   const resetRoleModulePermissions = async (role: string) => {
@@ -2191,10 +1859,11 @@ export function useData() {
     } else {
       next[role] = SYSTEM_MODULES.map(m => m.id);
     }
-    setLocalRoleModules(next);
-    try {
-      localStorage.setItem("comet_role_module_permissions", JSON.stringify(next));
-    } catch {}
+    cloudStore.mutate((draft) => {
+      draft.roleModulePermissions = next;
+    }, { immediate: true });
+    queryClient.setQueryData(['role_module_permissions'], next);
+    invalidate('role_module_permissions');
     toast.success(`Módulos de ${role} restaurados para a configuração padrão.`);
   };
 
@@ -2202,44 +1871,28 @@ export function useData() {
   const visibility = useQuery({ 
     queryKey: ['visibility_settings'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_visibility_settings") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return DEFAULT_VISIBILITY; 
+      return cloudStore.getState().visibility || DEFAULT_VISIBILITY; 
     } 
   }).data ?? DEFAULT_VISIBILITY;
   
   const slaThresholds = useQuery({ 
     queryKey: ['sla_thresholds'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_sla_thresholds") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return { alerta: 24, critico: 48, vencido: 72 }; 
+      return cloudStore.getState().slaThresholds || { alerta: 24, critico: 48, vencido: 72 }; 
     } 
   }).data ?? { alerta: 24, critico: 48, vencido: 72 };
 
   const aiSettings = useQuery({ 
     queryKey: ['ai_settings'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_ai_settings") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return null; 
+      return cloudStore.getState().aiConfig || null; 
     } 
   }).data;
 
   const company = useQuery({ 
     queryKey: ['company_settings'], 
     queryFn: async () => { 
-      try {
-        const saved = typeof window !== "undefined" ? localStorage.getItem("comet_company_settings") : null;
-        if (saved) return JSON.parse(saved);
-      } catch {}
-      return { id: '00000000-0000-0000-0000-000000000000', name: "Minha Empresa" } as CompanySettings; 
+      return cloudStore.getState().company || ({ id: '00000000-0000-0000-0000-000000000000', name: "Minha Empresa" } as CompanySettings); 
     } 
   }).data;
 
@@ -2254,43 +1907,25 @@ export function useData() {
     staleTime: Infinity 
   }).data ?? { from: startOfMonth(new Date()), to: endOfMonth(new Date()), label: "Este mês", type: "thisMonth" };
 
-  // ==========================================
-  // REALTIME SYNCHRONIZATION (CROSS-TAB & STORAGE EVENTS)
-  // ==========================================
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (!e.key) return;
-      if (e.key.startsWith("comet_") || e.key.includes("drive") || e.key.includes("lead") || e.key.includes("lp")) {
-        queryClient.invalidateQueries();
-      }
-    };
-
-    const handleCustomDbUpdate = () => {
-      queryClient.invalidateQueries();
-    };
-
-    let bcChannel: BroadcastChannel | null = null;
-    if (typeof window !== "undefined") {
-      window.addEventListener('storage', handleStorageChange);
-      window.addEventListener('salead_database_root_updated', handleCustomDbUpdate);
-      try {
-        bcChannel = new BroadcastChannel("comet_realtime_sync");
-        bcChannel.onmessage = () => {
-          queryClient.invalidateQueries();
-        };
-      } catch {}
+  // 17. LEAD ROUTING CONFIG
+  const leadRoutingConfigQuery = useQuery<LeadRoutingConfig>({
+    queryKey: ['lead_routing_config'],
+    queryFn: async () => {
+      return cloudStore.getState().leadRoutingConfig || DEFAULT_LEAD_ROUTING_CONFIG;
     }
+  });
 
-    return () => {
-      if (bcChannel) {
-        try { bcChannel.close(); } catch {}
-      }
-      if (typeof window !== "undefined") {
-        window.removeEventListener('storage', handleStorageChange);
-        window.removeEventListener('salead_database_root_updated', handleCustomDbUpdate);
-      }
-    };
-  }, [queryClient]);
+  const leadRoutingConfig = leadRoutingConfigQuery.data ?? DEFAULT_LEAD_ROUTING_CONFIG;
+
+  const updateLeadRoutingConfig = async (newConfig: LeadRoutingConfig) => {
+    cloudStore.mutate((draft) => {
+      draft.leadRoutingConfig = newConfig;
+    }, { immediate: true });
+    queryClient.setQueryData(['lead_routing_config'], newConfig);
+    queryClient.invalidateQueries({ queryKey: ['lead_routing_config'] });
+  };
+
+
 
   const authSessionUser = getCurrentUser();
   const localEmail = typeof window !== "undefined" ? localStorage.getItem("comet_user_email") : null;
@@ -2338,6 +1973,7 @@ export function useData() {
 
   return {
     initialized: !!company && !!currentUser,
+    cloudStatus: cloudStore.getStatus(),
     leads, 
     tasks, 
     users, 
@@ -2346,6 +1982,7 @@ export function useData() {
     company, 
     marketingInvestments, 
     pipelines, 
+    pipelineHistory,
     stageWorkflows, 
     handoffRules, 
     automations, 
@@ -2358,6 +1995,8 @@ export function useData() {
     resetRoleModulePermissions,
     SYSTEM_MODULES,
     DEFAULT_ROLE_MODULES,
+    leadRoutingConfig,
+    updateLeadRoutingConfig,
     visibility, 
     slaThresholds, 
     dateFilter, 
@@ -2371,45 +2010,49 @@ export function useData() {
     stages: (pipelines[0]?.stages || []).map((s: any) => s.name).filter(Boolean) || STAGES,
     
     aiConfig: {
-      activeProvider: aiSettings?.provider || 'openrouter',
-      openRouterKey: aiSettings?.openrouter_key || '',
-      googleKey: aiSettings?.google_key || '',
-      modelId: aiSettings?.model_id || 'openai/gpt-4o-mini',
-      modelName: aiSettings?.model_name || 'GPT-4o Mini'
+      activeProvider: aiSettings?.provider || aiSettings?.activeProvider || 'openrouter',
+      openRouterKey: aiSettings?.openrouter_key || aiSettings?.openRouterKey || '',
+      googleKey: aiSettings?.google_key || aiSettings?.googleKey || '',
+      modelId: aiSettings?.model_id || aiSettings?.modelId || 'openai/gpt-4o-mini',
+      modelName: aiSettings?.model_name || aiSettings?.modelName || 'GPT-4o Mini'
     },
 
     // ====================
-    // MUTATIONS COM DTOs
+    // MUTATIONS COM DTOs (ZERO-LOCALSTORAGE CLOUD ENGINE)
     // ====================
 
     // LEADS
     addLead: async (l: any) => { 
       const generatedId = isUUID(l.id) ? l.id : (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `lead_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
       
-      // Busca lead existente no cache para mesclagem automática
       let existingLeadMatch: any = null;
       try {
-        const cachedLeads = (queryClient.getQueryData(['leads']) as any[]) || [];
+        const cachedLeads = (queryClient.getQueryData(['leads']) as any[]) || cloudStore.getState().leads || [];
         const cleanPhone = (l.whatsapp || "").replace(/\D/g, "");
         const normEmail = (l.email || "").trim().toLowerCase();
         const cleanName = (l.name || "").trim().toLowerCase();
-        const cleanComp = (l.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
 
         existingLeadMatch = cachedLeads.find((x: any) => {
           if (!x) return false;
-          if (x.id === l.id) return true;
-          if (normEmail && x.email && x.email.trim().toLowerCase() === normEmail) return true;
-          if (cleanPhone && cleanPhone.length >= 8 && x.whatsapp && x.whatsapp.replace(/\D/g, "") === cleanPhone) return true;
-          if (cleanName && cleanName !== "novo lead" && cleanName !== "lead" && cleanName.length >= 3) {
-            const xName = (x.name || "").trim().toLowerCase();
-            const xComp = (x.company || "").replace(/\s*\(LP:.*?\)/gi, "").trim().toLowerCase();
-            if (cleanComp && xComp && cleanComp === xComp && cleanName === xName) return true;
+          if (x.id && l.id && String(x.id).trim() === String(l.id).trim()) return true;
+
+          const xEmail = (x.email || "").trim().toLowerCase();
+          const xPhone = (x.whatsapp || "").replace(/\D/g, "");
+          const xName = (x.name || "").trim().toLowerCase();
+
+          if (normEmail && xEmail) return normEmail === xEmail;
+
+          if (cleanPhone && cleanPhone.length >= 8 && xPhone === cleanPhone) {
+            const isGenericX = !xName || xName === "novo lead" || xName === "lead" || xName === "sem nome" || xName.length < 3;
+            const isGenericL = !cleanName || cleanName === "novo lead" || cleanName === "lead" || cleanName === "sem nome" || cleanName.length < 3;
+            if (isGenericX || isGenericL || xName === cleanName || xName.includes(cleanName) || cleanName.includes(xName)) {
+              return true;
+            }
           }
           return false;
         });
       } catch {}
 
-      // Se já existe um lead cadastrado, unifica no mesmo registro!
       if (existingLeadMatch) {
         const sourcesSet = new Set<string>();
         if (existingLeadMatch.source) existingLeadMatch.source.split(',').forEach((s: string) => s.trim() && sourcesSet.add(s.trim()));
@@ -2426,7 +2069,6 @@ export function useData() {
 
         const calculatedVisits = (Number(existingLeadMatch.lpVisits) || 1) + 1;
         const isCustomer = isPreviousCustomer || l.classification === 'Cliente' || l.stage === 'Ganho' || !!l.isCustomer;
-
         const mergedTagsSet = new Set<string>([...(existingLeadMatch.tags || []), ...(l.tags || []), "recorrência"]);
         if (isCustomer) mergedTagsSet.add("cliente");
 
@@ -2457,19 +2099,15 @@ export function useData() {
         };
 
         try {
-          await fetch(`/api/leads/${encodeURIComponent(existingLeadMatch.id)}`, {
+          fetch(`/api/leads/${encodeURIComponent(existingLeadMatch.id)}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updatedFields),
           }).catch(() => {});
 
-          const driveCfg = getDriveConfig();
-          if (driveCfg.webappUrl) {
-            const rootDb = getLocalDatabaseRoot<any>() || {};
-            rootDb.leads = (rootDb.leads || []).map((l: any) => l.id === existingLeadMatch.id ? { ...l, ...updatedFields } : l);
-            saveLocalDatabaseRoot(rootDb);
-            pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-          }
+          cloudStore.mutate((draft) => {
+            draft.leads = (draft.leads || []).map((item: any) => item.id === existingLeadMatch.id ? { ...item, ...updatedFields } : item);
+          }, { immediate: true });
         } catch {}
 
         invalidate('leads');
@@ -2497,6 +2135,49 @@ export function useData() {
       if (isCustomer && !tags.includes("cliente")) tags.push("cliente");
       if (isRecurring && !tags.includes("recorrência")) tags.push("recorrência");
 
+      let resolvedPipelineId = l.pipelineId;
+      let resolvedStage = l.stage;
+      let resolvedOwner = l.owner;
+
+      if (leadRoutingConfig?.enabled) {
+        if (!resolvedPipelineId || resolvedPipelineId === "prospection") {
+          resolvedPipelineId = leadRoutingConfig.targetPipelineId || "prospection";
+        }
+        if (!resolvedStage || resolvedStage === "Leads" || resolvedStage === "Novo Lead") {
+          resolvedStage = leadRoutingConfig.targetStage || "Novo Lead";
+        }
+
+        if (!resolvedOwner || resolvedOwner === "Sem dono" || resolvedOwner === "Sem responsável") {
+          if (leadRoutingConfig.distributionType === "specific_user") {
+            resolvedOwner = leadRoutingConfig.specificUserName || "Responsável Comercial";
+          } else if (leadRoutingConfig.distributionType === "unassigned") {
+            resolvedOwner = "Sem responsável";
+          } else if (leadRoutingConfig.distributionType === "role_round_robin") {
+            const tr = (leadRoutingConfig.targetRole || "LDR").toLowerCase();
+            const matchingUsers = users.filter(u => {
+              const r = (u.role || "").toLowerCase();
+              if (r.includes(tr)) return true;
+              if (tr === "seller" && (r.includes("vendedor") || r.includes("comercial") || r.includes("closer"))) return true;
+              if (tr === "ldr" && (r.includes("qualificador") || r.includes("prospector") || r.includes("inbound"))) return true;
+              return false;
+            });
+
+            const candidatePool = matchingUsers.length > 0 ? matchingUsers : (users.length > 0 ? users : []);
+            if (candidatePool.length > 0) {
+              const lastIdx = leadRoutingConfig.lastAssignedIndex ?? -1;
+              const nextIdx = (lastIdx + 1) % candidatePool.length;
+              resolvedOwner = candidatePool[nextIdx].name;
+              updateLeadRoutingConfig({
+                ...leadRoutingConfig,
+                lastAssignedIndex: nextIdx
+              }).catch(() => {});
+            } else {
+              resolvedOwner = "Sem responsável";
+            }
+          }
+        }
+      }
+
       const fullLead: Lead = {
         id: generatedId,
         name: l.name || "Novo Lead",
@@ -2504,8 +2185,8 @@ export function useData() {
         email: l.email || "",
         whatsapp: l.whatsapp || "",
         value: Number(l.value) || 0,
-        stage: l.stage || "Leads",
-        owner: l.owner || "Sem dono",
+        stage: resolvedStage || "Leads",
+        owner: resolvedOwner || "Sem dono",
         source: l.source || "Manual",
         classification: isTestLead ? "Lead Teste" : (isCustomer ? "Cliente" : (l.classification || "Lead")),
         temperature: l.temperature || "Frio",
@@ -2515,7 +2196,7 @@ export function useData() {
         minScore: l.minScore || "Nenhum",
         landingPage: l.landingPage,
         productId: l.productId,
-        pipelineId: l.pipelineId || "prospection",
+        pipelineId: resolvedPipelineId || "prospection",
         tags,
         score: Number(l.score) || 0,
         sla: l.sla || "ok",
@@ -2543,9 +2224,8 @@ export function useData() {
         }
       };
 
-      // 1. Salva diretamente no banco de dados (backend Express, Local Storage e Google Drive)
       try {
-        await fetch("/api/submit-lead", {
+        fetch("/api/submit-lead", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2560,21 +2240,9 @@ export function useData() {
           }),
         }).catch(() => {});
 
-        // Salva no LocalStorage
-        if (typeof window !== "undefined") {
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
-          localStorage.setItem("comet_local_leads", JSON.stringify([fullLead, ...curLoc.filter((x: any) => x.id !== fullLead.id)]));
-        }
-
-        // Salva no Google Drive / Sheets
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.leads = [fullLead, ...(rootDb.leads || []).filter((x: any) => x.id !== fullLead.id)];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.leads = [fullLead, ...(draft.leads || []).filter((x: any) => x.id !== fullLead.id)];
+        }, { immediate: true });
       } catch (err) {
         console.warn("Aviso ao salvar lead:", err);
       }
@@ -2584,42 +2252,23 @@ export function useData() {
     },
 
     updateLead: async (id: string, u: any) => { 
-      // 1. Atualização Otimista imediata no React Query cache
       queryClient.setQueryData(['leads'], (old: any) => {
         if (!Array.isArray(old)) return old;
         return old.map((lead: any) => lead.id === id ? { ...lead, ...u } : lead);
       });
 
-      // 2. Atualiza no backend server (Express / Banco de Dados)
       try {
-        await fetch(`/api/leads/${encodeURIComponent(id)}`, {
+        fetch(`/api/leads/${encodeURIComponent(id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(u)
-        });
-      } catch {}
+        }).catch(() => {});
 
-      // 3. Atualiza no LocalStorage e Google Drive
-      try {
-        if (typeof window !== "undefined") {
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          if (rawLoc) {
-            const curLoc = JSON.parse(rawLoc);
-            if (Array.isArray(curLoc)) {
-              localStorage.setItem("comet_local_leads", JSON.stringify(curLoc.map((l: any) => l.id === id ? { ...l, ...u } : l)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.leads = (rootDb.leads || []).map((l: any) => l.id === id ? { ...l, ...u } : l);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.leads = (draft.leads || []).map((l: any) => l.id === id ? { ...l, ...u } : l);
+        }, { immediate: true });
       } catch (err) {
-        console.warn("Aviso ao atualizar lead no Drive:", err);
+        console.warn("Aviso ao atualizar lead na nuvem:", err);
       }
 
       invalidate('leads');
@@ -2629,7 +2278,6 @@ export function useData() {
       let targetEmail = "";
       let targetPhone = "";
 
-      // 1. Atualização Otimista no React Query cache e identificação do lead
       queryClient.setQueryData(['leads'], (old: any) => {
         if (!Array.isArray(old)) return old;
         const target = old.find((l: any) => l.id === id);
@@ -2645,81 +2293,38 @@ export function useData() {
         });
       });
 
-      // 2. Remove no backend Express se presente
       try {
-        await fetch(`/api/leads/${encodeURIComponent(id)}`, { method: "DELETE" });
-      } catch {}
-
-      // 3. Remove no Google Drive e Google Sheets
-      try {
+        fetch(`/api/leads/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
         await deleteLeadFromDrive(id, targetEmail, targetPhone);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.leads = (rootDb.leads || []).filter((l: any) => {
+        cloudStore.mutate((draft) => {
+          draft.leads = (draft.leads || []).filter((l: any) => {
             if (l.id === id) return false;
             if (targetEmail && l.email && l.email.trim().toLowerCase() === targetEmail) return false;
             if (targetPhone && targetPhone.length >= 8 && l.whatsapp && l.whatsapp.replace(/\D/g, "") === targetPhone) return false;
             return true;
           });
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        }, { immediate: true });
       } catch (driveErr) {
-        console.warn("Aviso ao remover lead no Google Drive:", driveErr);
-      }
-
-      // 4. Remove do LocalStorage
-      if (typeof window !== "undefined") {
-        try {
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          if (rawLoc) {
-            const curLoc = JSON.parse(rawLoc);
-            if (Array.isArray(curLoc)) {
-              localStorage.setItem("comet_local_leads", JSON.stringify(curLoc.filter((l: any) => l.id !== id)));
-            }
-          }
-        } catch {}
+        console.warn("Aviso ao remover lead na nuvem:", driveErr);
       }
 
       invalidate('leads');
     },
 
     bulkDeleteLeads: async (ids: string[]) => { 
-      // 1. Atualização do cache
+      const idSet = new Set(ids);
       queryClient.setQueryData(['leads'], (old: any) => {
         if (!Array.isArray(old)) return old;
-        const idSet = new Set(ids);
         return old.filter((l: any) => !idSet.has(l.id));
       });
 
-      // 2. Deleta no Google Drive & Sheets
       try {
         await deleteLeadFromDrive(ids);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          const idSet = new Set(ids);
-          rootDb.leads = (rootDb.leads || []).filter((l: any) => !idSet.has(l.id));
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.leads = (draft.leads || []).filter((l: any) => !idSet.has(l.id));
+        }, { immediate: true });
       } catch (driveErr) {
-        console.warn("Aviso ao deletar leads em massa no Google Drive:", driveErr);
-      }
-
-      // 3. Remove do LocalStorage
-      if (typeof window !== "undefined") {
-        try {
-          const idSet = new Set(ids);
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          if (rawLoc) {
-            const curLoc = JSON.parse(rawLoc);
-            if (Array.isArray(curLoc)) {
-              localStorage.setItem("comet_local_leads", JSON.stringify(curLoc.filter((l: any) => !idSet.has(l.id))));
-            }
-          }
-        } catch {}
+        console.warn("Aviso ao deletar leads em massa na nuvem:", driveErr);
       }
 
       toast.success("Leads excluídos com sucesso.");
@@ -2734,13 +2339,9 @@ export function useData() {
       });
 
       try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.leads = (rootDb.leads || []).map((l: any) => idSet.has(l.id) ? { ...l, classification: status } : l);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.leads = (draft.leads || []).map((l: any) => idSet.has(l.id) ? { ...l, classification: status } : l);
+        }, { immediate: true });
       } catch {}
 
       toast.success("Status atualizado com sucesso!");
@@ -2767,19 +2368,9 @@ export function useData() {
       };
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_tasks");
-          const current = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_tasks", JSON.stringify([newTask, ...current]));
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.tasks = [newTask, ...(rootDb.tasks || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.tasks = [newTask, ...(draft.tasks || []).filter((x: any) => x.id !== newTask.id)];
+        }, { immediate: true });
       } catch (err: any) {
         console.warn("Aviso ao salvar tarefa:", err);
       }
@@ -2796,23 +2387,9 @@ export function useData() {
       });
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_tasks");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_tasks", JSON.stringify(list.map((task: any) => task.id === id ? { ...task, ...t } : task)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.tasks = (rootDb.tasks || []).map((task: any) => task.id === id ? { ...task, ...t } : task);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.tasks = (draft.tasks || []).map((task: any) => task.id === id ? { ...task, ...t } : task);
+        }, { immediate: true });
       } catch (err) {
         console.warn("Aviso ao atualizar tarefa:", err);
       }
@@ -2828,15 +2405,9 @@ export function useData() {
 
       try {
         await deleteTaskFromDrive(id);
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_tasks");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_tasks", JSON.stringify(list.filter((task: any) => task.id !== id)));
-            }
-          }
-        }
+        cloudStore.mutate((draft) => {
+          draft.tasks = (draft.tasks || []).filter((task: any) => task.id !== id);
+        }, { immediate: true });
       } catch {}
       invalidate('tasks');
     },
@@ -2857,23 +2428,9 @@ export function useData() {
         });
 
         try {
-          if (typeof window !== "undefined") {
-            const raw = localStorage.getItem("comet_local_tasks");
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list)) {
-                localStorage.setItem("comet_local_tasks", JSON.stringify(list.map((t: any) => t.id === id ? { ...t, ...updates } : t)));
-              }
-            }
-          }
-
-          const driveCfg = getDriveConfig();
-          if (driveCfg.webappUrl) {
-            const rootDb = getLocalDatabaseRoot<any>() || {};
-            rootDb.tasks = (rootDb.tasks || []).map((t: any) => t.id === id ? { ...t, ...updates } : t);
-            saveLocalDatabaseRoot(rootDb);
-            pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-          }
+          cloudStore.mutate((draft) => {
+            draft.tasks = (draft.tasks || []).map((t: any) => t.id === id ? { ...t, ...updates } : t);
+          }, { immediate: true });
         } catch {}
 
         invalidate('tasks');
@@ -2884,20 +2441,6 @@ export function useData() {
     addUser: async (u: any) => {
       const id = u.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `user_${Date.now()}`);
       
-      if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
-        try {
-          const map = getStoredUserCustomPerms();
-          map[id] = {
-            enabled: Boolean(u.customPermissionsEnabled),
-            modules: Array.isArray(u.allowedModules) ? u.allowedModules : []
-          };
-          if (u.email) {
-            map[u.email.toLowerCase()] = map[id];
-          }
-          localStorage.setItem("comet_user_module_permissions", JSON.stringify(map));
-        } catch {}
-      }
-
       const fullUser = {
         id,
         name: u.name || "Usuário",
@@ -2913,14 +2456,19 @@ export function useData() {
       };
 
       try {
-        saveRegisteredUser(fullUser);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.users = [fullUser, ...(rootDb.users || []).filter((x: any) => x.id !== id)];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
+          cloudStore.mutate((draft) => {
+            const nextMap = { ...(draft.userModulePermissions || {}) };
+            const permEntry = {
+              enabled: Boolean(u.customPermissionsEnabled),
+              modules: Array.isArray(u.allowedModules) ? u.allowedModules : []
+            };
+            nextMap[id] = permEntry;
+            if (u.email) nextMap[u.email.toLowerCase()] = permEntry;
+            draft.userModulePermissions = nextMap;
+          });
         }
+        saveRegisteredUser(fullUser);
       } catch (e) {
         console.warn("Aviso ao cadastrar usuário:", e);
       }
@@ -2929,32 +2477,23 @@ export function useData() {
     },
 
     updateUser: async (id: string, u: any) => { 
-      if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
-        try {
-          const map = getStoredUserCustomPerms();
-          map[id] = {
-            enabled: Boolean(u.customPermissionsEnabled),
-            modules: Array.isArray(u.allowedModules) ? u.allowedModules : []
-          };
-          if (u.email) {
-            map[u.email.toLowerCase()] = map[id];
-          }
-          localStorage.setItem("comet_user_module_permissions", JSON.stringify(map));
-        } catch {}
-      }
-
       try {
+        if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
+          cloudStore.mutate((draft) => {
+            const nextMap = { ...(draft.userModulePermissions || {}) };
+            const permEntry = {
+              enabled: Boolean(u.customPermissionsEnabled),
+              modules: Array.isArray(u.allowedModules) ? u.allowedModules : []
+            };
+            nextMap[id] = permEntry;
+            if (u.email) nextMap[u.email.toLowerCase()] = permEntry;
+            draft.userModulePermissions = nextMap;
+          });
+        }
+
         const localUsers = getRegisteredUsers();
         const updated = localUsers.map(user => user.id === id ? { ...user, ...u } : user);
         saveRegisteredUsers(updated);
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.users = updated;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
       } catch (err) {
         console.warn("Erro ao atualizar usuário:", err);
       }
@@ -2964,7 +2503,6 @@ export function useData() {
     deleteUser: async (id: string) => { 
       const targetUser = users.find(u => u.id === id);
 
-      // Proteção rígida do Admin Titular (Tiago Rezeck)
       if (
         targetUser && 
         (targetUser.email?.toLowerCase() === "tiagorezeck@hotmail.com" || 
@@ -2979,18 +2517,6 @@ export function useData() {
         removeRegisteredUser(id);
         if (targetUser?.email) {
           removeRegisteredUser(targetUser.email);
-        }
-      } catch {}
-
-      // Sincroniza lista atualizada no Google Drive / Sheets
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const remainingUsers = users.filter(u => u.id !== id);
-          const rootDb = getLocalDatabaseRoot() || {};
-          rootDb.users = remainingUsers;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
         }
       } catch {}
 
@@ -3009,19 +2535,9 @@ export function useData() {
       };
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_products");
-          const current = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_products", JSON.stringify([newProduct, ...current]));
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.products = [newProduct, ...(rootDb.products || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.products = [newProduct, ...(draft.products || []).filter((x: any) => x.id !== newProduct.id)];
+        }, { immediate: true });
       } catch (err: any) {
         console.warn("Aviso ao cadastrar produto:", err);
       }
@@ -3038,23 +2554,9 @@ export function useData() {
       });
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_products");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_products", JSON.stringify(list.map((prod: any) => prod.id === id ? { ...prod, ...p } : prod)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.products = (rootDb.products || []).map((prod: any) => prod.id === id ? { ...prod, ...p } : prod);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.products = (draft.products || []).map((prod: any) => prod.id === id ? { ...prod, ...p } : prod);
+        }, { immediate: true });
       } catch (err) {
         console.warn("Aviso ao atualizar produto:", err);
       }
@@ -3071,15 +2573,9 @@ export function useData() {
 
       try {
         await deleteProductFromDrive(id);
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_products");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_products", JSON.stringify(list.filter((prod: any) => prod.id !== id)));
-            }
-          }
-        }
+        cloudStore.mutate((draft) => {
+          draft.products = (draft.products || []).filter((prod: any) => prod.id !== id);
+        }, { immediate: true });
       } catch {}
 
       toast.success("Produto removido com sucesso.");
@@ -3101,19 +2597,9 @@ export function useData() {
       };
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_playbooks");
-          const current = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_playbooks", JSON.stringify([newPlaybook, ...current]));
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.playbooks = [newPlaybook, ...(rootDb.playbooks || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.playbooks = [newPlaybook, ...(draft.playbooks || []).filter((x: any) => x.id !== newPlaybook.id)];
+        }, { immediate: true });
       } catch (err: any) {
         console.warn("Aviso ao criar playbook:", err);
       }
@@ -3130,23 +2616,9 @@ export function useData() {
       });
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_playbooks");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_playbooks", JSON.stringify(list.map((pb: any) => pb.id === id ? { ...pb, ...p, updatedAt: new Date().toISOString() } : pb)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.playbooks = (rootDb.playbooks || []).map((pb: any) => pb.id === id ? { ...pb, ...p, updatedAt: new Date().toISOString() } : pb);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.playbooks = (draft.playbooks || []).map((pb: any) => pb.id === id ? { ...pb, ...p, updatedAt: new Date().toISOString() } : pb);
+        }, { immediate: true });
       } catch (err) {
         console.warn("Aviso ao atualizar playbook:", err);
       }
@@ -3162,23 +2634,9 @@ export function useData() {
       });
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_playbooks");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_playbooks", JSON.stringify(list.filter((pb: any) => pb.id !== id)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.playbooks = (rootDb.playbooks || []).filter((pb: any) => pb.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.playbooks = (draft.playbooks || []).filter((pb: any) => pb.id !== id);
+        }, { immediate: true });
       } catch {}
 
       toast.success("Playbook excluído com sucesso!");
@@ -3195,19 +2653,9 @@ export function useData() {
       };
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_objections");
-          const current = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_objections", JSON.stringify([newObjection, ...current]));
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.objections = [newObjection, ...(rootDb.objections || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.objections = [newObjection, ...(draft.objections || []).filter((x: any) => x.id !== newObjection.id)];
+        }, { immediate: true });
       } catch (err: any) {
         console.warn("Aviso ao criar objeção:", err);
       }
@@ -3224,23 +2672,9 @@ export function useData() {
       });
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_objections");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_objections", JSON.stringify(list.map((obj: any) => obj.id === id ? { ...obj, ...o } : obj)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.objections = (rootDb.objections || []).map((obj: any) => obj.id === id ? { ...obj, ...o } : obj);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.objections = (draft.objections || []).map((obj: any) => obj.id === id ? { ...obj, ...o } : obj);
+        }, { immediate: true });
       } catch (err) {
         console.warn("Aviso ao atualizar objeção:", err);
       }
@@ -3256,23 +2690,9 @@ export function useData() {
       });
 
       try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_objections");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_objections", JSON.stringify(list.filter((obj: any) => obj.id !== id)));
-            }
-          }
-        }
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.objections = (rootDb.objections || []).filter((obj: any) => obj.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        cloudStore.mutate((draft) => {
+          draft.objections = (draft.objections || []).filter((obj: any) => obj.id !== id);
+        }, { immediate: true });
       } catch {}
 
       toast.success("Objeção removida!");
@@ -3287,6 +2707,7 @@ export function useData() {
         return v.toString(16);
       });
       const generatedId = isUUID(lp.id) ? lp.id : (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : fallbackUuid);
+      const heroModel = lp.hero?.model || lp.heroModel || lp.model || "split_image";
       const item: LandingPage = {
         name: lp.name || lp.title || "Nova Landing Page",
         title: lp.title || lp.name || "Nova Landing Page",
@@ -3299,41 +2720,33 @@ export function useData() {
         created_at: lp.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
         ...lp,
+        heroModel,
+        hero: lp.hero ? { ...lp.hero, model: heroModel } : undefined,
         id: generatedId,
       };
 
-      // Ensure the generated UUID is set on the item
       item.id = generatedId;
       item.originalId = generatedId;
       if (item.config) {
         item.config.client_id = generatedId;
         item.config.id = generatedId;
         item.config.originalId = generatedId;
+        item.config.heroModel = heroModel;
       }
 
-      // Se o ID ou slug estava na lista de deletados, remove da lista
       if (item.id) removeDeletedLandingPageId(item.id);
       if (item.slug) removeDeletedLandingPageId(item.slug);
 
-      // 1. Salva imediatamente no localStorage para garantir que NUNCA seja perdida
-      try {
-        const localList = getLocalLandingPages();
-        const nextLocals = [item, ...localList.filter(p => p.id !== item.id && p.slug !== item.slug)];
-        saveLocalLandingPages(nextLocals);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("active_preview_page", JSON.stringify(item));
-        }
-      } catch (lsErr) {
-        console.warn("Aviso ao salvar localmente:", lsErr);
-      }
+      cloudStore.mutate((draft) => {
+        draft.landingPages = [item, ...(draft.landingPages || []).filter((p: any) => p.id !== item.id && p.slug !== item.slug)];
+        draft.activePreviewPage = item;
+      }, { immediate: true });
 
-      // 2. Atualização imediata no cache do React Query
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         return [item, ...list.filter(p => p.id !== item.id && p.slug !== item.slug)];
       });
 
-      // 3. Salva no banco de dados persistente do servidor e no preview store
       try {
         await Promise.allSettled([
           fetch('/api/landing-pages', {
@@ -3351,47 +2764,60 @@ export function useData() {
         console.warn("Erro ao chamar API de landing pages:", netErr);
       }
 
-      // 4. Sincroniza com Google Drive se configurado
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.landingPages = [item, ...(rootDb.landingPages || []).filter((p: any) => p.id !== item.id && p.slug !== item.slug)];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch (err: any) {
-        console.warn("Aviso ao sincronizar LP com Google Drive:", err);
-      }
-
       invalidate('landing_pages');
       notifyRealtimeSync();
       return item;
     },
 
-    updateLandingPage: async (id: string, lp: any) => { 
-      removeDeletedLandingPageId(id);
-      if (lp.slug) removeDeletedLandingPageId(lp.slug);
+    updateLandingPage: async (id: string | any, lp?: any) => { 
+      let targetObj = lp;
+      let targetIdStr = typeof id === "string" ? id : "";
+      if (typeof id === "object" && id !== null) {
+        targetObj = id;
+        targetIdStr = id.id || id.client_id || id.originalId || "";
+      } else if (!targetObj) {
+        targetObj = {};
+      }
+
+      const cleanId = targetIdStr || targetObj.id || "";
+      if (cleanId) removeDeletedLandingPageId(cleanId);
+      if (targetObj.slug) removeDeletedLandingPageId(targetObj.slug);
       
       const currentCache = queryClient.getQueryData<LandingPage[]>(['landing_pages']) || [];
-      const localList = getLocalLandingPages();
-      const existing = currentCache.find(p => p.id === id || (p as any).originalId === id || p.slug === id) ||
-                       localList.find(p => p.id === id || (p as any).originalId === id || p.slug === id) ||
-                       getInitialAILandingPages().find(p => p.id === id || p.slug === id);
-      const targetId = existing?.id || id;
+      const cloudList = getLocalLandingPages();
+      const existing = currentCache.find(p => p.id === cleanId || (p as any).originalId === cleanId || (targetObj.slug && p.slug === targetObj.slug)) ||
+                       cloudList.find(p => p.id === cleanId || (p as any).originalId === cleanId || (targetObj.slug && p.slug === targetObj.slug)) ||
+                       getInitialAILandingPages().find(p => p.id === cleanId || (targetObj.slug && p.slug === targetObj.slug));
+      const targetId = existing?.id || cleanId;
       
       const prevStatus = existing?.status;
-      const nextStatus = lp.status;
+      const nextStatus = targetObj.status;
       const isExitingTestMode = prevStatus === "Teste" && (nextStatus === "Ativa" || nextStatus === "Pausada");
+
+      const heroModel = targetObj.hero?.model || targetObj.heroModel || targetObj.model || (existing as any)?.hero?.model || (existing as any)?.heroModel || "split_image";
+      const mergedHero = (targetObj.hero || (existing as any)?.hero) ? {
+        ...((existing as any)?.hero || {}),
+        ...(targetObj.hero || {}),
+        model: heroModel,
+      } : undefined;
 
       let updatedItem: LandingPage = {
         ...(existing || {}),
-        ...lp,
+        ...targetObj,
         id: targetId,
+        heroModel,
+        hero: mergedHero || targetObj.hero || (existing as any)?.hero,
         updated_at: new Date().toISOString()
       };
 
-      // Se saiu do status "Teste" para "Ativa" ou "Pausada", zera contadores e apaga leads fake de teste
+      if (updatedItem.config) {
+        updatedItem.config = {
+          ...updatedItem.config,
+          heroModel,
+          hero: updatedItem.hero || updatedItem.config.hero,
+        };
+      }
+
       if (isExitingTestMode) {
         updatedItem = {
           ...updatedItem,
@@ -3427,33 +2853,15 @@ export function useData() {
           return false;
         };
 
-        // 1. Limpa leads do cache local do React Query
         queryClient.setQueryData(['leads'], (old: Lead[] | undefined) => {
           if (!Array.isArray(old)) return [];
           return old.filter(l => !isLeadFromThisLP(l));
         });
 
-        // 2. Limpa leads do localStorage
-        if (typeof window !== "undefined") {
-          try {
-            const cleanLeadStorage = (key: string) => {
-              const raw = localStorage.getItem(key);
-              if (raw) {
-                const list = JSON.parse(raw);
-                if (Array.isArray(list)) {
-                  localStorage.setItem(key, JSON.stringify(list.filter(l => !isLeadFromThisLP(l))));
-                }
-              }
-            };
-            cleanLeadStorage("comet_local_leads");
-            cleanLeadStorage("comet_inbound_leads_queue");
-            cleanLeadStorage("people_cro_leads_v1");
-          } catch (cleanLsErr) {
-            console.warn("Aviso ao limpar leads de teste do localStorage:", cleanLsErr);
-          }
-        }
+        cloudStore.mutate((draft) => {
+          draft.leads = (draft.leads || []).filter(l => !isLeadFromThisLP(l));
+        });
 
-        // 3. Remove leads do servidor Express associados a esta LP
         try {
           await fetch(`/api/landing-pages/${encodeURIComponent(targetId)}/clear-test-leads`, {
             method: "POST",
@@ -3462,7 +2870,6 @@ export function useData() {
           }).catch(() => {});
         } catch {}
 
-        // 4. Limpa e zera contadores nas Planilhas e JSON do Google Drive
         try {
           clearLpTestDataInDrive(targetId, targetTitle);
         } catch (gasErr) {
@@ -3473,19 +2880,15 @@ export function useData() {
         invalidate('leads');
       }
 
-      // 1. Atualiza no localStorage
-      try {
-        const nextLocals = localList.map(p => (p.id === targetId || (p as any).originalId === targetId) ? updatedItem : p);
-        if (!nextLocals.some(p => p.id === targetId)) nextLocals.unshift(updatedItem);
-        saveLocalLandingPages(nextLocals);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("active_preview_page", JSON.stringify(updatedItem));
-        }
-      } catch (lsErr) {
-        console.warn("Aviso ao atualizar localmente:", lsErr);
-      }
+      cloudStore.mutate((draft) => {
+        const list = Array.isArray(draft.landingPages) ? draft.landingPages : [];
+        const exists = list.some((p: any) => p.id === targetId || p.originalId === targetId || (updatedItem.slug && p.slug === updatedItem.slug));
+        draft.landingPages = exists
+          ? list.map((p: any) => (p.id === targetId || p.originalId === targetId || (updatedItem.slug && p.slug === updatedItem.slug)) ? updatedItem : p)
+          : [updatedItem, ...list];
+        draft.activePreviewPage = updatedItem;
+      }, { immediate: true });
 
-      // 2. Atualiza no cache do React Query
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         const found = list.some(p => p.id === targetId || (p as any).originalId === targetId);
@@ -3495,7 +2898,6 @@ export function useData() {
         return list.map(p => (p.id === targetId || (p as any).originalId === targetId) ? updatedItem : p);
       });
 
-      // 3. Atualiza no servidor API e preview store
       try {
         await Promise.allSettled([
           fetch(`/api/landing-pages/${encodeURIComponent(targetId)}`, {
@@ -3510,19 +2912,6 @@ export function useData() {
           }),
         ]);
       } catch {}
-
-      // 4. Sincroniza com Google Drive se configurado
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.landingPages = (rootDb.landingPages || []).map((p: any) => (p.id === targetId || p.slug === targetId) ? updatedItem : p);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch (err: any) {
-        console.warn("Aviso ao atualizar LP no Google Drive:", err);
-      }
 
       invalidate('landing_pages');
       notifyRealtimeSync();
@@ -3545,33 +2934,18 @@ export function useData() {
 
       const isTarget = (p: any) => p && (idsToMark.has(p.id) || (p.slug && idsToMark.has(p.slug)));
 
-      if (typeof window !== "undefined") {
-        try {
-          const activePrev = localStorage.getItem("active_preview_page");
-          if (activePrev) {
-            const parsed = JSON.parse(activePrev);
-            if (isTarget(parsed)) {
-              localStorage.removeItem("active_preview_page");
-            }
-          }
-        } catch {}
-      }
+      cloudStore.mutate((draft) => {
+        draft.landingPages = (draft.landingPages || []).filter((p: any) => !isTarget(p));
+        if (draft.activePreviewPage && isTarget(draft.activePreviewPage)) {
+          draft.activePreviewPage = null;
+        }
+      }, { immediate: true });
 
-      // 1. Remove do localStorage
-      let updatedLocalList: LandingPage[] = [];
-      try {
-        const localList = getLocalLandingPages();
-        updatedLocalList = localList.filter(p => !isTarget(p));
-        saveLocalLandingPages(updatedLocalList);
-      } catch {}
-
-      // 2. Atualiza cache do React Query
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         return list.filter(p => !isTarget(p));
       });
 
-      // 3. Remove da API do servidor Express
       try {
         fetch(`/api/landing-pages/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
         if (target?.id && target.id !== id) {
@@ -3579,19 +2953,10 @@ export function useData() {
         }
       } catch {}
 
-      // 4. Exclui permanentemente no Google Drive & Google Sheets
       try {
         const targetTitle = target?.title || target?.name || "";
         const targetSlug = target?.slug || "";
         await deleteLandingPageFromDrive(Array.from(idsToMark), targetSlug, targetTitle);
-
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.landingPages = (rootDb.landingPages || []).filter((p: any) => !isTarget(p));
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
       } catch (driveErr) {
         console.warn("Aviso ao remover LP do Google Drive:", driveErr);
       }
@@ -3615,43 +2980,29 @@ export function useData() {
       }
 
       const idsSet = new Set(ids);
-      // 1. Remove do localStorage
-      try {
-        const localList = getLocalLandingPages();
-        saveLocalLandingPages(localList.filter(p => !idsSet.has(p.id) && !idsSet.has(p.slug || "")));
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.landingPages = (draft.landingPages || []).filter((p: any) => !idsSet.has(p.id) && !idsSet.has(p.slug || ""));
+      }, { immediate: true });
 
-      // 2. Atualiza cache
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         return list.filter(p => !idsSet.has(p.id) && !idsSet.has((p as any).originalId || "") && !idsSet.has(p.slug || ""));
       });
 
-      // 3. Remove do servidor API
       try {
         fetch('/api/landing-pages/bulk-delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ids }),
         }).catch(() => {});
-      } catch {}
-
-      // 4. Remove no Google Drive e Google Sheets
-      try {
         await deleteLandingPageFromDrive(ids);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.landingPages = (rootDb.landingPages || []).filter((p: any) => !idsSet.has(p.id) && !idsSet.has(p.slug || ""));
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
       } catch (driveErr) {
         console.warn("Aviso ao remover LPs em massa no Google Drive:", driveErr);
       }
 
       toast.success("Landing Pages selecionadas foram excluídas.");
       invalidate('landing_pages');
+      notifyRealtimeSync();
     },
 
     cleanDatabaseKeepOne: async () => {
@@ -3669,39 +3020,26 @@ export function useData() {
         addDeletedLandingPageId(id);
       }
 
-      // 1. Atualiza no localStorage
-      try {
-        saveLocalLandingPages([toKeep]);
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.landingPages = [toKeep];
+      }, { immediate: true });
 
-      // 2. Atualiza cache
       queryClient.setQueryData(['landing_pages'], [toKeep]);
 
-      // 3. Limpa servidor
       try {
         fetch('/api/landing-pages/clean-keep-one', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ keepId: toKeep.id }),
         }).catch(() => {});
-      } catch {}
-
-      // 4. Limpa no Google Drive e Google Sheets
-      try {
         await cleanDatabaseKeepOneInDrive(toKeep.id);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.landingPages = [toKeep];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
       } catch (driveErr) {
         console.warn("Aviso ao limpar banco no Google Drive:", driveErr);
       }
 
       toast.success("Banco de dados limpo! Apenas 1 Landing Page foi mantida.");
       invalidate('landing_pages');
+      notifyRealtimeSync();
     },
 
     // SURVEYS
@@ -3729,21 +3067,9 @@ export function useData() {
         created_at: new Date().toISOString()
       };
 
-      const current = getLocalSurveys();
-      const updated = [newSurvey, ...current.filter(x => x.id !== newSurvey.id)];
-      saveLocalSurveys(updated);
-
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.surveys = [newSurvey, ...(rootDb.surveys || []).filter((x: any) => x.id !== newSurvey.id)];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch (err) {
-        console.warn("Aviso ao salvar pesquisa no Google Drive:", err);
-      }
+      cloudStore.mutate((draft) => {
+        draft.surveys = [newSurvey, ...(draft.surveys || []).filter((x: any) => x.id !== newSurvey.id)];
+      }, { immediate: true });
 
       invalidate('surveys');
       return newSurvey;
@@ -3761,20 +3087,13 @@ export function useData() {
         updated_at: new Date().toISOString()
       };
 
-      const updatedList = [updatedSurvey, ...current.filter(x => x.id !== id)];
-      saveLocalSurveys(updatedList);
-
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.surveys = (rootDb.surveys || []).map((x: any) => x.id === id ? updatedSurvey : x);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch (err) {
-        console.warn("Aviso ao atualizar pesquisa no Google Drive:", err);
-      }
+      cloudStore.mutate((draft) => {
+        const list = Array.isArray(draft.surveys) ? draft.surveys : [];
+        const exists = list.some((x: any) => x.id === id);
+        draft.surveys = exists
+          ? list.map((x: any) => x.id === id ? updatedSurvey : x)
+          : [updatedSurvey, ...list];
+      }, { immediate: true });
 
       invalidate('surveys');
       return updatedSurvey;
@@ -3783,21 +3102,12 @@ export function useData() {
     deleteSurvey: async (id: string) => { 
       const current = getLocalSurveys();
       const targetSurvey = current.find(x => x.id === id);
-      saveLocalSurveys(current.filter(x => x.id !== id));
+      cloudStore.mutate((draft) => {
+        draft.surveys = (draft.surveys || []).filter((x: any) => x.id !== id);
+      }, { immediate: true });
       try {
         await deleteSurveyFromDrive(id, targetSurvey?.name);
       } catch {}
-      
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.surveys = (rootDb.surveys || []).filter((x: any) => x.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
-
       invalidate('surveys');
     },
 
@@ -3825,31 +3135,38 @@ export function useData() {
         minClassification: extraPayload?.minClassification
       };
 
-      const localList = getLocalSurveyResponses();
-      saveLocalSurveyResponses([newResponse, ...localList]);
-
-      try {
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.surveyResponses = [newResponse, ...(rootDb.surveyResponses || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch (err) {
-        console.warn("Aviso ao salvar resposta da pesquisa no Google Drive:", err);
-      }
+      cloudStore.mutate((draft) => {
+        draft.surveyResponses = [newResponse, ...(draft.surveyResponses || [])];
+      }, { immediate: true });
 
       invalidate('survey_responses');
       return newResponse;
     },
 
-    // PIPELINES
-    addPipeline: async (name: string) => { 
-      const newPipe = {
-        id: `pipe_${Date.now()}`,
-        name,
-        color: "#4F46E5",
+    // PIPELINES & GESTÃO KANBAN
+    addPipeline: async (nameOrData: string | Partial<Pipeline>) => { 
+      const pipeData = typeof nameOrData === "string" ? { name: nameOrData } : nameOrData;
+      const pipeId = pipeData.id || `pipe_${Date.now()}`;
+      const defaultStages: PipelineStage[] = [
+        { id: `stg_${Date.now()}_1`, name: "Novo Lead", order: 1, type: "NORMAL", color: "default", slaHours: 24, active: true },
+        { id: `stg_${Date.now()}_2`, name: "Contato Realizado", order: 2, type: "NORMAL", color: "info", slaHours: 24, active: true },
+        { id: `stg_${Date.now()}_3`, name: "Qualificação", order: 3, type: "NORMAL", color: "warning", slaHours: 48, active: true },
+        { id: `stg_${Date.now()}_4`, name: "Proposta", order: 4, type: "NORMAL", color: "purple", slaHours: 48, active: true },
+        { id: `stg_${Date.now()}_5`, name: "Ganho", order: 5, type: "GANHO", color: "success", active: true },
+        { id: `stg_${Date.now()}_6`, name: "Perdido", order: 6, type: "PERDIDO", color: "destructive", active: true },
+        { id: `stg_${Date.now()}_7`, name: "Stand By", order: 7, type: "STAND_BY", color: "amber", active: true }
+      ];
+
+      const newPipe: Pipeline = {
+        id: pipeId,
+        name: pipeData.name || "Novo Pipeline",
+        code: pipeData.code || (pipeData.name || "NOVO").toUpperCase().replace(/[^A-Z0-9]/g, "_").substring(0, 10),
+        functionRole: pipeData.functionRole || "Seller",
+        description: pipeData.description || "",
+        color: pipeData.color || "primary",
+        active: pipeData.active !== undefined ? pipeData.active : true,
+        order: (pipelines.length || 0) + 1,
+        stages: Array.isArray(pipeData.stages) && pipeData.stages.length > 0 ? pipeData.stages : defaultStages,
         is_default: false,
         created_at: new Date().toISOString()
       };
@@ -3859,49 +3176,99 @@ export function useData() {
         return [...list, newPipe];
       });
 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_pipelines");
-          const list = raw ? JSON.parse(raw) : DEFAULT_PIPELINES;
-          localStorage.setItem("comet_local_pipelines", JSON.stringify([...list, newPipe]));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.pipelines = [...(rootDb.pipelines || DEFAULT_PIPELINES), newPipe];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        const baseList = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
+        draft.pipelines = [...baseList, newPipe];
+      }, { immediate: true });
 
-      toast.success("Pipeline criado com sucesso!");
+      toast.success(`Pipeline "${newPipe.name}" criado com sucesso!`);
       invalidate('pipelines');
       return [newPipe];
     },
 
-    updatePipeline: async (id: string, u: any) => { 
+    updatePipeline: async (id: string, u: Partial<Pipeline>) => { 
       queryClient.setQueryData(['pipelines'], (old: any) => {
         if (!Array.isArray(old)) return old;
         return old.map((p: any) => p.id === id ? { ...p, ...u } : p);
       });
 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_pipelines");
-          const list = raw ? JSON.parse(raw) : DEFAULT_PIPELINES;
-          localStorage.setItem("comet_local_pipelines", JSON.stringify(list.map((p: any) => p.id === id ? { ...p, ...u } : p)));
+      cloudStore.mutate((draft) => {
+        const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
+        const pipes = baseList.map((p: any) => p.id === id ? { ...p, ...u } : p);
+        if (!pipes.some((p: any) => p.id === id)) {
+          const defPipe = DEFAULT_PIPELINES.find(d => d.id === id);
+          if (defPipe) pipes.push({ ...defPipe, ...u });
         }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.pipelines = (rootDb.pipelines || DEFAULT_PIPELINES).map((p: any) => p.id === id ? { ...p, ...u } : p);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+        draft.pipelines = pipes;
+      }, { immediate: true });
 
       toast.success("Pipeline atualizado com sucesso!");
       invalidate('pipelines');
+    },
+
+    savePipelineStages: async (pipelineId: string, stages: PipelineStage[]) => {
+      const updatedStages = stages.map((s, idx) => ({ ...s, order: idx + 1 }));
+      queryClient.setQueryData(['pipelines'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
+      });
+
+      cloudStore.mutate((draft) => {
+        const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
+        const pipes = baseList.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
+        if (!pipes.some((p: any) => p.id === pipelineId)) {
+          const defPipe = DEFAULT_PIPELINES.find(d => d.id === pipelineId);
+          if (defPipe) pipes.push({ ...defPipe, stages: updatedStages });
+        }
+        draft.pipelines = pipes;
+      }, { immediate: true });
+
+      toast.success("Etapas do pipeline atualizadas!");
+      invalidate('pipelines');
+    },
+
+    deletePipelineStage: async (pipelineId: string, stageName: string, fallbackStageName?: string) => {
+      if (fallbackStageName && fallbackStageName !== stageName) {
+        const leadsToMigrate = leads.filter(l => (l.pipelineId === pipelineId || (!l.pipelineId && pipelineId === "prospection")) && l.stage === stageName);
+        if (leadsToMigrate.length > 0) {
+          queryClient.setQueryData(['leads'], (old: any) => {
+            if (!Array.isArray(old)) return old;
+            return old.map((l: any) => {
+              if ((l.pipelineId === pipelineId || (!l.pipelineId && pipelineId === "prospection")) && l.stage === stageName) {
+                return { ...l, stage: fallbackStageName };
+              }
+              return l;
+            });
+          });
+        }
+      }
+
+      const currentPipe = pipelines.find(p => p.id === pipelineId);
+      if (currentPipe) {
+        const nextStages = currentPipe.stages.filter(s => s.name !== stageName);
+        const updatedStages = nextStages.map((s, idx) => ({ ...s, order: idx + 1 }));
+        queryClient.setQueryData(['pipelines'], (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
+        });
+
+        cloudStore.mutate((draft) => {
+          if (fallbackStageName && fallbackStageName !== stageName) {
+            draft.leads = (draft.leads || []).map((l: any) => {
+              if ((l.pipelineId === pipelineId || (!l.pipelineId && pipelineId === "prospection")) && l.stage === stageName) {
+                return { ...l, stage: fallbackStageName };
+              }
+              return l;
+            });
+          }
+          const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
+          draft.pipelines = baseList.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
+        }, { immediate: true });
+      }
+
+      toast.success(`Etapa "${stageName}" excluída do pipeline.`);
+      invalidate('pipelines');
+      invalidate('leads');
     },
 
     deletePipeline: async (id: string) => { 
@@ -3910,114 +3277,560 @@ export function useData() {
         return old.filter((p: any) => p.id !== id);
       });
 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_pipelines");
-          const list = raw ? JSON.parse(raw) : DEFAULT_PIPELINES;
-          localStorage.setItem("comet_local_pipelines", JSON.stringify(list.filter((p: any) => p.id !== id)));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.pipelines = (rootDb.pipelines || DEFAULT_PIPELINES).filter((p: any) => p.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
+        draft.pipelines = baseList.filter((p: any) => p.id !== id);
+      }, { immediate: true });
 
       toast.success("Pipeline removido com sucesso!");
       invalidate('pipelines');
     },
 
-    // PERMISSIONS & CONFIGS
+    // TRANSFERÊNCIAS DE LEADS E CARTEIRAS (ZERO-LOCALSTORAGE CLOUD ENGINE)
+    transferLead: async (
+      leadId: string, 
+      targetPipelineId: string, 
+      targetStage: string, 
+      targetOwner?: string, 
+      note?: string
+    ) => {
+      const targetLead = leads.find(l => l.id === leadId);
+      if (!targetLead) {
+        toast.error("Lead não encontrado para transferência.");
+        return;
+      }
+
+      const sourcePipe = pipelines.find(p => p.id === (targetLead.pipelineId || "prospection")) || pipelines[0];
+      const destPipe = pipelines.find(p => p.id === targetPipelineId) || sourcePipe;
+      const prevOwner = targetLead.owner || "Sem responsável";
+      const newOwner = targetOwner || prevOwner;
+      const prevStage = targetLead.stage;
+      const nowIso = new Date().toISOString();
+
+      const transferActivity: Activity = {
+        id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        type: 'pipeline_transfer',
+        description: `Transferido de [${sourcePipe.name}] (${prevStage}) para [${destPipe.name}] (${targetStage}). Responsável: ${newOwner}.${note ? ` Obs: ${note}` : ''}`,
+        timestamp: nowIso,
+        user: currentUser?.name || "Usuário",
+        metadata: {
+          fromPipeline: sourcePipe.id,
+          toPipeline: destPipe.id,
+          fromStage: prevStage,
+          toStage: targetStage,
+          fromOwner: prevOwner,
+          toOwner: newOwner,
+          note
+        }
+      };
+
+      const histEntry: PipelineMovementHistory = {
+        id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        leadId,
+        leadName: targetLead.name || "Lead",
+        previousPipelineId: sourcePipe.id,
+        previousPipelineName: sourcePipe.name,
+        previousStage: prevStage,
+        newPipelineId: destPipe.id,
+        newPipelineName: destPipe.name,
+        newStage: targetStage,
+        previousOwner: prevOwner,
+        newOwner: newOwner,
+        movementType: 'PIPELINE_TRANSFER',
+        user: currentUser?.name || "Usuário",
+        timestamp: nowIso,
+        note: note || ""
+      };
+
+      const updatedLeadFields: Partial<Lead> = {
+        pipelineId: targetPipelineId,
+        stage: targetStage,
+        owner: newOwner,
+        previousPipelineId: sourcePipe.id,
+        previousStage: prevStage,
+        previousOwner: prevOwner,
+        dataMovimentacao: nowIso,
+        dataTransferencia: nowIso,
+        activities: [transferActivity, ...(targetLead.activities || [])]
+      };
+
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((l: any) => l.id === leadId ? { ...l, ...updatedLeadFields } : l);
+      });
+
+      queryClient.setQueryData(['pipeline_history'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [histEntry, ...list].slice(0, 1000);
+      });
+
+      cloudStore.mutate((draft) => {
+        draft.leads = (draft.leads || []).map((l: any) => l.id === leadId ? { ...l, ...updatedLeadFields } : l);
+        draft.historico_pipeline = [histEntry, ...(draft.historico_pipeline || [])].slice(0, 1000);
+      }, { immediate: true });
+
+      invalidate('leads');
+      invalidate('pipeline_history');
+      toast.success(`Lead transferido para ${destPipe.name} com sucesso!`);
+    },
+
+    claimLeadToPipeline: async (
+      leadId: string,
+      targetPipelineId: string,
+      targetStage: string,
+      targetOwner?: string,
+      note?: string
+    ) => {
+      const targetLead = leads.find(l => l.id === leadId);
+      if (!targetLead) {
+        toast.error("Lead não encontrado.");
+        return;
+      }
+
+      const eligibility = checkLeadClaimEligibility(targetLead, currentUser, pipelines);
+      if (!eligibility.canClaim && currentUser?.role !== "Admin Geral") {
+        toast.error(eligibility.reason);
+        throw new Error(eligibility.reason);
+      }
+
+      const activeUser = getCurrentUser();
+      const finalOwner = targetOwner || currentUser?.name || activeUser?.name || "Vendedor";
+      const customNote = note || `Lead puxado da base de leads por ${finalOwner}`;
+
+      const sourcePipe = pipelines.find(p => p.id === (targetLead.pipelineId || "prospection")) || pipelines[0];
+      const destPipe = pipelines.find(p => p.id === targetPipelineId) || sourcePipe;
+      const prevOwner = targetLead.owner || "Sem responsável";
+      const prevStage = targetLead.stage;
+      const nowIso = new Date().toISOString();
+
+      const transferActivity: Activity = {
+        id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        type: 'pipeline_transfer',
+        description: `Lead puxado da base para [${destPipe.name}] (${targetStage}). Responsável: ${finalOwner}.${note ? ` Obs: ${note}` : ''}`,
+        timestamp: nowIso,
+        user: currentUser?.name || activeUser?.name || "Usuário",
+        metadata: {
+          fromPipeline: sourcePipe.id,
+          toPipeline: destPipe.id,
+          fromStage: prevStage,
+          toStage: targetStage,
+          fromOwner: prevOwner,
+          toOwner: finalOwner,
+          action: 'CLAIM_LEAD',
+          note
+        }
+      };
+
+      const histEntry: PipelineMovementHistory = {
+        id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        leadId,
+        leadName: targetLead.name || "Lead",
+        previousPipelineId: sourcePipe.id,
+        newPipelineId: destPipe.id,
+        previousStage: prevStage,
+        newStage: targetStage,
+        previousOwner: prevOwner,
+        newOwner: finalOwner,
+        movementType: 'PIPELINE_TRANSFER',
+        user: currentUser?.name || activeUser?.name || "Usuário",
+        timestamp: nowIso,
+        note: customNote
+      };
+
+      const updatedLeadFields = {
+        pipelineId: destPipe.id,
+        stage: targetStage,
+        owner: finalOwner,
+        previousPipelineId: sourcePipe.id,
+        previousStage: prevStage,
+        previousOwner: prevOwner,
+        dataMovimentacao: nowIso,
+        dataTransferencia: nowIso,
+        activities: [transferActivity, ...(targetLead.activities || [])]
+      };
+
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((l: any) => l.id === leadId ? { ...l, ...updatedLeadFields } : l);
+      });
+
+      queryClient.setQueryData(['pipeline_history'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [histEntry, ...list].slice(0, 1000);
+      });
+
+      cloudStore.mutate((draft) => {
+        draft.leads = (draft.leads || []).map((l: any) => l.id === leadId ? { ...l, ...updatedLeadFields } : l);
+        draft.historico_pipeline = [histEntry, ...(draft.historico_pipeline || [])].slice(0, 1000);
+      }, { immediate: true });
+
+      invalidate('leads');
+      invalidate('pipeline_history');
+      toast.success(`Lead colocado no seu pipeline (${destPipe.name}) com sucesso!`);
+    },
+
+    transferMultipleLeads: async (
+      leadIds: string[],
+      targetPipelineId: string,
+      targetStage: string,
+      targetOwner?: string,
+      note?: string
+    ) => {
+      if (!leadIds || leadIds.length === 0) return;
+      const toastId = toast.loading(`Transferindo ${leadIds.length} leads em lote...`);
+      const nowIso = new Date().toISOString();
+      const destPipe = pipelines.find(p => p.id === targetPipelineId) || pipelines[0];
+      const historyEntries: PipelineMovementHistory[] = [];
+
+      const applyBatchUpdate = (list: any[]) =>
+        list.map((lead: any) => {
+          if (!leadIds.includes(lead.id)) return lead;
+
+          const sourcePipe = pipelines.find(p => p.id === (lead.pipelineId || "prospection")) || pipelines[0];
+          const prevOwner = lead.owner || "Sem responsável";
+          const newOwner = targetOwner || prevOwner;
+          const prevStage = lead.stage;
+
+          const hist: PipelineMovementHistory = {
+            id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            leadId: lead.id,
+            leadName: lead.name || "Lead",
+            previousPipelineId: sourcePipe.id,
+            previousPipelineName: sourcePipe.name,
+            previousStage: prevStage,
+            newPipelineId: destPipe.id,
+            newPipelineName: destPipe.name,
+            newStage: targetStage,
+            previousOwner: prevOwner,
+            newOwner: newOwner,
+            movementType: 'PIPELINE_TRANSFER',
+            user: currentUser?.name || "Usuário",
+            timestamp: nowIso,
+            note: note || "Transferência em lote"
+          };
+          if (!historyEntries.some(h => h.leadId === lead.id)) {
+            historyEntries.push(hist);
+          }
+
+          const act: Activity = {
+            id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            type: 'pipeline_transfer',
+            description: `Transferência em lote de [${sourcePipe.name}] para [${destPipe.name}] (${targetStage}).`,
+            timestamp: nowIso,
+            user: currentUser?.name || "Usuário"
+          };
+
+          return {
+            ...lead,
+            pipelineId: targetPipelineId,
+            stage: targetStage,
+            owner: newOwner,
+            previousPipelineId: sourcePipe.id,
+            previousStage: prevStage,
+            previousOwner: prevOwner,
+            dataMovimentacao: nowIso,
+            dataTransferencia: nowIso,
+            activities: [act, ...(lead.activities || [])]
+          };
+        });
+
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return applyBatchUpdate(old);
+      });
+
+      queryClient.setQueryData(['pipeline_history'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [...historyEntries, ...list].slice(0, 1000);
+      });
+
+      cloudStore.mutate((draft) => {
+        draft.leads = applyBatchUpdate(draft.leads || []);
+        draft.historico_pipeline = [...historyEntries, ...(draft.historico_pipeline || [])].slice(0, 1000);
+      }, { immediate: true });
+
+      invalidate('leads');
+      invalidate('pipeline_history');
+      toast.dismiss(toastId);
+      toast.success(`${leadIds.length} leads transferidos com sucesso!`);
+    },
+
+    distributeLeadsByRoutingConfig: async (
+      targetLeadIds?: string[],
+      customConfig?: Partial<LeadRoutingConfig>
+    ) => {
+      const activeConfig: LeadRoutingConfig = {
+        ...leadRoutingConfig,
+        ...(customConfig || {})
+      };
+
+      if (customConfig) {
+        await updateLeadRoutingConfig(activeConfig);
+      }
+
+      let leadsToProcess: Lead[] = [];
+      if (targetLeadIds && targetLeadIds.length > 0) {
+        leadsToProcess = leads.filter(l => targetLeadIds.includes(l.id));
+      } else {
+        leadsToProcess = leads.filter(l => {
+          const elig = checkLeadClaimEligibility(l, currentUser, pipelines);
+          const isUnassigned = !l.owner || l.owner === "Sem dono" || l.owner === "Sem responsável";
+          const isInitialStage = l.stage === "Novo Lead" || l.stage === "Leads" || l.stage === "Sem Contato";
+          return elig.canClaim && (isUnassigned || isInitialStage);
+        });
+      }
+
+      if (leadsToProcess.length === 0) {
+        toast.info("Nenhum lead elegível para distribuição encontrado.");
+        return { count: 0 };
+      }
+
+      const targetRole = activeConfig.targetRole || "LDR";
+      const tr = targetRole.toLowerCase();
+      let candidates = users.filter(u => {
+        const r = (u.role || "").toLowerCase();
+        if (r.includes(tr)) return true;
+        if (tr === "seller" && (r.includes("vendedor") || r.includes("comercial") || r.includes("closer"))) return true;
+        if (tr === "ldr" && (r.includes("qualificador") || r.includes("prospector") || r.includes("inbound"))) return true;
+        return false;
+      });
+
+      if (candidates.length === 0) {
+        candidates = users.filter(u => !u.role?.toLowerCase().includes("desenvolvedor")) || users;
+        if (candidates.length === 0 && currentUser) {
+          candidates = [currentUser];
+        }
+      }
+
+      const destPipe = pipelines.find(p => p.id === activeConfig.targetPipelineId) || pipelines[0];
+      const destStage = activeConfig.targetStage || (destPipe.stages[0]?.name || "Novo Lead");
+      const distType = activeConfig.distributionType || "role_round_robin";
+
+      const nowIso = new Date().toISOString();
+      const historyEntries: PipelineMovementHistory[] = [];
+      const toastId = toast.loading(`Distribuindo ${leadsToProcess.length} leads (${targetRole})...`);
+
+      const leadIdToAssignedOwner: Record<string, string> = {};
+
+      leadsToProcess.forEach((l, idx) => {
+        let assignedOwner = "Sem responsável";
+        if (distType === "specific_user") {
+          const spec = users.find(u => u.id === activeConfig.specificUserId);
+          assignedOwner = spec?.name || activeConfig.specificUserName || currentUser?.name || "Vendedor";
+        } else if (distType === "role_round_robin") {
+          const c = candidates[idx % candidates.length];
+          assignedOwner = c?.name || currentUser?.name || "Vendedor";
+        } else if (distType === "unassigned") {
+          assignedOwner = "Sem responsável";
+        }
+        leadIdToAssignedOwner[l.id] = assignedOwner;
+      });
+
+      const updatedLeadIds = new Set(leadsToProcess.map(l => l.id));
+
+      const applyDistribution = (list: any[]) =>
+        list.map((lead: any) => {
+          if (!updatedLeadIds.has(lead.id)) return lead;
+
+          const assignedOwner = leadIdToAssignedOwner[lead.id] || "Sem responsável";
+          const sourcePipe = pipelines.find(p => p.id === (lead.pipelineId || "prospection")) || pipelines[0];
+          const prevOwner = lead.owner || "Sem responsável";
+          const prevStage = lead.stage;
+
+          if (!historyEntries.some(h => h.leadId === lead.id)) {
+            historyEntries.push({
+              id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              leadId: lead.id,
+              leadName: lead.name || "Lead",
+              previousPipelineId: sourcePipe.id,
+              previousPipelineName: sourcePipe.name,
+              previousStage: prevStage,
+              newPipelineId: destPipe.id,
+              newPipelineName: destPipe.name,
+              newStage: destStage,
+              previousOwner: prevOwner,
+              newOwner: assignedOwner,
+              movementType: 'PIPELINE_TRANSFER',
+              user: currentUser?.name || "Distribuição Automática",
+              timestamp: nowIso,
+              note: `Distribuído para ${assignedOwner} no funil ${destPipe.name} (${destStage})`
+            });
+          }
+
+          const act: Activity = {
+            id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            type: 'pipeline_transfer',
+            description: `Distribuído via regra de ${targetRole} para [${destPipe.name}] (${destStage}). Responsável: ${assignedOwner}.`,
+            timestamp: nowIso,
+            user: currentUser?.name || "Distribuição Automática",
+            metadata: {
+              targetRole,
+              distributionType: distType,
+              assignedOwner
+            }
+          };
+
+          return {
+            ...lead,
+            pipelineId: destPipe.id,
+            stage: destStage,
+            owner: assignedOwner,
+            previousPipelineId: sourcePipe.id,
+            previousStage: prevStage,
+            previousOwner: prevOwner,
+            dataMovimentacao: nowIso,
+            dataTransferencia: nowIso,
+            activities: [act, ...(lead.activities || [])]
+          };
+        });
+
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return applyDistribution(old);
+      });
+
+      queryClient.setQueryData(['pipeline_history'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [...historyEntries, ...list].slice(0, 1000);
+      });
+
+      cloudStore.mutate((draft) => {
+        draft.leads = applyDistribution(draft.leads || []);
+        draft.historico_pipeline = [...historyEntries, ...(draft.historico_pipeline || [])].slice(0, 1000);
+      }, { immediate: true });
+
+      invalidate('leads');
+      invalidate('pipeline_history');
+      toast.dismiss(toastId);
+      toast.success(`${leadsToProcess.length} leads distribuídos com sucesso!`);
+      return { count: leadsToProcess.length };
+    },
+
+    transferEntirePipeline: async (
+      sourcePipelineId: string, 
+      targetOwner: string, 
+      targetPipelineId?: string, 
+      note?: string
+    ) => {
+      const sourcePipe = pipelines.find(p => p.id === sourcePipelineId);
+      if (!sourcePipe) return;
+
+      const leadsInSource = leads.filter(l => l.pipelineId === sourcePipelineId || (!l.pipelineId && sourcePipelineId === "prospection"));
+      if (leadsInSource.length === 0) {
+        toast.info("Não há leads neste pipeline para transferir.");
+        return;
+      }
+
+      const destPipeId = targetPipelineId || sourcePipelineId;
+      const destPipe = pipelines.find(p => p.id === destPipeId) || sourcePipe;
+      const defaultDestStage = destPipe.stages[0]?.name || "Novo Lead";
+      const leadIds = leadsInSource.map(l => l.id);
+
+      const toastId = toast.loading(`Transferindo carteira completa de ${sourcePipe.name} (${leadIds.length} leads)...`);
+      const nowIso = new Date().toISOString();
+      const historyEntries: PipelineMovementHistory[] = [];
+
+      const applyTransfer = (list: any[]) =>
+        list.map((lead: any) => {
+          if (!leadIds.includes(lead.id)) return lead;
+          const prevOwner = lead.owner || "Sem responsável";
+          const prevStage = lead.stage;
+
+          if (!historyEntries.some(h => h.leadId === lead.id)) {
+            historyEntries.push({
+              id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              leadId: lead.id,
+              leadName: lead.name || "Lead",
+              previousPipelineId: sourcePipe.id,
+              previousPipelineName: sourcePipe.name,
+              previousStage: prevStage,
+              newPipelineId: destPipe.id,
+              newPipelineName: destPipe.name,
+              newStage: defaultDestStage,
+              previousOwner: prevOwner,
+              newOwner: targetOwner,
+              movementType: 'PIPELINE_TRANSFER',
+              user: currentUser?.name || "Usuário",
+              timestamp: nowIso,
+              note: note || `Transferência integral da carteira do funil ${sourcePipe.name}`
+            });
+          }
+
+          return {
+            ...lead,
+            pipelineId: destPipeId,
+            stage: defaultDestStage,
+            owner: targetOwner,
+            previousPipelineId: sourcePipe.id,
+            previousStage: prevStage,
+            previousOwner: prevOwner,
+            dataMovimentacao: nowIso,
+            dataTransferencia: nowIso
+          };
+        });
+
+      queryClient.setQueryData(['leads'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return applyTransfer(old);
+      });
+
+      queryClient.setQueryData(['pipeline_history'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [...historyEntries, ...list].slice(0, 1000);
+      });
+
+      cloudStore.mutate((draft) => {
+        draft.leads = applyTransfer(draft.leads || []);
+        draft.historico_pipeline = [...historyEntries, ...(draft.historico_pipeline || [])].slice(0, 1000);
+      }, { immediate: true });
+
+      invalidate('leads');
+      invalidate('pipeline_history');
+      toast.dismiss(toastId);
+      toast.success(`Carteira inteira (${leadIds.length} leads) transferida com sucesso para ${targetOwner}!`);
+    },
+
+    // PERMISSIONS & CONFIGS (ZERO-LOCALSTORAGE CLOUD ENGINE)
     updateRolePermissions: async (role: string, stages: string[]) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_role_permissions");
-          const map = raw ? JSON.parse(raw) : {};
-          map[role] = stages;
-          localStorage.setItem("comet_role_permissions", JSON.stringify(map));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.rolePermissions = { ...(rootDb.rolePermissions || {}), [role]: stages };
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.rolePermissions = { ...(draft.rolePermissions || {}), [role]: stages };
+      }, { immediate: true });
 
       toast.success("Permissões atualizadas com sucesso!");
       invalidate('role_permissions');
     },
     
     setWorkingDays: async (days: number[]) => { 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_working_days", JSON.stringify(days));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.workingDays = days;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.workingDays = days;
+      }, { immediate: true });
 
       toast.success("Dias úteis atualizados com sucesso!");
       invalidate('working_days');
     },
 
     setHolidays: async (dates: string[]) => { 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_holidays", JSON.stringify(dates));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.holidays = dates;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.holidays = dates;
+      }, { immediate: true });
 
       toast.success("Feriados atualizados com sucesso!");
       invalidate('holidays');
     },
 
     setVisibility: async (v: VisibilitySettings) => { 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_visibility_settings", JSON.stringify(v));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.visibility = v;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.visibility = v;
+      }, { immediate: true });
 
       toast.success("Visibilidade atualizada com sucesso!");
       invalidate('visibility_settings');
     },
 
     setSlaThresholds: async (t: any) => { 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_sla_thresholds", JSON.stringify(t));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.slaThresholds = t;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.slaThresholds = t;
+      }, { immediate: true });
 
       toast.success("SLA atualizado com sucesso!");
       invalidate('sla_thresholds');
@@ -4036,20 +3849,9 @@ export function useData() {
         created_at: new Date().toISOString()
       };
 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_investments");
-          const list = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_investments", JSON.stringify([newInv, ...list]));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.marketingInvestments = [newInv, ...(rootDb.marketingInvestments || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.marketingInvestments = [newInv, ...(draft.marketingInvestments || [])];
+      }, { immediate: true });
 
       toast.success("Investimento lançado com sucesso!");
       invalidate('marketing_investments');
@@ -4057,24 +3859,9 @@ export function useData() {
     },
 
     deleteMarketingInvestment: async (id: string) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_investments");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_investments", JSON.stringify(list.filter((x: any) => x.id !== id)));
-            }
-          }
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.marketingInvestments = (rootDb.marketingInvestments || []).filter((x: any) => x.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.marketingInvestments = (draft.marketingInvestments || []).filter((x: any) => x.id !== id);
+      }, { immediate: true });
 
       toast.success("Investimento removido!");
       invalidate('marketing_investments');
@@ -4089,20 +3876,9 @@ export function useData() {
         created_at: new Date().toISOString()
       };
 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_automations");
-          const list = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_automations", JSON.stringify([newAuto, ...list]));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.automations = [newAuto, ...(rootDb.automations || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.automations = [newAuto, ...(draft.automations || [])];
+      }, { immediate: true });
 
       toast.success("Automação criada com sucesso!");
       invalidate('automations');
@@ -4110,24 +3886,9 @@ export function useData() {
     },
 
     updateAutomation: async (id: number, a: any) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_automations");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_automations", JSON.stringify(list.map((x: any) => x.id === id ? { ...x, ...a } : x)));
-            }
-          }
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.automations = (rootDb.automations || []).map((x: any) => x.id === id ? { ...x, ...a } : x);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.automations = (draft.automations || []).map((x: any) => x.id === id ? { ...x, ...a } : x);
+      }, { immediate: true });
 
       toast.success("Automação atualizada com sucesso!");
       invalidate('automations');
@@ -4135,24 +3896,9 @@ export function useData() {
     },
 
     deleteAutomation: async (id: number) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_automations");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_automations", JSON.stringify(list.filter((x: any) => x.id !== id)));
-            }
-          }
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.automations = (rootDb.automations || []).filter((x: any) => x.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.automations = (draft.automations || []).filter((x: any) => x.id !== id);
+      }, { immediate: true });
 
       toast.success("Automação removida com sucesso!");
       invalidate('automations');
@@ -4162,24 +3908,9 @@ export function useData() {
       const aut = automations.find(a => a.id === id); 
       if (aut) { 
         const updated = !aut.active;
-        try {
-          if (typeof window !== "undefined") {
-            const raw = localStorage.getItem("comet_local_automations");
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list)) {
-                localStorage.setItem("comet_local_automations", JSON.stringify(list.map((x: any) => x.id === id ? { ...x, active: updated } : x)));
-              }
-            }
-          }
-          const driveCfg = getDriveConfig();
-          if (driveCfg.webappUrl) {
-            const rootDb = getLocalDatabaseRoot<any>() || {};
-            rootDb.automations = (rootDb.automations || []).map((x: any) => x.id === id ? { ...x, active: updated } : x);
-            saveLocalDatabaseRoot(rootDb);
-            pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-          }
-        } catch {}
+        cloudStore.mutate((draft) => {
+          draft.automations = (draft.automations || []).map((x: any) => x.id === id ? { ...x, active: updated } : x);
+        }, { immediate: true });
 
         invalidate('automations');
       }
@@ -4193,20 +3924,9 @@ export function useData() {
         created_at: new Date().toISOString()
       };
 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_handoff_rules");
-          const list = raw ? JSON.parse(raw) : [];
-          localStorage.setItem("comet_local_handoff_rules", JSON.stringify([newRule, ...list]));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.handoffRules = [newRule, ...(rootDb.handoffRules || [])];
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.handoffRules = [newRule, ...(draft.handoffRules || [])];
+      }, { immediate: true });
 
       toast.success("Regra de handoff criada com sucesso!");
       invalidate('handoff_rules');
@@ -4214,24 +3934,9 @@ export function useData() {
     },
 
     updateHandoffRule: async (id: string, r: any) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_handoff_rules");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_handoff_rules", JSON.stringify(list.map((x: any) => x.id === id ? { ...x, ...r } : x)));
-            }
-          }
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.handoffRules = (rootDb.handoffRules || []).map((x: any) => x.id === id ? { ...x, ...r } : x);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.handoffRules = (draft.handoffRules || []).map((x: any) => x.id === id ? { ...x, ...r } : x);
+      }, { immediate: true });
 
       toast.success("Regra de handoff atualizada!");
       invalidate('handoff_rules');
@@ -4239,78 +3944,68 @@ export function useData() {
     },
 
     deleteHandoffRule: async (id: string) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_handoff_rules");
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              localStorage.setItem("comet_local_handoff_rules", JSON.stringify(list.filter((x: any) => x.id !== id)));
-            }
-          }
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.handoffRules = (rootDb.handoffRules || []).filter((x: any) => x.id !== id);
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.handoffRules = (draft.handoffRules || []).filter((x: any) => x.id !== id);
+      }, { immediate: true });
 
       toast.success("Regra de handoff excluída!");
       invalidate('handoff_rules');
     },
 
-    // STAGE WORKFLOWS
+    // STAGE WORKFLOWS (normalizado como StageWorkflow[])
     updateWorkflow: async (pipelineId: string, stageName: string, updates: Partial<StageWorkflow>) => { 
-      try {
-        if (typeof window !== "undefined") {
-          const raw = localStorage.getItem("comet_local_stage_workflows");
-          const map = raw ? JSON.parse(raw) : {};
-          const key = `${pipelineId}_${stageName}`;
-          map[key] = { ...(map[key] || {}), ...updates, stageName, pipelineId };
-          localStorage.setItem("comet_local_stage_workflows", JSON.stringify(map));
+      cloudStore.mutate((draft) => {
+        const raw = draft.stageWorkflows;
+        let list: StageWorkflow[] = [];
+        if (Array.isArray(raw)) {
+          list = [...raw];
+        } else if (raw && typeof raw === "object") {
+          list = Object.entries(raw).map(([key, val]: [string, any]) => {
+            const [pid, ...rest] = key.split("_");
+            return {
+              pipelineId: val?.pipelineId || pid,
+              stageName: val?.stageName || rest.join("_"),
+              rules: Array.isArray(val?.rules) ? val.rules : [],
+              ...val,
+            } as StageWorkflow;
+          });
         }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.stageWorkflows = { ...(rootDb.stageWorkflows || {}), [`${pipelineId}_${stageName}`]: updates };
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
+        const idx = list.findIndex(w => w.pipelineId === pipelineId && w.stageName === stageName);
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], ...updates, pipelineId, stageName };
+        } else {
+          list.push({
+            id: `${pipelineId}_${stageName}`,
+            pipelineId,
+            stageName,
+            rules: Array.isArray(updates.rules) ? updates.rules : [],
+            ...updates,
+          });
         }
-      } catch (err: any) {
-        console.warn("Aviso ao atualizar workflow:", err.message);
-      }
+        draft.stageWorkflows = list;
+      }, { immediate: true });
+
       invalidate('stage_workflows');
     },
 
     // COMPANY SETTINGS
     setCompany: async (c: any) => { 
       const updated = {
-        name: c.name || "Minha Empresa",
-        sector: c.sector || "",
-        purpose: c.purpose || "",
-        logo: c.logo || "",
-        contact: c.contact || "",
-        email: c.email || "",
-        address: c.address || "",
-        website: c.website || "",
+        ...company,
+        name: c.name || company?.name || "Minha Empresa",
+        sector: c.sector ?? company?.sector ?? "",
+        purpose: c.purpose ?? company?.purpose ?? "",
+        logo: c.logo ?? company?.logo ?? "",
+        contact: c.contact ?? company?.contact ?? "",
+        email: c.email ?? company?.email ?? "",
+        address: c.address ?? company?.address ?? "",
+        website: c.website ?? company?.website ?? "",
         updated_at: new Date().toISOString()
       };
 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_company_settings", JSON.stringify(updated));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.company = updated;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.company = { ...(draft.company || {}), ...updated };
+      }, { immediate: true });
 
       toast.success("Dados da empresa atualizados!");
       invalidate('company_settings');
@@ -4323,23 +4018,16 @@ export function useData() {
 
     setAIConfig: async (config: any) => { 
       const updated = {
-        openrouter_key: config.openRouterKey, 
-        model_id: config.modelId, 
-        model_name: config.modelName 
+        ...(cloudStore.getState().aiConfig || {}),
+        ...config,
+        openrouter_key: config.openRouterKey ?? config.openrouter_key,
+        model_id: config.modelId ?? config.model_id,
+        model_name: config.modelName ?? config.model_name
       };
 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_ai_config", JSON.stringify(updated));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.aiConfig = updated;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.aiConfig = updated;
+      }, { immediate: true });
 
       invalidate('ai_settings'); 
       toast.success("Configuração de IA salva com sucesso!");
@@ -4352,7 +4040,7 @@ export function useData() {
     exportData: () => { 
       try {
         const fullBackup = {
-          version: "2.0.0",
+          version: "3.0.0",
           exportedAt: new Date().toISOString(),
           company,
           visibility,
@@ -4388,76 +4076,42 @@ export function useData() {
       toast.loading(mode === 'replace' ? "Substituindo base de dados..." : "Mesclando dados no sistema...");
 
       try {
-        const rootDb = getLocalDatabaseRoot<any>() || {};
+        cloudStore.mutate((draft) => {
+          const mergeList = (cur: any[], inc: any[]) =>
+            mode === 'replace'
+              ? inc
+              : [...inc, ...(cur || []).filter((c: any) => !inc.some((n: any) => n.id === c.id))];
 
-        if (Array.isArray(newData.leads) && newData.leads.length > 0) {
-          const currentLeads = mode === 'replace' ? [] : (rootDb.leads || getLocalLeads() || []);
-          const mergedLeads = mode === 'replace' ? newData.leads : [...newData.leads, ...currentLeads.filter((cl: any) => !newData.leads.some((nl: any) => nl.id === cl.id))];
-          saveLocalLeads(mergedLeads);
-          rootDb.leads = mergedLeads;
-        }
+          if (Array.isArray(newData.leads) && newData.leads.length > 0) {
+            draft.leads = mergeList(draft.leads || [], newData.leads);
+          }
+          if (Array.isArray(newData.tasks) && newData.tasks.length > 0) {
+            draft.tasks = mergeList(draft.tasks || [], newData.tasks);
+          }
+          if (Array.isArray(newData.products) && newData.products.length > 0) {
+            draft.products = mergeList(draft.products || [], newData.products);
+          }
+          if (Array.isArray(newData.playbooks) && newData.playbooks.length > 0) {
+            draft.playbooks = mergeList(draft.playbooks || [], newData.playbooks);
+          }
+          if (Array.isArray(newData.objections) && newData.objections.length > 0) {
+            draft.objections = mergeList(draft.objections || [], newData.objections);
+          }
+          if (Array.isArray(newData.landingPages) && newData.landingPages.length > 0) {
+            draft.landingPages = mergeList(draft.landingPages || [], newData.landingPages);
+          }
+          if (Array.isArray(newData.surveys) && newData.surveys.length > 0) {
+            draft.surveys = mergeList(draft.surveys || [], newData.surveys);
+          }
+          if (Array.isArray(newData.automations) && newData.automations.length > 0) {
+            draft.automations = mergeList(draft.automations || [], newData.automations);
+          }
+          if (newData.company) draft.company = newData.company;
+          if (newData.visibility) draft.visibility = newData.visibility;
+          if (newData.slaThresholds) draft.slaThresholds = newData.slaThresholds;
+        }, { immediate: true });
 
-        if (Array.isArray(newData.tasks) && newData.tasks.length > 0) {
-          const currentTasks = mode === 'replace' ? [] : (rootDb.tasks || getLocalTasks() || []);
-          const mergedTasks = mode === 'replace' ? newData.tasks : [...newData.tasks, ...currentTasks.filter((ct: any) => !newData.tasks.some((nt: any) => nt.id === ct.id))];
-          saveLocalTasks(mergedTasks);
-          rootDb.tasks = mergedTasks;
-        }
-
-        if (Array.isArray(newData.products) && newData.products.length > 0) {
-          const currentProducts = mode === 'replace' ? [] : (rootDb.products || []);
-          const mergedProducts = mode === 'replace' ? newData.products : [...newData.products, ...currentProducts.filter((cp: any) => !newData.products.some((np: any) => np.id === cp.id))];
-          rootDb.products = mergedProducts;
-          if (typeof window !== "undefined") localStorage.setItem("comet_local_products", JSON.stringify(mergedProducts));
-        }
-
-        if (Array.isArray(newData.playbooks) && newData.playbooks.length > 0) {
-          const currentPlaybooks = mode === 'replace' ? [] : (rootDb.playbooks || []);
-          const mergedPlaybooks = mode === 'replace' ? newData.playbooks : [...newData.playbooks, ...currentPlaybooks.filter((cp: any) => !newData.playbooks.some((np: any) => np.id === cp.id))];
-          rootDb.playbooks = mergedPlaybooks;
-          if (typeof window !== "undefined") localStorage.setItem("comet_local_playbooks", JSON.stringify(mergedPlaybooks));
-        }
-
-        if (Array.isArray(newData.objections) && newData.objections.length > 0) {
-          const currentObjections = mode === 'replace' ? [] : (rootDb.objections || []);
-          const mergedObjections = mode === 'replace' ? newData.objections : [...newData.objections, ...currentObjections.filter((co: any) => !newData.objections.some((no: any) => no.id === co.id))];
-          rootDb.objections = mergedObjections;
-          if (typeof window !== "undefined") localStorage.setItem("comet_local_objections", JSON.stringify(mergedObjections));
-        }
-
-        if (Array.isArray(newData.landingPages) && newData.landingPages.length > 0) {
-          const currentLps = mode === 'replace' ? [] : (rootDb.landingPages || getLocalLandingPages() || []);
-          const mergedLps = mode === 'replace' ? newData.landingPages : [...newData.landingPages, ...currentLps.filter((clp: any) => !newData.landingPages.some((nlp: any) => nlp.id === clp.id))];
-          saveLocalLandingPages(mergedLps);
-          rootDb.landingPages = mergedLps;
-        }
-
-        if (Array.isArray(newData.automations) && newData.automations.length > 0) {
-          const currentAutos = mode === 'replace' ? [] : (rootDb.automations || []);
-          const mergedAutos = mode === 'replace' ? newData.automations : [...newData.automations, ...currentAutos.filter((ca: any) => !newData.automations.some((na: any) => na.id === ca.id))];
-          rootDb.automations = mergedAutos;
-          if (typeof window !== "undefined") localStorage.setItem("comet_local_automations", JSON.stringify(mergedAutos));
-        }
-
-        if (newData.company) {
-          rootDb.company = newData.company;
-          if (typeof window !== "undefined") localStorage.setItem("comet_company_settings", JSON.stringify(newData.company));
-        }
-        if (newData.visibility) {
-          rootDb.visibility = newData.visibility;
-          if (typeof window !== "undefined") localStorage.setItem("comet_visibility_settings", JSON.stringify(newData.visibility));
-        }
-        if (newData.slaThresholds) {
-          rootDb.slaThresholds = newData.slaThresholds;
-          if (typeof window !== "undefined") localStorage.setItem("comet_sla_thresholds", JSON.stringify(newData.slaThresholds));
-        }
-
-        saveLocalDatabaseRoot(rootDb);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          await pushToGoogleDrive(driveCfg.webappUrl, rootDb);
-        }
-
+        await cloudStore.pushNow().catch(() => {});
         queryClient.invalidateQueries();
         toast.dismiss();
         toast.success(mode === 'replace' ? "Dados substituídos com sucesso!" : "Dados mesclados com sucesso!");
@@ -4471,73 +4125,44 @@ export function useData() {
       toast.loading(`Importando registros de ${key}...`);
       try {
         const items = Array.isArray(data) ? data : [data];
-        const rootDb = getLocalDatabaseRoot<any>() || {};
 
-        switch (key) {
-          case 'leads': {
-            const current = getLocalLeads();
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            saveLocalLeads(merged);
-            rootDb.leads = merged;
-            break;
-          }
-          case 'tasks': {
-            const current = getLocalTasks();
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            saveLocalTasks(merged);
-            rootDb.tasks = merged;
-            break;
-          }
-          case 'products': {
-            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_products") : null;
-            const current = raw ? JSON.parse(raw) : [];
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            if (typeof window !== "undefined") localStorage.setItem("comet_local_products", JSON.stringify(merged));
-            rootDb.products = merged;
-            break;
-          }
-          case 'objections': {
-            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_objections") : null;
-            const current = raw ? JSON.parse(raw) : [];
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            if (typeof window !== "undefined") localStorage.setItem("comet_local_objections", JSON.stringify(merged));
-            rootDb.objections = merged;
-            break;
-          }
-          case 'landingPages': {
-            const current = getLocalLandingPages();
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            saveLocalLandingPages(merged);
-            rootDb.landingPages = merged;
-            break;
-          }
-          case 'playbooks': {
-            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_playbooks") : null;
-            const current = raw ? JSON.parse(raw) : [];
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            if (typeof window !== "undefined") localStorage.setItem("comet_local_playbooks", JSON.stringify(merged));
-            rootDb.playbooks = merged;
-            break;
-          }
-          case 'automations': {
-            const raw = typeof window !== "undefined" ? localStorage.getItem("comet_local_automations") : null;
-            const current = raw ? JSON.parse(raw) : [];
-            const merged = [...items, ...current.filter((c: any) => !items.some((i: any) => i.id === c.id))];
-            if (typeof window !== "undefined") localStorage.setItem("comet_local_automations", JSON.stringify(merged));
-            rootDb.automations = merged;
-            break;
-          }
-          default: {
-            console.warn(`Módulo ${key} não possui handler específico.`);
-          }
-        }
+        cloudStore.mutate((draft) => {
+          const mergeByMode = (cur: any[]) =>
+            mode === 'replace'
+              ? items
+              : [...items, ...(cur || []).filter((c: any) => !items.some((i: any) => i.id === c.id))];
 
-        saveLocalDatabaseRoot(rootDb);
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+          switch (key) {
+            case 'leads':
+              draft.leads = mergeByMode(draft.leads || []);
+              break;
+            case 'tasks':
+              draft.tasks = mergeByMode(draft.tasks || []);
+              break;
+            case 'products':
+              draft.products = mergeByMode(draft.products || []);
+              break;
+            case 'objections':
+              draft.objections = mergeByMode(draft.objections || []);
+              break;
+            case 'landingPages':
+              draft.landingPages = mergeByMode(draft.landingPages || []);
+              break;
+            case 'surveys':
+              draft.surveys = mergeByMode(draft.surveys || []);
+              break;
+            case 'playbooks':
+              draft.playbooks = mergeByMode(draft.playbooks || []);
+              break;
+            case 'automations':
+              draft.automations = mergeByMode(draft.automations || []);
+              break;
+            default:
+              console.warn(`Módulo ${key} não possui handler específico.`);
+          }
+        }, { immediate: true });
 
+        await cloudStore.pushNow().catch(() => {});
         queryClient.invalidateQueries();
         toast.dismiss();
         toast.success(`Módulo ${key} importado com sucesso!`);
@@ -4549,36 +4174,18 @@ export function useData() {
 
     addFunnelType: async (type: string) => { 
       const next = [...funnelTypes, type]; 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_funnel_types", JSON.stringify(next));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.funnelTypes = next;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.funnelTypes = next;
+      }, { immediate: true });
       invalidate('funnel_types'); 
       toast.success("Tipo de funil adicionado com sucesso!");
     },
 
     deleteFunnelType: async (type: string) => { 
       const next = funnelTypes.filter(t => t !== type); 
-      try {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("comet_funnel_types", JSON.stringify(next));
-        }
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.funnelTypes = next;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.funnelTypes = next;
+      }, { immediate: true });
       invalidate('funnel_types'); 
       toast.success("Tipo de funil removido!");
     },
@@ -4596,7 +4203,7 @@ export function useData() {
       // 0. CRIAR CHECKPOINT COMPLETO ANTES DA LIMPEZA
       try {
         const fullBackup = {
-          version: "2.0.0",
+          version: "3.0.0",
           type: "pre_reset_checkpoint",
           exportedAt: new Date().toISOString(),
           company,
@@ -4620,7 +4227,6 @@ export function useData() {
         const now = new Date();
         const checkpointName = formatCheckpointName(now);
 
-        // Salva histórico de checkpoints locais com recuperação garantida
         saveSystemCheckpoint({
           id: `cp_${Date.now()}`,
           name: checkpointName,
@@ -4629,7 +4235,6 @@ export function useData() {
           data: fullBackup
         });
 
-        // Se o Google Drive estiver configurado, envia também o snapshot para a nuvem
         const driveCfg = getDriveConfig();
         if (driveCfg && driveCfg.webappUrl) {
           try {
@@ -4642,70 +4247,53 @@ export function useData() {
         console.warn("Aviso na criação do checkpoint pré-reset:", cpErr);
       }
 
-      // 1. Limpeza de dados transacionais e customizados (A BASE DE LEADS NUNCA É APAGADA NO RESET)
+      // 1. Limpeza na nuvem e RAM (Base de Leads 100% preservada, zero localStorage)
       try {
-        saveLocalTasks([]);
-        saveLocalSurveys([]);
-        saveLocalSurveyResponses([]);
-        saveLocalLandingPages([]);
-        localStorage.removeItem(LOCAL_LP_STORAGE_KEY);
-        localStorage.removeItem(DELETED_LP_STORAGE_KEY);
-        localStorage.removeItem(LP_SEED_INITIALIZED_KEY);
-        localStorage.removeItem("comet_local_investments");
-        localStorage.removeItem("comet_local_products");
-        localStorage.removeItem("comet_local_objections");
-        localStorage.removeItem("comet_local_handoff_rules");
-        localStorage.removeItem("comet_local_stage_workflows");
+        purgeLegacyBusinessLocalStorage();
 
-        // 2. RECRIAR PADRÕES (SEED)
-        localStorage.setItem("comet_local_pipelines", JSON.stringify(DEFAULT_PIPELINES));
-        localStorage.setItem("comet_local_playbooks", JSON.stringify(DEFAULT_PLAYBOOKS));
-        localStorage.setItem("comet_local_automations", JSON.stringify([
-          {
-            id: 1,
-            name: "SLA: Alerta de Inatividade (24h)",
-            category: "SLA",
-            trigger_event: "lead.sla_breach",
-            priority: "alta",
-            active: true,
-            action_type: "notify",
-            action_config: { message: "Atenção! Um lead entrou em zona de alerta por falta de interação." }
-          },
-          {
-            id: 2,
-            name: "Tarefa: Primeiro Contato Inbound",
-            category: "Vendas",
-            trigger_event: "lead.created",
-            priority: "urgente",
-            active: true,
-            action_type: "create_task",
-            action_config: { title: "Realizar primeiro contato via WhatsApp (Lead Novo)" }
-          }
-        ]));
+        cloudStore.mutate((draft) => {
+          draft.tasks = [];
+          draft.surveys = [];
+          draft.surveyResponses = [];
+          draft.landingPages = [];
+          draft.deletedLpIds = [];
+          draft.activePreviewPage = null;
+          draft.marketingInvestments = [];
+          draft.products = [];
+          draft.objections = [];
+          draft.handoffRules = [];
+          draft.stageWorkflows = [];
+          draft.pipelines = DEFAULT_PIPELINES;
+          draft.playbooks = DEFAULT_PLAYBOOKS;
+          draft.automations = [
+            {
+              id: 1,
+              name: "SLA: Alerta de Inatividade (24h)",
+              category: "SLA",
+              trigger_event: "lead.sla_breach",
+              priority: "alta",
+              active: true,
+              action_type: "notify",
+              action_config: { message: "Atenção! Um lead entrou em zona de alerta por falta de interação." }
+            },
+            {
+              id: 2,
+              name: "Tarefa: Primeiro Contato Inbound",
+              category: "Vendas",
+              trigger_event: "lead.created",
+              priority: "urgente",
+              active: true,
+              action_type: "create_task",
+              action_config: { title: "Realizar primeiro contato via WhatsApp (Lead Novo)" }
+            }
+          ];
+        }, { immediate: true });
 
-        // Atualiza Google Drive se configurado
-        const driveCfg = getDriveConfig();
-        if (driveCfg.webappUrl) {
-          const rootDb = getLocalDatabaseRoot<any>() || {};
-          rootDb.tasks = [];
-          rootDb.surveys = [];
-          rootDb.surveyResponses = [];
-          rootDb.landingPages = [];
-          rootDb.marketingInvestments = [];
-          rootDb.products = [];
-          rootDb.objections = [];
-          rootDb.handoffRules = [];
-          rootDb.stageWorkflows = {};
-          rootDb.pipelines = DEFAULT_PIPELINES;
-          rootDb.playbooks = DEFAULT_PLAYBOOKS;
-          saveLocalDatabaseRoot(rootDb);
-          pushToGoogleDrive(driveCfg.webappUrl, rootDb).catch(() => {});
-        }
+        await cloudStore.pushNow().catch(() => {});
       } catch (err: any) {
         console.warn("Aviso no reset dos dados:", err);
       }
 
-      // 3. Resetar cache e avisar usuário
       queryClient.invalidateQueries();
       toast.dismiss(toastId);
       toast.success("Banco de dados resetado com sucesso! Checkpoint criado e Base de Leads 100% preservada.");

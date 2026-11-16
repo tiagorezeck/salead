@@ -4,7 +4,7 @@ import {
   History, Info, Mail, Phone, Target, GitMerge, AlertCircle, ExternalLink, Pencil, 
   Save, X, Thermometer, UserCheck, Zap, TrendingUp, Calendar, ArrowUpRight, 
   ArrowDownRight, Check, Ban, CreditCard, RefreshCw, MessageCircle, DollarSign, 
-  Building2, Globe, User, Video, FileCheck, Layers 
+  Building2, Globe, User, Video, FileCheck, Layers, ArrowRightLeft, ArrowRight 
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { calculateMinQualification, getMinClassificationBadge, type MinScoreValue, type MinQualification } from "@/lib/min-qualification";
 import { differenceInDays, format } from "date-fns";
 import { ScheduleModal } from "@/components/crm/schedule-modal";
+import { TransferLeadModal } from "@/components/crm/transfer-lead-modal";
 import { 
   getLeadStatusCodeInfo, 
   getLeadStatusCode, 
@@ -32,11 +33,12 @@ interface LeadDrawerProps {
 }
 
 export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDrawerProps) {
-  const { users, stageWorkflows, currentUser, products, landingPages, surveys = [], surveysResponses = [] } = useData();
+  const { users, stageWorkflows, currentUser, products, landingPages, surveys = [], surveysResponses = [], pipelines = [], pipelineHistory = [] } = useData();
   const [activeTab, setActiveTab] = useState<'perfil' | 'historico'>('perfil');
   const [isEditing, setIsEditing] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showSurveyModal, setShowSurveyModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
   const [note, setNote] = useState("");
   
   const [editForm, setEditForm] = useState({
@@ -57,6 +59,14 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
     isCustomer: false,
     isRecurring: false
   });
+
+  const currentPipeline = useMemo(() => {
+    return pipelines.find(p => p.id === (lead.pipelineId || "prospection")) || pipelines[0];
+  }, [lead.pipelineId, pipelines]);
+
+  const leadPipelineMovements = useMemo(() => {
+    return pipelineHistory.filter(h => h.leadId === lead.id);
+  }, [pipelineHistory, lead.id]);
 
   useEffect(() => { 
     if (lead) {
@@ -436,10 +446,29 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
           {/* Seletor & Stepper Interativo de Etapas do Pipeline */}
           <div className="mt-3.5 p-3 bg-muted/40 rounded-2xl border border-border/80 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Layers className="h-3.5 w-3.5 text-primary" /> Etapa Atual no Funil:
-              </span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span className="truncate">{currentPipeline?.name || "Funil Comercial"}</span>
+                </span>
+                {currentPipeline?.functionRole && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.2 bg-primary/10 text-primary border border-primary/20 rounded">
+                    {currentPipeline.functionRole}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(true)}
+                  className="px-2 py-1 rounded-xl bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground border border-primary/20 text-[9px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer"
+                  title="Transferir lead para outro pipeline/funil"
+                >
+                  <ArrowRightLeft className="h-3 w-3" />
+                  <span>Transferir</span>
+                </button>
+
                 <select
                   value={lead.stage}
                   onChange={(e) => handleSetStage(e.target.value)}
@@ -924,6 +953,63 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
             </div>
           ) : (
             <div className="p-5 space-y-6 pb-12">
+              {/* HISTÓRICO DE MOVIMENTAÇÕES DE PIPELINE / FUNIS (JORNADA & AUDITORIA) */}
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-muted/20 border border-primary/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-black text-primary uppercase tracking-wider">
+                    <Layers className="h-4 w-4" /> Jornada & Movimentações no Pipeline
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowTransferModal(true)}
+                    className="text-[9px] font-black uppercase tracking-wider text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowRightLeft className="h-3 w-3" /> Transferir Funil
+                  </button>
+                </div>
+
+                {leadPipelineMovements.length === 0 ? (
+                  <div className="p-3 bg-background/60 rounded-xl border border-border text-center">
+                    <p className="text-xs text-muted-foreground">
+                      Funil Atual: <strong className="text-foreground">{currentPipeline?.name || "Prospecção"}</strong> · Etapa: <strong className="text-foreground">{lead.stage}</strong>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Nenhuma transferência entre funis registrada até o momento.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {leadPipelineMovements.map((mov, mIdx) => (
+                      <div key={mov.id || mIdx} className="p-2.5 rounded-xl bg-background/80 border border-border/70 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold">
+                          <div className="flex items-center gap-1.5 text-foreground flex-wrap">
+                            <span className="text-muted-foreground">{mov.fromPipelineName || "Origem"}</span>
+                            <span className="text-xs font-semibold text-muted-foreground">({mov.fromStage})</span>
+                            <ArrowRight className="h-3 w-3 text-primary shrink-0" />
+                            <span className="text-primary">{mov.toPipelineName || "Destino"}</span>
+                            <span className="text-xs font-semibold text-primary">({mov.toStage})</span>
+                          </div>
+                          <span className="text-[9px] text-muted-foreground shrink-0 font-medium">
+                            {mov.timestamp ? new Date(mov.timestamp).toLocaleString('pt-BR') : "Recente"}
+                          </span>
+                        </div>
+                        
+                        {(mov.responsibleName || mov.reason) && (
+                          <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5 border-t border-border/40">
+                            {mov.responsibleName && (
+                              <span>Responsável: <strong className="text-foreground">{mov.responsibleName}</strong></span>
+                            )}
+                            {mov.reason && (
+                              <span className="italic truncate max-w-[200px]" title={mov.reason}>"{mov.reason}"</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="relative">
                 <textarea 
                   value={note} 
@@ -1075,6 +1161,13 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
           </div>
         </div>
       )}
+
+      {/* MODAL DE TRANSFERÊNCIA DE FUNIL */}
+      <TransferLeadModal
+        isOpen={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        lead={lead}
+      />
     </>
   );
 }

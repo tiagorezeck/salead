@@ -17,6 +17,7 @@ interface KanbanCardProps {
   onMarkLost?: (e: React.MouseEvent) => void;
   onSchedule?: (e: React.MouseEvent) => void;
   onMoveStage?: (stage: string) => void;
+  onTransfer?: (e: React.MouseEvent) => void;
 }
 
 export function KanbanCard({ 
@@ -28,7 +29,8 @@ export function KanbanCard({
   onDragEnd, 
   onMarkLost, 
   onSchedule,
-  onMoveStage 
+  onMoveStage,
+  onTransfer
 }: KanbanCardProps) {
   const { products } = useData();
   const sla = SLA_CONFIG[lead.sla] || SLA_CONFIG.ok;
@@ -221,6 +223,19 @@ export function KanbanCard({
               title="Marcar como Perdido"
             >
               <Ban className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {onTransfer && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTransfer(e);
+              }}
+              className="text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+              title="Transferir de Pipeline / Funil"
+            >
+              <Layers className="h-3.5 w-3.5" />
             </button>
           )}
 

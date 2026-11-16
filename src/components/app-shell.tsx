@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   LayoutDashboard, KanbanSquare, Users, Megaphone, Trophy, Zap, Settings, Bell, Search, Sparkles,
   GitBranch, Timer, BarChart3, CheckSquare, Gauge, X, AlertTriangle, Flame, Plus, BookOpen,
-  Package, ChevronRight, ChevronLeft, Menu, UserCog, Target, ClipboardList, Cloud, CloudOff, RefreshCw, MonitorPlay, Activity,
+  Package, ChevronRight, ChevronLeft, Menu, UserCog, UserPlus, Target, ClipboardList, Cloud, CloudOff, RefreshCw, MonitorPlay, Activity,
   Command, Wallet, Maximize2, Minimize2, Sliders, Sun, Moon, FileSpreadsheet, ExternalLink, UserCheck, UserX, Check
 } from "lucide-react";
 import React, { useState, useMemo, useEffect, useRef } from "react";

@@ -1,4 +1,5 @@
 // src/lib/lp-store.ts
+import { cloudStore } from "@/services/cloudStorageService";
 
 export type SectionType =
   | "hero"
@@ -174,8 +175,6 @@ export interface LP {
   whatsappNumbers?: string[];
   config?: Record<string, any>;
 }
-
-const KEY = "app:lps:v1";
 
 export const DEFAULT_THEME: LPTheme = {
   primary: "#FF6A00",
@@ -452,9 +451,7 @@ export function blankSections(brand = "Nova landing"): Section[] {
 export function loadLPs(): LP[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as LP[];
+    return (cloudStore.getState().landingPages || []) as unknown as LP[];
   } catch {
     return [];
   }
@@ -462,19 +459,36 @@ export function loadLPs(): LP[] {
 
 export function saveLPs(lps: LP[]) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(lps));
+  cloudStore.mutate(
+    (draft) => {
+      draft.landingPages = lps as any[];
+    },
+    { immediate: true }
+  );
 }
 
 export function saveLP(lp: LP) {
-  const all = loadLPs();
-  const idx = all.findIndex((x) => x.id === lp.id);
-  if (idx >= 0) all[idx] = { ...lp, updatedAt: Date.now() };
-  else all.unshift({ ...lp, updatedAt: Date.now() });
-  saveLPs(all);
+  const stamped = { ...lp, updatedAt: Date.now() };
+  cloudStore.mutate(
+    (draft) => {
+      const current = Array.isArray(draft.landingPages) ? [...draft.landingPages] : [];
+      const idx = current.findIndex((x: any) => x.id === stamped.id);
+      if (idx >= 0) current[idx] = stamped as any;
+      else current.unshift(stamped as any);
+      draft.landingPages = current;
+    },
+    { immediate: true }
+  );
 }
 
 export function deleteLP(id: string) {
-  saveLPs(loadLPs().filter((x) => x.id !== id));
+  cloudStore.mutate(
+    (draft) => {
+      draft.deletedLpIds = Array.from(new Set([...(draft.deletedLpIds || []), id]));
+      draft.landingPages = (draft.landingPages || []).filter((x: any) => x.id !== id);
+    },
+    { immediate: true }
+  );
 }
 
 export function getLP(id: string): LP | undefined {

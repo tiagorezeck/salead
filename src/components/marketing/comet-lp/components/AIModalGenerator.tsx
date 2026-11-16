@@ -3,6 +3,7 @@ import { LandingPage, AccentColor, HeroModel } from "../types/landingPage";
 import { THEME_CONFIGS } from "../utils/theme";
 import { applyThematicImagesToPage } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
+import { cloudStore } from "@/services/cloudStorageService";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Sparkles,
@@ -254,17 +255,19 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
     "Montando Bento Grid, prova social e integrador webhook...",
   ];
 
-  // Load custom saved niches and audiences from localStorage
+  // Load custom saved niches and audiences from cloudStore (zero localStorage)
   useEffect(() => {
-    try {
-      const savedNiches = localStorage.getItem("lan_custom_niches");
-      if (savedNiches) setCustomNiches(JSON.parse(savedNiches));
-
-      const savedAudiences = localStorage.getItem("lan_custom_audiences");
-      if (savedAudiences) setCustomAudiences(JSON.parse(savedAudiences));
-    } catch (e) {
-      console.error("Error loading custom LAN parameters:", e);
-    }
+    const syncCustomParams = () => {
+      try {
+        const aiCfg = (cloudStore.getState().aiConfig || {}) as any;
+        if (Array.isArray(aiCfg.customNiches)) setCustomNiches(aiCfg.customNiches);
+        if (Array.isArray(aiCfg.customAudiences)) setCustomAudiences(aiCfg.customAudiences);
+      } catch (e) {
+        console.error("Error loading custom LAN parameters:", e);
+      }
+    };
+    syncCustomParams();
+    return cloudStore.subscribe(syncCustomParams);
   }, []);
 
   if (!isOpen) return null;
@@ -278,9 +281,9 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
     if (!customNiches.includes(trimmed)) {
       const updated = [...customNiches, trimmed];
       setCustomNiches(updated);
-      try {
-        localStorage.setItem("lan_custom_niches", JSON.stringify(updated));
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.aiConfig = { ...(draft.aiConfig || {}), customNiches: updated };
+      });
     }
     setNiche(trimmed);
     setNewNicheInput("");
@@ -291,9 +294,9 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
     e.stopPropagation();
     const updated = customNiches.filter((n) => n !== target);
     setCustomNiches(updated);
-    try {
-      localStorage.setItem("lan_custom_niches", JSON.stringify(updated));
-    } catch {}
+    cloudStore.mutate((draft) => {
+      draft.aiConfig = { ...(draft.aiConfig || {}), customNiches: updated };
+    });
     if (niche === target) {
       setNiche("Mentoria High-Ticket & Infoprodutos");
     }
@@ -308,9 +311,9 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
     if (!customAudiences.includes(trimmed)) {
       const updated = [...customAudiences, trimmed];
       setCustomAudiences(updated);
-      try {
-        localStorage.setItem("lan_custom_audiences", JSON.stringify(updated));
-      } catch {}
+      cloudStore.mutate((draft) => {
+        draft.aiConfig = { ...(draft.aiConfig || {}), customAudiences: updated };
+      });
     }
 
     setTargetAudience((prev) => (prev ? `${prev}, ${trimmed}` : trimmed));
@@ -322,9 +325,9 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
     e.stopPropagation();
     const updated = customAudiences.filter((a) => a !== target);
     setCustomAudiences(updated);
-    try {
-      localStorage.setItem("lan_custom_audiences", JSON.stringify(updated));
-    } catch {}
+    cloudStore.mutate((draft) => {
+      draft.aiConfig = { ...(draft.aiConfig || {}), customAudiences: updated };
+    });
   };
 
   // Toggle or select audience tag

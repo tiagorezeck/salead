@@ -1,15 +1,24 @@
 // =========================================================================
-// GOOGLE DRIVE + GOOGLE SHEETS DATABASE CLIENT SERVICE (SALEAD MOTOR)
+// GOOGLE DRIVE + GOOGLE SHEETS DATABASE CLIENT SERVICE (ZERO-LOCALSTORAGE)
+// Transporte puro com Google Apps Script (Code.gs v3.0) via /api/drive-proxy
+// ou chamada direta, sem armazenamento de dados de negócio em localStorage.
 // =========================================================================
+
+import {
+  getGlobalGasConfig,
+  normalizeGasUrl,
+  setGlobalGasConfig,
+} from "@/config/gasConfig";
 
 export interface DriveConfig {
   webappUrl: string;
+  apiToken?: string;
   autoSync: boolean;
   folderName: string;
   connected?: boolean;
   folderId?: string;
   lastSyncTimestamp?: number;
-  syncStatus?: 'synced' | 'syncing' | 'error' | 'offline';
+  syncStatus?: "synced" | "syncing" | "error" | "offline";
   spreadsheetUrl?: string;
   spreadsheetName?: string;
   spreadsheetId?: string;
@@ -30,110 +39,683 @@ export interface DriveTestResult {
   message: string;
   spreadsheetUrl?: string;
   spreadsheetName?: string;
+  spreadsheetId?: string;
   folder?: string;
 }
 
-const STORAGE_KEY = 'app_drive_config';
-const DB_LOCAL_STORAGE_KEY = 'salead_database_root';
+export interface SystemCheckpoint {
+  id: string;
+  name: string;
+  timestamp: string;
+  leadsCount: number;
+  data: any;
+  driveFileName?: string;
+}
 
-export const getDriveConfig = (): DriveConfig => {
-  if (typeof window === "undefined") {
-    return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline', connected: false };
-  }
-  try {
-    // Detecta parâmetro de sincronização direta na URL para emparelhamento instantâneo em celulares e outros PCs
-    const urlParams = new URLSearchParams(window.location.search);
-    const driveParam = urlParams.get('drive_url') || urlParams.get('sync_drive');
-    if (driveParam) {
-      const cleanParam = cleanWebAppUrl(decodeURIComponent(driveParam));
-      if (cleanParam) {
-        const autoSyncedConfig: DriveConfig = {
-          webappUrl: cleanParam,
-          autoSync: true,
-          folderName: 'SALEAD/AppDatabase_Data',
-          syncStatus: 'synced',
-          lastSyncTimestamp: Date.now(),
-          connected: true
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(autoSyncedConfig));
-        return autoSyncedConfig;
-      }
-    }
+// Estado em memória RAM (Zero-LocalStorage)
+let inMemoryDriveConfig: DriveConfig | null = null;
+let inMemoryDatabaseRoot: any = null;
+let inMemoryCheckpoints: SystemCheckpoint[] = [];
 
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) {
-      return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline', connected: false };
-    }
-    const parsed = JSON.parse(saved);
-    const isConn = !!(parsed.webappUrl && parsed.webappUrl.trim().length > 0);
-    return {
-      ...parsed,
-      connected: isConn,
-      syncStatus: isConn ? (parsed.syncStatus === 'error' ? 'error' : 'synced') : 'offline'
-    };
-  } catch {
-    return { webappUrl: '', autoSync: true, folderName: 'SALEAD/AppDatabase_Data', syncStatus: 'offline', connected: false };
-  }
+const GET_ACTIONS = new Set([
+  "ping",
+  "test",
+  "get",
+  "GET_DATABASE",
+  "LOAD_DATABASE",
+  "GET_PUBLIC_LP",
+  "GET_LP_BY_SLUG",
+  "GET_PUBLIC_SURVEY",
+  "RECORD_LP_VISIT",
+  "INCREMENT_LP_VISIT",
+  "lp_visit",
+  "list_files",
+  "get_file",
+  "FORCE_READ_SHEETS",
+  "force_read",
+]);
+
+export const cleanWebAppUrl = (rawUrl: string): string => {
+  return normalizeGasUrl(rawUrl);
 };
 
-export const saveDriveConfig = (config: Partial<DriveConfig>): DriveConfig => {
-  const current = getDriveConfig();
-  const updated = { ...current, ...config };
-  updated.connected = !!(updated.webappUrl && updated.webappUrl.trim().length > 0);
+export const getDriveConfig = (): DriveConfig => {
+  const globalCfg = getGlobalGasConfig();
+  const baseUrl = normalizeGasUrl(globalCfg.WEBAPP_URL);
+
   if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new CustomEvent('salead_drive_config_updated', { detail: updated }));
-    
-    // Persiste também no servidor para que todos os membros da equipe e navegadores recebam automaticamente
-    fetch('/api/system/drive-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated)
-    }).catch(() => {});
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const driveParam = urlParams.get("drive_url") || urlParams.get("sync_drive");
+      if (driveParam) {
+        const cleanParam = cleanWebAppUrl(decodeURIComponent(driveParam));
+        if (cleanParam) {
+          setGlobalGasConfig({ WEBAPP_URL: cleanParam });
+          inMemoryDriveConfig = {
+            ...(inMemoryDriveConfig || {}),
+            webappUrl: cleanParam,
+            apiToken: inMemoryDriveConfig?.apiToken || globalCfg.API_TOKEN,
+            autoSync: true,
+            folderName: "SALEAD/AppDatabase_Data",
+            syncStatus: "synced",
+            lastSyncTimestamp: Date.now(),
+            connected: true,
+            spreadsheetUrl:
+              inMemoryDriveConfig?.spreadsheetUrl || globalCfg.SPREADSHEET_URL,
+            spreadsheetId:
+              inMemoryDriveConfig?.spreadsheetId || globalCfg.SPREADSHEET_ID,
+            spreadsheetName:
+              inMemoryDriveConfig?.spreadsheetName || globalCfg.SPREADSHEET_NAME,
+          };
+          return { ...inMemoryDriveConfig };
+        }
+      }
+    } catch {}
   }
-  return updated;
+
+  if (!inMemoryDriveConfig) {
+    inMemoryDriveConfig = {
+      webappUrl: baseUrl,
+      apiToken: globalCfg.API_TOKEN || "",
+      autoSync: true,
+      folderName: "SALEAD/AppDatabase_Data",
+      connected: !!baseUrl,
+      syncStatus: baseUrl ? "synced" : "offline",
+      spreadsheetUrl: globalCfg.SPREADSHEET_URL,
+      spreadsheetId: globalCfg.SPREADSHEET_ID,
+      spreadsheetName: globalCfg.SPREADSHEET_NAME,
+    };
+  }
+
+  return { ...inMemoryDriveConfig };
+};
+
+export const saveDriveConfig = (
+  config: Partial<DriveConfig>,
+  persistServer = true
+): DriveConfig => {
+  const current = getDriveConfig();
+  const nextUrl =
+    config.webappUrl !== undefined
+      ? cleanWebAppUrl(config.webappUrl)
+      : current.webappUrl;
+
+  const updated: DriveConfig = {
+    ...current,
+    ...config,
+    webappUrl: nextUrl,
+    connected: !!(nextUrl && nextUrl.trim().length > 0),
+  };
+
+  setGlobalGasConfig({
+    WEBAPP_URL: updated.webappUrl,
+    ...(config.apiToken !== undefined ? { API_TOKEN: config.apiToken } : {}),
+    ...(config.spreadsheetUrl !== undefined
+      ? { SPREADSHEET_URL: config.spreadsheetUrl }
+      : {}),
+    ...(config.spreadsheetId !== undefined
+      ? { SPREADSHEET_ID: config.spreadsheetId }
+      : {}),
+    ...(config.spreadsheetName !== undefined
+      ? { SPREADSHEET_NAME: config.spreadsheetName }
+      : {}),
+  });
+
+  const changed = JSON.stringify(current) !== JSON.stringify(updated);
+  inMemoryDriveConfig = updated;
+
+  if (typeof window !== "undefined" && changed) {
+    window.dispatchEvent(
+      new CustomEvent("salead_drive_config_updated", { detail: updated })
+    );
+
+    if (persistServer && config.webappUrl !== undefined) {
+      fetch("/api/server-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webappUrl: updated.webappUrl,
+          apiToken: updated.apiToken,
+          autoSync: updated.autoSync,
+          folderName: updated.folderName,
+          spreadsheetUrl: updated.spreadsheetUrl,
+          spreadsheetId: updated.spreadsheetId,
+          spreadsheetName: updated.spreadsheetName,
+        }),
+      }).catch(() => {});
+
+      fetch("/api/system/drive-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      }).catch(() => {});
+    }
+  }
+
+  return { ...updated };
 };
 
 export const initializeSharedDriveConfig = async (): Promise<DriveConfig> => {
   if (typeof window === "undefined") return getDriveConfig();
-  try {
-    const res = await fetch('/api/system/drive-config');
-    if (res.ok) {
+
+  const tryEndpoints = ["/api/runtime-config", "/api/system/drive-config"];
+  for (const endpoint of tryEndpoints) {
+    try {
+      const res = await fetch(endpoint, { cache: "no-store" });
+      if (!res.ok) continue;
       const serverConfig = await res.json();
       if (serverConfig && serverConfig.webappUrl) {
-        const local = getDriveConfig();
-        if (!local.webappUrl || (serverConfig.lastSyncTimestamp && serverConfig.lastSyncTimestamp > (local.lastSyncTimestamp || 0))) {
-          const merged = { ...local, ...serverConfig, connected: true };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-          window.dispatchEvent(new CustomEvent('salead_drive_config_updated', { detail: merged }));
-          return merged;
+        const clean = cleanWebAppUrl(serverConfig.webappUrl);
+        if (clean) {
+          return saveDriveConfig(
+            {
+              webappUrl: clean,
+              ...(serverConfig.apiToken
+                ? { apiToken: serverConfig.apiToken }
+                : {}),
+              autoSync: serverConfig.autoSync !== false,
+              folderName:
+                serverConfig.folderName || "SALEAD/AppDatabase_Data",
+              spreadsheetUrl:
+                serverConfig.spreadsheetUrl || getDriveConfig().spreadsheetUrl,
+              spreadsheetId:
+                serverConfig.spreadsheetId || getDriveConfig().spreadsheetId,
+              spreadsheetName:
+                serverConfig.spreadsheetName || getDriveConfig().spreadsheetName,
+              connected: true,
+            },
+            false
+          );
         }
       }
+    } catch {}
+  }
+
+  return getDriveConfig();
+};
+
+export const getLocalDatabaseRoot = <T>(): T | null => {
+  return (inMemoryDatabaseRoot as T) || null;
+};
+
+export const saveLocalDatabaseRoot = <T>(data: T): void => {
+  inMemoryDatabaseRoot = data;
+};
+
+// =========================================================================
+// HELPER CENTRAL DE REQUISIÇÃO VIA PROXY (SEM CORS / ZERO-LOCALSTORAGE)
+// =========================================================================
+export const executeDriveRequest = async (
+  payload: any,
+  retryCount = 0
+): Promise<any> => {
+  const maxRetries = 3;
+  const cfg = getDriveConfig();
+  const cleanUrl = cleanWebAppUrl(payload.targetUrl || cfg.webappUrl || "");
+
+  if (
+    cleanUrl &&
+    (cleanUrl.includes("script.google.com/d/") || cleanUrl.includes("/edit"))
+  ) {
+    throw new Error(
+      "Você inseriu a URL de edição do projeto (script.google.com/d/...). Clique em 'Implantar' > 'Gerenciar implantações' / 'Nova implantação' > tipo 'App da Web' e copie a URL terminada em /exec."
+    );
+  }
+
+  const effectiveToken = payload.apiToken ?? cfg.apiToken ?? "";
+
+  let proxyRes: Response | null = null;
+  let data: any = null;
+
+  try {
+    proxyRes = await fetch("/api/drive-proxy", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(effectiveToken
+          ? {
+              Authorization: `Bearer ${effectiveToken}`,
+              "x-api-token": effectiveToken,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        ...payload,
+        ...(cleanUrl ? { targetUrl: cleanUrl } : {}),
+        ...(effectiveToken ? { apiToken: effectiveToken } : {}),
+      }),
+    });
+    data = await proxyRes.json().catch(() => null);
+  } catch {}
+
+  // Retry automático para LockService ocupado (HTTP 429 ou status busy)
+  if (
+    (data?.status === "busy" ||
+      data?.message?.includes("ocupado") ||
+      proxyRes?.status === 429) &&
+    retryCount < maxRetries
+  ) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, 2500 * (retryCount + 1))
+    );
+    return executeDriveRequest(payload, retryCount + 1);
+  }
+
+  if (data && data.status === "busy") {
+    return {
+      status: "busy",
+      success: true,
+      message:
+        data.message ||
+        "O Google Apps Script está temporariamente ocupado. Nova tentativa agendada.",
+      queued: true,
+    };
+  }
+
+  // Fallback direto apenas se /api/drive-proxy não existir (404) e houver URL válida
+  if ((!proxyRes || proxyRes.status === 404) && cleanUrl && typeof window !== "undefined") {
+    try {
+      const action = String(payload.action || "").trim();
+      if (GET_ACTIONS.has(action)) {
+        const directUrl = new URL(cleanUrl);
+        directUrl.searchParams.set("action", action);
+        if (payload.fileName) directUrl.searchParams.set("fileName", payload.fileName);
+        if (payload.id) directUrl.searchParams.set("id", String(payload.id));
+        if (payload.lpId) directUrl.searchParams.set("lpId", String(payload.lpId));
+        if (payload.slug) directUrl.searchParams.set("slug", String(payload.slug));
+        if (payload.title) directUrl.searchParams.set("title", String(payload.title));
+        if (payload.surveyId) directUrl.searchParams.set("surveyId", String(payload.surveyId));
+        if (payload.nocache) directUrl.searchParams.set("nocache", "1");
+        if (effectiveToken) directUrl.searchParams.set("token", effectiveToken);
+        directUrl.searchParams.set("t", Date.now().toString());
+
+        const directRes = await fetch(directUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+          },
+        });
+        return await directRes.json();
+      } else {
+        const directRes = await fetch(cleanUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({ ...payload, token: effectiveToken }),
+        });
+        return await directRes.json();
+      }
+    } catch (directErr: any) {
+      throw new Error(
+        `Conexão com o Google Apps Script indisponível. Verifique a URL e as permissões do Web App. (${
+          directErr.message || "Offline"
+        })`
+      );
+    }
+  }
+
+  if (data && data.status === "error") {
+    throw new Error(data.message || "Erro retornado pelo Google Apps Script.");
+  }
+
+  if (data && data.status === "unauthorized") {
+    throw new Error(
+      data.message || "Acesso não autorizado: Token de segurança inválido."
+    );
+  }
+
+  if (!proxyRes || !proxyRes.ok) {
+    const errorMsg =
+      data?.message ||
+      `Erro de conexão com o proxy (HTTP ${proxyRes ? proxyRes.status : "Offline"})`;
+    throw new Error(errorMsg);
+  }
+
+  if (!data) {
+    throw new Error("Resposta vazia recebida do servidor.");
+  }
+
+  return data;
+};
+
+// PING / TESTE DE CONEXÃO
+export const testDriveConnection = async (
+  rawUrl?: string,
+  token?: string
+): Promise<DriveTestResult> => {
+  const cleanUrl = cleanWebAppUrl(rawUrl || getDriveConfig().webappUrl);
+  if (!cleanUrl) {
+    return {
+      success: false,
+      message: "Insira a URL do Web App do Google Apps Script.",
+    };
+  }
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "ping",
+      apiToken: token,
+    });
+
+    if (res.status === "success" || res.success) {
+      saveDriveConfig({
+        webappUrl: cleanUrl,
+        apiToken: token !== undefined ? token : getDriveConfig().apiToken,
+        syncStatus: "synced",
+        lastSyncTimestamp: Date.now(),
+        spreadsheetUrl: res.spreadsheetUrl || getDriveConfig().spreadsheetUrl,
+        spreadsheetName: res.spreadsheetName || getDriveConfig().spreadsheetName,
+        spreadsheetId: res.spreadsheetId || getDriveConfig().spreadsheetId,
+        lastSyncMessage: res.message,
+      });
+      return {
+        success: true,
+        message:
+          res.message ||
+          "Conexão com Google Drive e Planilha estabelecida com sucesso!",
+        spreadsheetUrl: res.spreadsheetUrl,
+        spreadsheetName: res.spreadsheetName,
+        spreadsheetId: res.spreadsheetId,
+        folder: res.folder,
+      };
+    }
+
+    return {
+      success: false,
+      message: res.message || "Falha na resposta do script.",
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message:
+        err.message ||
+        "Não foi possível conectar ao Google Apps Script. Verifique se a implantação está como 'Qualquer pessoa' (Anyone) e tipo 'App da Web'.",
+    };
+  }
+};
+
+export const setScriptSecuritySecret = async (
+  secret: string,
+  customUrl?: string
+): Promise<{ success: boolean; message: string }> => {
+  const cleanUrl = cleanWebAppUrl(customUrl || getDriveConfig().webappUrl);
+  if (!cleanUrl) throw new Error("URL do Google Apps Script não configurada.");
+
+  const res = await executeDriveRequest({
+    targetUrl: cleanUrl,
+    action: "SET_API_SECRET",
+    data: { newSecret: secret },
+    apiToken: getDriveConfig().apiToken,
+  });
+
+  if (res.status === "success" || res.success) {
+    saveDriveConfig({ apiToken: secret });
+    return {
+      success: true,
+      message: res.message || "Chave de segurança atualizada com sucesso!",
+    };
+  }
+  throw new Error(res.message || "Erro ao configurar chave de segurança.");
+};
+
+// PUSH (Enviar / Salvar banco de dados completo na nuvem)
+export async function pushToGoogleDrive<T>(
+  dataOrUrl: string | T,
+  optionalData?: T
+): Promise<any> {
+  let targetUrl: string;
+  let data: T;
+
+  if (typeof dataOrUrl === "string" && optionalData !== undefined) {
+    targetUrl = dataOrUrl;
+    data = optionalData;
+  } else {
+    targetUrl = getDriveConfig().webappUrl;
+    data = dataOrUrl as T;
+  }
+
+  const cleanUrl = cleanWebAppUrl(targetUrl || getGlobalGasConfig().WEBAPP_URL);
+  saveLocalDatabaseRoot(data);
+
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "save",
+      data,
+    });
+
+    if (res.status === "error") throw new Error(res.message);
+
+    if (res.status === "busy") {
+      saveDriveConfig(
+        {
+          syncStatus: "syncing",
+          lastSyncMessage: res.message,
+        },
+        false
+      );
+      return res;
+    }
+
+    saveDriveConfig(
+      {
+        lastSyncTimestamp: Date.now(),
+        syncStatus: "synced",
+        spreadsheetUrl: res.spreadsheetUrl || getDriveConfig().spreadsheetUrl,
+        spreadsheetName: res.spreadsheetName || getDriveConfig().spreadsheetName,
+        spreadsheetId: res.spreadsheetId || getDriveConfig().spreadsheetId,
+        lastSyncMessage: res.message,
+      },
+      false
+    );
+
+    return res;
+  } catch (err: any) {
+    saveDriveConfig({ syncStatus: "error", lastSyncMessage: err.message }, false);
+    throw err;
+  }
+}
+
+// PULL (Leitura rápida via CacheService chunked + database_root.json)
+export async function fetchFromGoogleDrive<T>(
+  optionalUrl?: string,
+  nocache = false
+): Promise<T | null> {
+  const targetUrl =
+    optionalUrl || getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL;
+  const cleanUrl = cleanWebAppUrl(targetUrl);
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "get",
+      ...(nocache ? { nocache: "1" } : {}),
+    });
+
+    if (res?.status === "empty") return null;
+    if (res?.status === "error") throw new Error(res.message);
+
+    const payload = res?.data && typeof res.data === "object" && !Array.isArray(res.leads)
+      ? res.data
+      : res;
+
+    saveLocalDatabaseRoot(payload);
+    saveDriveConfig(
+      { lastSyncTimestamp: Date.now(), syncStatus: "synced" },
+      false
+    );
+
+    return payload as T;
+  } catch {
+    saveDriveConfig({ syncStatus: "offline" }, false);
+    return null;
+  }
+}
+
+// LEITURA DIRETA DE LANDING PAGE PÚBLICA (Zero-LocalStorage, funciona em aba anônima)
+export const fetchPublicLpFromDrive = async (
+  idOrSlug: string
+): Promise<any | null> => {
+  if (!idOrSlug) return null;
+  const cleanUrl = cleanWebAppUrl(
+    getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "GET_PUBLIC_LP",
+      id: idOrSlug,
+      slug: idOrSlug,
+      lpId: idOrSlug,
+    });
+    if (res && (res.status === "success" || res.success) && res.landingPage) {
+      return res.landingPage;
     }
   } catch {}
-  return getDriveConfig();
+
+  // Fallback para carga completa do banco caso o script ainda esteja em versão anterior
+  try {
+    const db: any = await fetchFromGoogleDrive(cleanUrl, true);
+    const list = Array.isArray(db?.landingPages)
+      ? db.landingPages
+      : Array.isArray(db?.landing_pages)
+      ? db.landing_pages
+      : [];
+    const targetLow = idOrSlug.trim().toLowerCase();
+    return (
+      list.find(
+        (p: any) =>
+          p &&
+          (String(p.id || "").toLowerCase() === targetLow ||
+            String(p.originalId || "").toLowerCase() === targetLow ||
+            String(p.slug || "").toLowerCase() === targetLow)
+      ) || null
+    );
+  } catch {
+    return null;
+  }
+};
+
+// LEITURA DIRETA DE PESQUISA PÚBLICA (Zero-LocalStorage)
+export const fetchPublicSurveyFromDrive = async (
+  idOrSlug: string
+): Promise<any | null> => {
+  if (!idOrSlug) return null;
+  const cleanUrl = cleanWebAppUrl(
+    getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "GET_PUBLIC_SURVEY",
+      id: idOrSlug,
+      surveyId: idOrSlug,
+    });
+    if (res && (res.status === "success" || res.success) && res.survey) {
+      return res.survey;
+    }
+  } catch {}
+
+  try {
+    const db: any = await fetchFromGoogleDrive(cleanUrl, true);
+    const list = Array.isArray(db?.surveys) ? db.surveys : [];
+    const targetLow = idOrSlug.trim().toLowerCase();
+    return (
+      list.find(
+        (s: any) =>
+          s &&
+          (String(s.id || "").toLowerCase() === targetLow ||
+            String(s.slug || "").toLowerCase() === targetLow)
+      ) || null
+    );
+  } catch {
+    return null;
+  }
+};
+
+// FORÇAR LEITURA COMPLETA DAS ABAS DO GOOGLE SHEETS
+export const forceReadSpreadsheetFromDrive = async <T>(
+  url?: string
+): Promise<T | null> => {
+  const cleanUrl = cleanWebAppUrl(
+    url || getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
+  if (!cleanUrl) return null;
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "FORCE_READ_SHEETS",
+    });
+    let db =
+      res && (res.data || res.content) ? res.data || res.content : res;
+
+    if (
+      !db ||
+      typeof db !== "object" ||
+      (!Array.isArray(db.leads) && !Array.isArray(db.landingPages))
+    ) {
+      db = await fetchFromGoogleDrive<T>(cleanUrl, true);
+    }
+
+    if (db && typeof db === "object") {
+      saveLocalDatabaseRoot(db);
+      saveDriveConfig(
+        { lastSyncTimestamp: Date.now(), syncStatus: "synced" },
+        false
+      );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("salead_drive_synced", { detail: db }));
+      }
+    }
+
+    return db as T;
+  } catch {
+    const fallbackDb = await fetchFromGoogleDrive<T>(cleanUrl);
+    if (fallbackDb && typeof fallbackDb === "object") {
+      saveLocalDatabaseRoot(fallbackDb);
+      saveDriveConfig(
+        { lastSyncTimestamp: Date.now(), syncStatus: "synced" },
+        false
+      );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("salead_drive_synced", { detail: fallbackDb })
+        );
+      }
+    }
+    return fallbackDb;
+  }
 };
 
 let syncIntervalId: any = null;
 let isSyncingNow = false;
 
-export const triggerInstantCloudSync = async (forceReadSheets = true): Promise<any> => {
+export const triggerInstantCloudSync = async (
+  forceReadSheets = false
+): Promise<any> => {
   if (typeof window === "undefined" || isSyncingNow) return null;
   const cfg = getDriveConfig();
-  if (!cfg.webappUrl) return null;
-  
+  const url = cfg.webappUrl || getGlobalGasConfig().WEBAPP_URL;
+  if (!url) return null;
+
   try {
     isSyncingNow = true;
-    let data: any = null;
-    if (forceReadSheets) {
-      data = await forceReadSpreadsheetFromDrive(cfg.webappUrl);
-    } else {
-      data = await fetchFromGoogleDrive(cfg.webappUrl);
-    }
-    if (data && typeof data === 'object') {
-      window.dispatchEvent(new CustomEvent('salead_drive_synced', { detail: data }));
-      window.dispatchEvent(new Event('storage'));
-      window.dispatchEvent(new CustomEvent('lp_visit_incremented'));
+    const data = forceReadSheets
+      ? await forceReadSpreadsheetFromDrive(url)
+      : await fetchFromGoogleDrive(url);
+    if (data && typeof data === "object") {
+      window.dispatchEvent(new CustomEvent("salead_drive_synced", { detail: data }));
+      window.dispatchEvent(new CustomEvent("lp_visit_incremented"));
     }
     return data;
   } catch (err) {
@@ -145,302 +727,26 @@ export const triggerInstantCloudSync = async (forceReadSheets = true): Promise<a
 };
 
 export const startRealtimeCloudSyncEngine = () => {
-  if (typeof window === "undefined") return;
-  if (syncIntervalId) return;
+  if (typeof window === "undefined" || syncIntervalId) return;
 
-  // Sincronização inicial automática imediata
-  initializeSharedDriveConfig().then((cfg) => {
-    if (cfg && cfg.webappUrl) {
-      triggerInstantCloudSync(true).catch(() => {});
-    }
-  }).catch(() => {});
+  initializeSharedDriveConfig()
+    .then((cfg) => {
+      if (cfg && cfg.webappUrl) {
+        triggerInstantCloudSync(false).catch(() => {});
+      }
+    })
+    .catch(() => {});
 
-  // Loop contínuo a cada 10 segundos
   syncIntervalId = setInterval(() => {
     const cfg = getDriveConfig();
-    if (cfg.webappUrl && cfg.autoSync !== false) {
-      triggerInstantCloudSync(true).catch(() => {});
+    if (
+      cfg.webappUrl &&
+      cfg.autoSync !== false &&
+      (typeof document === "undefined" || document.visibilityState === "visible")
+    ) {
+      triggerInstantCloudSync(false).catch(() => {});
     }
-  }, 10000);
-
-  // Sincronização ao focar na janela / aba
-  window.addEventListener('focus', () => {
-    const cfg = getDriveConfig();
-    if (cfg.webappUrl) triggerInstantCloudSync(true).catch(() => {});
-  });
-
-  window.addEventListener('online', () => {
-    const cfg = getDriveConfig();
-    if (cfg.webappUrl) triggerInstantCloudSync(true).catch(() => {});
-  });
-};
-
-export const cleanWebAppUrl = (rawUrl: string): string => {
-  if (!rawUrl) return '';
-  let url = rawUrl.trim().replace(/^["']|["']$/g, '');
-
-  // Se o usuário colou apenas o ID de implantação do Apps Script (ex: AKfycb...)
-  if (url.startsWith('AKfy')) {
-    url = `https://script.google.com/macros/s/${url}/exec`;
-  }
-
-  // Se o link for do Google Apps Script
-  if (url.includes('script.google.com/macros/s/')) {
-    if (url.endsWith('/dev')) {
-      url = url.replace(/\/dev$/, '/exec');
-    } else if (!url.endsWith('/exec')) {
-      url = url.replace(/\/+$/, '') + '/exec';
-    }
-  }
-
-  return url;
-};
-
-export const getLocalDatabaseRoot = <T>(): T | null => {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(DB_LOCAL_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-export const saveLocalDatabaseRoot = <T>(data: T): void => {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(DB_LOCAL_STORAGE_KEY, JSON.stringify(data));
-  } catch (err: any) {
-    console.warn("Aviso ao persistir salead_database_root no localStorage:", err);
-    // Recuperação inteligente em caso de QuotaExceededError
-    try {
-      localStorage.removeItem(LOCAL_CHECKPOINTS_STORAGE_KEY);
-      localStorage.setItem(DB_LOCAL_STORAGE_KEY, JSON.stringify(data));
-    } catch {}
-  }
-};
-
-// =========================================================================
-// HELPER CENTRAL DE REQUISIÇÃO VIA PROXY (SEM PROBLEMAS DE CORS / IFRAME)
-// =========================================================================
-const executeDriveRequest = async (payload: {
-  targetUrl: string;
-  action: string;
-  data?: any;
-  fileName?: string;
-  base64Data?: string;
-  folderCategory?: string;
-  mimeType?: string;
-}): Promise<any> => {
-  const cleanUrl = cleanWebAppUrl(payload.targetUrl);
-  if (!cleanUrl) throw new Error("URL do Google Apps Script não configurada.");
-
-  // Se o usuário colou a URL de edição do Google Apps Script em vez do Web App
-  if (cleanUrl.includes('script.google.com/d/') || cleanUrl.includes('/edit')) {
-    throw new Error("Você inseriu a URL de edição do projeto (script.google.com/d/...). Clique no botão azul 'Implantar' > 'Nova implantação' > tipo 'App da Web' e copie a URL gerada (terminada em /exec).");
-  }
-
-  let proxyRes: Response | null = null;
-  let data: any = null;
-
-  try {
-    proxyRes = await fetch('/api/drive-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, targetUrl: cleanUrl })
-    });
-    data = await proxyRes.json().catch(() => null);
-  } catch {
-    // Tenta conexão direta de forma transparente sem poluir os logs
-  }
-
-  // Se o servidor proxy não existe no ambiente (HTTP 404 no Vercel ou hospedagem estática), faz tentativa direta no Google Apps Script
-  if ((!proxyRes || proxyRes.status === 404) && typeof window !== "undefined") {
-    try {
-      if (payload.action === "ping" || payload.action === "get" || payload.action === "list_files" || payload.action === "get_file" || payload.action === "FORCE_READ_SHEETS" || payload.action === "force_read") {
-        const directUrl = new URL(cleanUrl);
-        directUrl.searchParams.set("action", payload.action);
-        if (payload.fileName) directUrl.searchParams.set("fileName", payload.fileName);
-        directUrl.searchParams.set("t", Date.now().toString());
-
-        const directRes = await fetch(directUrl.toString(), {
-          method: "GET",
-          headers: { "Accept": "application/json, text/plain, */*" }
-        });
-        const directData = await directRes.json();
-        return directData;
-      } else {
-        const directRes = await fetch(cleanUrl, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload)
-        });
-        const directData = await directRes.json();
-        return directData;
-      }
-    } catch (directErr: any) {
-      throw new Error(`Conexão com o Google Apps Script indisponível. Verifique a URL configurada e as permissões do script. (${directErr.message || 'Offline'})`);
-    }
-  }
-
-  if (data && data.status === 'error') {
-    throw new Error(data.message || "Erro retornado pelo Google Apps Script.");
-  }
-
-  if (!proxyRes || !proxyRes.ok) {
-    const errorMsg = data?.message || `Erro de conexão com o proxy (HTTP ${proxyRes ? proxyRes.status : 'Offline'})`;
-    throw new Error(errorMsg);
-  }
-
-  if (!data) {
-    throw new Error("Resposta vazia recebida do servidor.");
-  }
-
-  if (data.status === 'error') {
-    throw new Error(data.message || "Erro desconhecido retornado pelo Google Apps Script.");
-  }
-
-  return data;
-};
-
-// PING / TESTE DE CONEXÃO
-export const testDriveConnection = async (rawUrl: string): Promise<DriveTestResult> => {
-  const cleanUrl = cleanWebAppUrl(rawUrl);
-  if (!cleanUrl) {
-    return { success: false, message: "Insira a URL do Web App do Google Apps Script." };
-  }
-
-  try {
-    const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'ping' });
-
-    if (res.status === 'success') {
-      saveDriveConfig({
-        webappUrl: cleanUrl,
-        syncStatus: 'synced',
-        lastSyncTimestamp: Date.now(),
-        spreadsheetUrl: res.spreadsheetUrl,
-        spreadsheetName: res.spreadsheetName,
-        spreadsheetId: res.spreadsheetId,
-        lastSyncMessage: res.message
-      });
-      return {
-        success: true,
-        message: res.message || "Conexão com Google Drive e Planilha estabelecida com sucesso!",
-        spreadsheetUrl: res.spreadsheetUrl,
-        spreadsheetName: res.spreadsheetName,
-        folder: res.folder
-      };
-    } else {
-      return { success: false, message: res.message || "Falha na resposta do script." };
-    }
-  } catch (err: any) {
-    return {
-      success: false,
-      message: err.message || `Não foi possível conectar ao Google Apps Script. Verifique se a implantação está como 'Qualquer pessoa' (Anyone) e com método 'App da Web'.`
-    };
-  }
-};
-
-// PUSH (Enviar / Salvar banco de dados)
-export async function pushToGoogleDrive<T>(dataOrUrl: string | T, optionalData?: T): Promise<any> {
-  let targetUrl: string;
-  let data: T;
-
-  if (typeof dataOrUrl === 'string' && optionalData !== undefined) {
-    targetUrl = dataOrUrl;
-    data = optionalData;
-  } else {
-    targetUrl = getDriveConfig().webappUrl;
-    data = dataOrUrl as T;
-  }
-
-  const cleanUrl = cleanWebAppUrl(targetUrl);
-  if (!cleanUrl) {
-    saveLocalDatabaseRoot(data);
-    return null;
-  }
-
-  saveLocalDatabaseRoot(data);
-
-  try {
-    const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'save', data });
-
-    if (res.status === 'error') throw new Error(res.message);
-
-    saveDriveConfig({
-      lastSyncTimestamp: Date.now(),
-      syncStatus: 'synced',
-      spreadsheetUrl: res.spreadsheetUrl || getDriveConfig().spreadsheetUrl,
-      spreadsheetName: res.spreadsheetName || getDriveConfig().spreadsheetName,
-      lastSyncMessage: res.message
-    });
-
-    return res;
-  } catch (err: any) {
-    saveDriveConfig({ syncStatus: 'error', lastSyncMessage: err.message });
-    throw err;
-  }
-}
-
-// PULL (Buscar dados atualizados no Google Drive)
-export async function fetchFromGoogleDrive<T>(optionalUrl?: string): Promise<T | null> {
-  const targetUrl = optionalUrl || getDriveConfig().webappUrl;
-  const cleanUrl = cleanWebAppUrl(targetUrl);
-  if (!cleanUrl) return null;
-
-  try {
-    const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'get' });
-
-    if (res.status === 'empty') return null;
-    if (res.status === 'error') throw new Error(res.message);
-
-    // Salva localmente como cache offline
-    saveLocalDatabaseRoot(res);
-    saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
-
-    return res as T;
-  } catch {
-    saveDriveConfig({ syncStatus: 'offline' });
-    return null;
-  }
-}
-
-// FORÇAR LEITURA COMPLETA DAS ABAS DO GOOGLE SHEETS
-export const forceReadSpreadsheetFromDrive = async <T>(url: string): Promise<T | null> => {
-  const cleanUrl = cleanWebAppUrl(url);
-  if (!cleanUrl) return null;
-
-  try {
-    // 1. Tenta acionar a ação FORCE_READ_SHEETS
-    const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'FORCE_READ_SHEETS' });
-    let db = (res && (res.data || res.content)) ? (res.data || res.content) : res;
-
-    // Se o script retornou ou se precisamos tentar o get padrão
-    if (!db || typeof db !== 'object' || (!Array.isArray(db.leads) && !Array.isArray(db.landingPages))) {
-      db = await fetchFromGoogleDrive<T>(cleanUrl);
-    }
-
-    if (db && typeof db === 'object') {
-      saveLocalDatabaseRoot(db);
-      saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('salead_drive_synced', { detail: db }));
-      }
-    }
-
-    return db as T;
-  } catch {
-    // Fallback gracioso para fetchFromGoogleDrive
-    const fallbackDb = await fetchFromGoogleDrive<T>(cleanUrl);
-    if (fallbackDb && typeof fallbackDb === 'object') {
-      saveLocalDatabaseRoot(fallbackDb);
-      saveDriveConfig({ lastSyncTimestamp: Date.now(), syncStatus: 'synced' });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('salead_drive_synced', { detail: fallbackDb }));
-      }
-    }
-    return fallbackDb;
-  }
+  }, 15000);
 };
 
 // REGISTRAR VISITA DE LANDING PAGE NO DRIVE E SHEETS (TEMPO REAL)
@@ -452,83 +758,96 @@ export const recordLpVisitToDrive = async (params: {
   title?: string;
 }): Promise<{ success: boolean; visits?: number; conv?: number }> => {
   const config = getDriveConfig();
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) return { success: false };
 
   try {
-    // 1. Tenta POST via proxy / executeDriveRequest
     const res = await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'RECORD_LP_VISIT',
+      action: "RECORD_LP_VISIT",
+      id: params.lpId || params.id,
+      lpId: params.lpId || params.id,
+      slug: params.slug,
+      title: params.pageTitle || params.title,
       data: {
         lpId: params.lpId || params.id,
         slug: params.slug,
-        title: params.pageTitle || params.title
-      }
+        title: params.pageTitle || params.title,
+      },
     });
 
-    if (res && res.status === 'success') {
+    if (res && (res.status === "success" || res.success)) {
       return { success: true, visits: res.visits, conv: res.conv };
     }
-  } catch (err) {
-    console.warn("Aviso ao registrar visita no Drive via POST, tentando GET...", err);
-  }
-
-  // 2. Fallback resiliente: requisição GET com query params (funciona perfeitamente sem bloqueios de CORS)
-  try {
-    const urlObj = new URL(cleanUrl);
-    urlObj.searchParams.set('action', 'RECORD_LP_VISIT');
-    if (params.lpId || params.id) urlObj.searchParams.set('id', params.lpId || params.id || '');
-    if (params.slug) urlObj.searchParams.set('slug', params.slug);
-    if (params.pageTitle || params.title) urlObj.searchParams.set('title', params.pageTitle || params.title || '');
-
-    await fetch(urlObj.toString(), { method: 'GET', mode: 'no-cors' });
-    return { success: true };
   } catch {}
 
   return { success: false };
 };
 
-// CRIAR CHECKPOINT (PONTO DE RESTAURAÇÃO)
-export const createCheckpoint = async <T>(url: string, data: T): Promise<string> => {
-  const cleanUrl = cleanWebAppUrl(url);
+// CRIAR / LISTAR / RESTAURAR CHECKPOINTS (100% Nuvem + RAM)
+export const createCheckpoint = async <T>(
+  url: string,
+  data: T
+): Promise<string> => {
+  const cleanUrl = cleanWebAppUrl(
+    url || getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) throw new Error("URL do Google Apps Script não configurada.");
 
-  const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'create_checkpoint', data });
+  const res = await executeDriveRequest({
+    targetUrl: cleanUrl,
+    action: "create_checkpoint",
+    data,
+  });
 
-  if (res.status === 'error') throw new Error(res.message);
+  if (res.status === "error") throw new Error(res.message);
   return res.fileName;
 };
 
-// LISTAR CHECKPOINTS
-export const listCheckpoints = async (url: string): Promise<DriveFileInfo[]> => {
-  const cleanUrl = cleanWebAppUrl(url);
+export const listCheckpoints = async (
+  url?: string
+): Promise<DriveFileInfo[]> => {
+  const cleanUrl = cleanWebAppUrl(
+    url || getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) return [];
 
-  const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'list_files' });
+  const res = await executeDriveRequest({
+    targetUrl: cleanUrl,
+    action: "list_files",
+  });
 
-  if (res.status === 'error') throw new Error(res.message);
+  if (res.status === "error") throw new Error(res.message);
   return res.files || [];
 };
 
-// RESTAURAR CHECKPOINT
-export const restoreCheckpoint = async <T>(url: string, fileName: string): Promise<T> => {
-  const cleanUrl = cleanWebAppUrl(url);
+export const restoreCheckpoint = async <T>(
+  url: string,
+  fileName: string
+): Promise<T> => {
+  const cleanUrl = cleanWebAppUrl(
+    url || getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) throw new Error("URL do Google Apps Script não configurada.");
 
-  const res = await executeDriveRequest({ targetUrl: cleanUrl, action: 'set_as_root', fileName });
+  const res = await executeDriveRequest({
+    targetUrl: cleanUrl,
+    action: "set_as_root",
+    fileName,
+  });
 
-  if (res.status === 'error') throw new Error(res.message);
-  
+  if (res.status === "error") throw new Error(res.message);
+
   if (res.content) {
     saveLocalDatabaseRoot(res.content);
   }
   return res.content as T;
 };
 
-// CHECKPOINTS LOCAIS / NUVEM UNIFICADOS
 export const formatCheckpointName = (d: Date = new Date()): string => {
-  const pad = (n: number) => (n < 10 ? '0' + n : n);
+  const pad = (n: number) => (n < 10 ? "0" + n : n);
   const day = pad(d.getDate());
   const month = pad(d.getMonth() + 1);
   const year = d.getFullYear();
@@ -537,49 +856,19 @@ export const formatCheckpointName = (d: Date = new Date()): string => {
   return `Checkpoint-${day}-${month}-${year}-${hours}:${minutes}`;
 };
 
-export interface SystemCheckpoint {
-  id: string;
-  name: string;
-  timestamp: string;
-  leadsCount: number;
-  data: any;
-  driveFileName?: string;
-}
-
-const LOCAL_CHECKPOINTS_STORAGE_KEY = 'salead_system_checkpoints_history';
-
 export const getStoredSystemCheckpoints = (): SystemCheckpoint[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(LOCAL_CHECKPOINTS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return [...inMemoryCheckpoints];
 };
 
 export const saveSystemCheckpoint = (checkpoint: SystemCheckpoint): void => {
-  if (typeof window === "undefined") return;
-  try {
-    const current = getStoredSystemCheckpoints();
-    const next = [checkpoint, ...current.filter(c => c.id !== checkpoint.id)].slice(0, 15);
-    localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(next));
-  } catch (err) {
-    console.warn("Falha ao salvar histórico de checkpoints, reduzindo histórico:", err);
-    try {
-      const reduced = [checkpoint];
-      localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(reduced));
-    } catch {}
-  }
+  inMemoryCheckpoints = [
+    checkpoint,
+    ...inMemoryCheckpoints.filter((c) => c.id !== checkpoint.id),
+  ].slice(0, 15);
 };
 
 export const deleteSystemCheckpoint = (id: string): void => {
-  if (typeof window === "undefined") return;
-  try {
-    const current = getStoredSystemCheckpoints();
-    const next = current.filter(c => c.id !== id);
-    localStorage.setItem(LOCAL_CHECKPOINTS_STORAGE_KEY, JSON.stringify(next));
-  } catch {}
+  inMemoryCheckpoints = inMemoryCheckpoints.filter((c) => c.id !== id);
 };
 
 // UPLOAD DE MÍDIA / IMAGEM (BASE64)
@@ -590,27 +879,28 @@ export const uploadMediaToDrive = async (
   category: string = "Geral",
   mimeType: string = "image/jpeg"
 ): Promise<{ fileId: string; url: string }> => {
-  const cleanUrl = cleanWebAppUrl(url);
+  const cleanUrl = cleanWebAppUrl(
+    url || getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) throw new Error("URL do Google Apps Script não configurada.");
 
   const res = await executeDriveRequest({
     targetUrl: cleanUrl,
-    action: 'UPLOAD_MEDIA',
+    action: "UPLOAD_MEDIA",
     base64Data,
     fileName,
     folderCategory: category,
-    mimeType
+    mimeType,
   });
 
-  if (res.status === 'error') throw new Error(res.message);
+  if (res.status === "error") throw new Error(res.message);
   return { fileId: res.fileId, url: res.url };
 };
 
-// =========================================================================
-// HELPER PARA EXPORTAÇÃO E DOWNLOAD DIRETO DA PLANILHA (XLSX, CSV, ETC)
-// =========================================================================
-
-export const getSpreadsheetExportUrl = (config?: DriveConfig, format: 'xlsx' | 'pdf' | 'csv' = 'xlsx'): string | null => {
+export const getSpreadsheetExportUrl = (
+  config?: DriveConfig,
+  format: "xlsx" | "pdf" | "csv" = "xlsx"
+): string | null => {
   const currentConfig = config || getDriveConfig();
   if (currentConfig.spreadsheetId) {
     return `https://docs.google.com/spreadsheets/d/${currentConfig.spreadsheetId}/export?format=${format}`;
@@ -626,9 +916,9 @@ export const getSpreadsheetExportUrl = (config?: DriveConfig, format: 'xlsx' | '
 };
 
 export const downloadSpreadsheetAsXlsx = (config?: DriveConfig): boolean => {
-  const exportUrl = getSpreadsheetExportUrl(config, 'xlsx');
+  const exportUrl = getSpreadsheetExportUrl(config, "xlsx");
   if (!exportUrl) return false;
-  
+
   const a = document.createElement("a");
   a.href = exportUrl;
   a.target = "_blank";
@@ -639,7 +929,10 @@ export const downloadSpreadsheetAsXlsx = (config?: DriveConfig): boolean => {
   return true;
 };
 
-export const downloadJsonBackup = (data: any, fileNamePrefix = "salead_crm_backup"): void => {
+export const downloadJsonBackup = (
+  data: any,
+  fileNamePrefix = "salead_crm_backup"
+): void => {
   if (typeof window === "undefined") return;
   const dateStr = new Date().toISOString().slice(0, 10);
   const jsonStr = JSON.stringify(data, null, 2);
@@ -675,14 +968,15 @@ export const submitLpLeadToDrive = async (leadData: {
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  if (!config.webappUrl) return null;
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) return null;
 
   try {
-    const res = await executeDriveRequest({
+    return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'SUBMIT_LP_LEAD',
+      action: "SUBMIT_LP_LEAD",
       lead: {
         ...leadData,
         isTest: leadData.isTest || false,
@@ -697,7 +991,6 @@ export const submitLpLeadToDrive = async (leadData: {
       },
       isTest: leadData.isTest || false,
     });
-    return res;
   } catch (err) {
     console.warn("Aviso ao enviar lead para Google Drive:", err);
     return null;
@@ -720,47 +1013,50 @@ export const submitSurveyResponseToDrive = async (surveyData: {
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  if (!config.webappUrl) return null;
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) return null;
 
   try {
-    const res = await executeDriveRequest({
+    return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'SUBMIT_SURVEY_RESPONSE',
+      action: "SUBMIT_SURVEY_RESPONSE",
       surveyResponse: surveyData,
       data: {
         surveyResponse: surveyData,
         timestamp: new Date().toISOString(),
       },
     });
-    return res;
   } catch (err) {
     console.warn("Aviso ao enviar resposta de pesquisa para Google Drive:", err);
     return null;
   }
 };
 
-export const clearLpTestDataInDrive = async (lpId: string, lpTitle?: string): Promise<any> => {
+export const clearLpTestDataInDrive = async (
+  lpId: string,
+  lpTitle?: string
+): Promise<any> => {
   let config = getDriveConfig();
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  if (!config.webappUrl) return null;
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) return null;
 
   try {
-    const res = await executeDriveRequest({
+    return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'CLEAR_LP_TEST_DATA',
+      action: "CLEAR_LP_TEST_DATA",
       landingPageId: lpId,
-      landingPageTitle: lpTitle || '',
-      timestamp: new Date().toISOString()
+      landingPageTitle: lpTitle || "",
+      timestamp: new Date().toISOString(),
     });
-    return res;
   } catch (err) {
-    console.warn("Aviso ao limpar dados de teste da LP nas planilhas do Google Drive:", err);
+    console.warn("Aviso ao limpar dados de teste da LP no Google Drive:", err);
     return null;
   }
 };
@@ -779,34 +1075,40 @@ export const deleteLandingPageFromDrive = async (
     config = await initializeSharedDriveConfig();
   }
   const idArray = Array.isArray(ids) ? ids : [ids];
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
 
-  // 1. Atualiza cache local offline do root
-  const localDb = getLocalDatabaseRoot<any>();
-  if (localDb && Array.isArray(localDb.landingPages)) {
+  if (inMemoryDatabaseRoot && Array.isArray(inMemoryDatabaseRoot.landingPages)) {
     const idSet = new Set(idArray);
-    localDb.landingPages = localDb.landingPages.filter((p: any) => {
-      if (!p) return false;
-      if (p.id && idSet.has(p.id)) return false;
-      if (slug && p.slug && p.slug.toLowerCase() === slug.toLowerCase()) return false;
-      if (title && (p.title || p.name) && (p.title || p.name).toLowerCase() === title.toLowerCase()) return false;
-      return true;
-    });
-    saveLocalDatabaseRoot(localDb);
+    inMemoryDatabaseRoot.landingPages = inMemoryDatabaseRoot.landingPages.filter(
+      (p: any) => {
+        if (!p) return false;
+        if (p.id && idSet.has(p.id)) return false;
+        if (slug && p.slug && p.slug.toLowerCase() === slug.toLowerCase())
+          return false;
+        if (
+          title &&
+          (p.title || p.name) &&
+          (p.title || p.name).toLowerCase() === title.toLowerCase()
+        )
+          return false;
+        return true;
+      }
+    );
   }
 
   if (!cleanUrl) return null;
 
   try {
-    const res = await executeDriveRequest({
+    return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'DELETE_LANDING_PAGE',
+      action: "DELETE_LANDING_PAGE",
       ids: idArray,
-      slug: slug || '',
-      landingPageTitle: title || '',
-      timestamp: new Date().toISOString()
+      slug: slug || "",
+      landingPageTitle: title || "",
+      timestamp: new Date().toISOString(),
     });
-    return res;
   } catch (err) {
     console.warn("Aviso ao deletar Landing Page do Google Drive/Sheets:", err);
     return null;
@@ -823,36 +1125,41 @@ export const deleteLeadFromDrive = async (
     config = await initializeSharedDriveConfig();
   }
   const idArray = Array.isArray(ids) ? ids : [ids];
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
 
-  // 1. Atualiza cache local offline do root
-  const localDb = getLocalDatabaseRoot<any>();
-  if (localDb && Array.isArray(localDb.leads)) {
+  if (inMemoryDatabaseRoot && Array.isArray(inMemoryDatabaseRoot.leads)) {
     const idSet = new Set(idArray);
-    const cleanEmail = (email || '').trim().toLowerCase();
-    const cleanPhone = (whatsapp || '').replace(/\D/g, '');
-    localDb.leads = localDb.leads.filter((l: any) => {
+    const cleanEmail = (email || "").trim().toLowerCase();
+    const cleanPhone = (whatsapp || "").replace(/\D/g, "");
+    inMemoryDatabaseRoot.leads = inMemoryDatabaseRoot.leads.filter((l: any) => {
       if (!l) return false;
       if (l.id && idSet.has(l.id)) return false;
-      if (cleanEmail && l.email && l.email.trim().toLowerCase() === cleanEmail) return false;
-      if (cleanPhone && cleanPhone.length >= 8 && l.whatsapp && l.whatsapp.replace(/\D/g, '') === cleanPhone) return false;
+      if (cleanEmail && l.email && l.email.trim().toLowerCase() === cleanEmail)
+        return false;
+      if (
+        cleanPhone &&
+        cleanPhone.length >= 8 &&
+        l.whatsapp &&
+        l.whatsapp.replace(/\D/g, "") === cleanPhone
+      )
+        return false;
       return true;
     });
-    saveLocalDatabaseRoot(localDb);
   }
 
   if (!cleanUrl) return null;
 
   try {
-    const res = await executeDriveRequest({
+    return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'DELETE_LEAD',
+      action: "DELETE_LEAD",
       ids: idArray,
-      email: email || '',
-      whatsapp: whatsapp || '',
-      timestamp: new Date().toISOString()
+      email: email || "",
+      whatsapp: whatsapp || "",
+      timestamp: new Date().toISOString(),
     });
-    return res;
   } catch (err) {
     console.warn("Aviso ao deletar lead do Google Drive/Sheets:", err);
     return null;
@@ -864,12 +1171,14 @@ export const deleteProductFromDrive = async (id: string): Promise<any> => {
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
 
-  const localDb = getLocalDatabaseRoot<any>();
-  if (localDb && Array.isArray(localDb.products)) {
-    localDb.products = localDb.products.filter((p: any) => p && p.id !== id);
-    saveLocalDatabaseRoot(localDb);
+  if (inMemoryDatabaseRoot && Array.isArray(inMemoryDatabaseRoot.products)) {
+    inMemoryDatabaseRoot.products = inMemoryDatabaseRoot.products.filter(
+      (p: any) => p && p.id !== id
+    );
   }
 
   if (!cleanUrl) return null;
@@ -877,9 +1186,9 @@ export const deleteProductFromDrive = async (id: string): Promise<any> => {
   try {
     return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'DELETE_PRODUCT',
+      action: "DELETE_PRODUCT",
       productId: id,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("Aviso ao deletar produto do Google Drive:", err);
@@ -892,12 +1201,14 @@ export const deleteTaskFromDrive = async (id: string): Promise<any> => {
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
 
-  const localDb = getLocalDatabaseRoot<any>();
-  if (localDb && Array.isArray(localDb.tasks)) {
-    localDb.tasks = localDb.tasks.filter((t: any) => t && t.id !== id);
-    saveLocalDatabaseRoot(localDb);
+  if (inMemoryDatabaseRoot && Array.isArray(inMemoryDatabaseRoot.tasks)) {
+    inMemoryDatabaseRoot.tasks = inMemoryDatabaseRoot.tasks.filter(
+      (t: any) => t && t.id !== id
+    );
   }
 
   if (!cleanUrl) return null;
@@ -905,9 +1216,9 @@ export const deleteTaskFromDrive = async (id: string): Promise<any> => {
   try {
     return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'DELETE_TASK',
+      action: "DELETE_TASK",
       taskId: id,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("Aviso ao deletar tarefa do Google Drive:", err);
@@ -915,17 +1226,25 @@ export const deleteTaskFromDrive = async (id: string): Promise<any> => {
   }
 };
 
-export const deleteSurveyFromDrive = async (id: string, name?: string): Promise<any> => {
+export const deleteSurveyFromDrive = async (
+  id: string,
+  name?: string
+): Promise<any> => {
   let config = getDriveConfig();
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
 
-  const localDb = getLocalDatabaseRoot<any>();
-  if (localDb && Array.isArray(localDb.surveys)) {
-    localDb.surveys = localDb.surveys.filter((s: any) => s && s.id !== id && (!name || (s.name && s.name.toLowerCase() !== name.toLowerCase())));
-    saveLocalDatabaseRoot(localDb);
+  if (inMemoryDatabaseRoot && Array.isArray(inMemoryDatabaseRoot.surveys)) {
+    inMemoryDatabaseRoot.surveys = inMemoryDatabaseRoot.surveys.filter(
+      (s: any) =>
+        s &&
+        s.id !== id &&
+        (!name || (s.name && s.name.toLowerCase() !== name.toLowerCase()))
+    );
   }
 
   if (!cleanUrl) return null;
@@ -933,10 +1252,10 @@ export const deleteSurveyFromDrive = async (id: string, name?: string): Promise<
   try {
     return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'DELETE_SURVEY',
+      action: "DELETE_SURVEY",
       surveyId: id,
-      surveyName: name || '',
-      timestamp: new Date().toISOString()
+      surveyName: name || "",
+      timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("Aviso ao deletar pesquisa do Google Drive:", err);
@@ -944,25 +1263,27 @@ export const deleteSurveyFromDrive = async (id: string, name?: string): Promise<
   }
 };
 
-export const cleanDatabaseKeepOneInDrive = async (keepId: string): Promise<any> => {
+export const cleanDatabaseKeepOneInDrive = async (
+  keepId: string
+): Promise<any> => {
   let config = getDriveConfig();
   if (!config.webappUrl) {
     config = await initializeSharedDriveConfig();
   }
-  const cleanUrl = cleanWebAppUrl(config.webappUrl);
+  const cleanUrl = cleanWebAppUrl(
+    config.webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
   if (!cleanUrl) return null;
 
   try {
     return await executeDriveRequest({
       targetUrl: cleanUrl,
-      action: 'CLEAN_DATABASE_KEEP_ONE',
+      action: "CLEAN_DATABASE_KEEP_ONE",
       keepId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("Aviso ao limpar banco no Google Drive:", err);
     return null;
   }
 };
-
-

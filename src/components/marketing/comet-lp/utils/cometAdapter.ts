@@ -4,37 +4,86 @@ import { uid } from "@/lib/lp-store";
 import { createDefaultPhotoGridSection } from "../data/defaultPhotoGrid";
 
 export function ensureCometLP(rawLP: any): LandingPage {
-  const base = PRESET_TEMPLATES[0];
-  if (!rawLP) return base;
+  if (!rawLP) return PRESET_TEMPLATES[0];
 
-  // Unpack nested config if coming directly from Supabase raw row
-  const source = rawLP.config && typeof rawLP.config === "object"
-    ? { ...rawLP.config, ...rawLP }
-    : rawLP;
+  // 1. Unpack nested config if stringified or object
+  let unpackedConfig: any = {};
+  if (rawLP.config) {
+    if (typeof rawLP.config === "object" && rawLP.config !== null) {
+      unpackedConfig = rawLP.config;
+    } else if (typeof rawLP.config === "string") {
+      try { unpackedConfig = JSON.parse(rawLP.config); } catch {}
+    }
+  }
 
-  const photoGrid = source.photoGrid || createDefaultPhotoGridSection(6);
+  // 1b. Unpack nested content if stringified or object
+  let unpackedContent: any = {};
+  if (rawLP.content) {
+    if (typeof rawLP.content === "object" && rawLP.content !== null) {
+      unpackedContent = rawLP.content;
+    } else if (typeof rawLP.content === "string") {
+      try { unpackedContent = JSON.parse(rawLP.content); } catch {}
+    }
+  }
+
+  // Find matching template base if applicable
+  const templateId = rawLP.templateId || unpackedConfig.templateId || rawLP.template;
+  const base = PRESET_TEMPLATES.find(t => t.id === rawLP.id || t.id === templateId || t.slug === rawLP.slug) || PRESET_TEMPLATES[0];
+
+  // Merge sources prioritizing rawLP properties, unpackedConfig and unpackedContent
+  const source = {
+    ...unpackedContent,
+    ...unpackedConfig,
+    ...rawLP,
+  };
+
+  const photoGrid = source.photoGrid || unpackedConfig.photoGrid || createDefaultPhotoGridSection(6);
   const visibility = {
     ...base.visibility,
+    ...(unpackedContent.visibility || {}),
+    ...(unpackedConfig.visibility || {}),
     ...(source.visibility || {}),
     photoGrid: source.visibility?.photoGrid !== undefined ? source.visibility.photoGrid : true,
   };
 
   const currentOrder: string[] = Array.isArray(source.sectionOrder) && source.sectionOrder.length > 0
     ? source.sectionOrder
-    : base.sectionOrder;
+    : (Array.isArray(unpackedConfig.sectionOrder) && unpackedConfig.sectionOrder.length > 0 ? unpackedConfig.sectionOrder : base.sectionOrder);
   const sectionOrder = currentOrder.includes("photoGrid")
     ? currentOrder
     : [...currentOrder.filter((s: string) => s !== "photoGrid"), "photoGrid"];
 
   // Ensure hero model is NEVER lost or overridden
-  const heroModel = source.hero?.model || source.heroModel || source.model || base.hero.model || "split_image";
+  const heroModel = (
+    source.hero?.model ||
+    source.heroModel ||
+    source.model ||
+    source.hero_model ||
+    unpackedConfig?.hero?.model ||
+    unpackedConfig?.heroModel ||
+    unpackedContent?.hero?.model ||
+    rawLP.heroModel ||
+    base.hero.model ||
+    "split_image"
+  );
+
+  const rawHero = (source.hero && typeof source.hero === "object" && Object.keys(source.hero).length > 0)
+    ? source.hero
+    : (unpackedConfig.hero || unpackedContent.hero || {});
 
   const hero = {
     ...base.hero,
-    ...(source.hero || {}),
+    ...rawHero,
     model: heroModel,
-    b2bMetrics: source.hero?.b2bMetrics || base.hero.b2bMetrics,
-    socialProofAvatars: source.hero?.socialProofAvatars || base.hero.socialProofAvatars,
+    headline: rawHero.headline || source.headline || rawLP.headline || base.hero.headline,
+    subheadline: rawHero.subheadline || source.subheadline || rawLP.subheadline || base.hero.subheadline,
+    ctaText: rawHero.ctaText || source.ctaText || rawLP.ctaText || base.hero.ctaText,
+    ctaSubtext: rawHero.ctaSubtext !== undefined ? rawHero.ctaSubtext : (source.ctaSubtext || base.hero.ctaSubtext),
+    imageUrl: rawHero.imageUrl || source.imageUrl || rawLP.imageUrl || base.hero.imageUrl,
+    videoUrl: rawHero.videoUrl || source.videoUrl || rawLP.videoUrl || base.hero.videoUrl,
+    videoThumbnail: rawHero.videoThumbnail || source.videoThumbnail || rawLP.videoThumbnail || base.hero.videoThumbnail,
+    b2bMetrics: rawHero.b2bMetrics || source.b2bMetrics || base.hero.b2bMetrics,
+    socialProofAvatars: rawHero.socialProofAvatars || source.socialProofAvatars || base.hero.socialProofAvatars,
   };
 
   return {
@@ -44,25 +93,26 @@ export function ensureCometLP(rawLP: any): LandingPage {
     title: source.title || source.name || "Landing Page",
     name: source.name || source.title || "Landing Page",
     slug: source.slug || (source.name ? source.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : `lp-${source.id || uid()}`),
-    surveyId: source.surveyId || source.survey_id || undefined,
-    externalUrl: source.externalUrl || source.external_url || undefined,
+    surveyId: source.surveyId || source.survey_id || unpackedConfig.surveyId || undefined,
+    externalUrl: source.externalUrl || source.external_url || unpackedConfig.externalUrl || undefined,
     accentColor: source.accentColor || (source.theme?.primary ? "orange" : base.accentColor || "orange"),
     accentShade: source.accentShade || base.accentShade || "600",
     theme: source.theme?.mode === "dark" ? "dark" : (source.theme === "dark" ? "dark" : (source.theme === "light" ? "light" : base.theme || "light")),
-    viewsCount: Number(source.visits ?? source.viewsCount ?? 0),
+    viewsCount: Number(source.visits ?? source.viewsCount ?? source.views_count ?? 0),
     leadsCount: Number(source.leads ?? source.leads_count ?? source.leadsCount ?? 0),
     status: source.status === "draft" || source.status === "Pausada" ? "draft" : "published",
     createdAt: source.created_at || source.createdAt || new Date().toISOString(),
     updatedAt: source.updated_at || source.updatedAt || new Date().toISOString(),
+    heroModel,
     hero,
-    socialProof: source.socialProof ? { ...base.socialProof, ...source.socialProof } : base.socialProof,
-    quiz: source.quiz ? { ...base.quiz, ...source.quiz } : base.quiz,
-    bentoGrid: source.bentoGrid ? { ...base.bentoGrid, ...source.bentoGrid } : base.bentoGrid,
-    testimonials: source.testimonials ? { ...base.testimonials, ...source.testimonials } : base.testimonials,
-    formSection: source.formSection ? { ...base.formSection, ...source.formSection } : base.formSection,
-    faq: Array.isArray(source.faq) ? source.faq : base.faq,
-    headerNav: source.headerNav ? { ...base.headerNav, ...source.headerNav } : base.headerNav,
-    footer: source.footer ? { ...base.footer, ...source.footer } : base.footer,
+    socialProof: source.socialProof ? { ...base.socialProof, ...source.socialProof } : (unpackedConfig.socialProof ? { ...base.socialProof, ...unpackedConfig.socialProof } : base.socialProof),
+    quiz: source.quiz ? { ...base.quiz, ...source.quiz } : (unpackedConfig.quiz ? { ...base.quiz, ...unpackedConfig.quiz } : base.quiz),
+    bentoGrid: source.bentoGrid ? { ...base.bentoGrid, ...source.bentoGrid } : (unpackedConfig.bentoGrid ? { ...base.bentoGrid, ...unpackedConfig.bentoGrid } : base.bentoGrid),
+    testimonials: source.testimonials ? { ...base.testimonials, ...source.testimonials } : (unpackedConfig.testimonials ? { ...base.testimonials, ...unpackedConfig.testimonials } : base.testimonials),
+    formSection: source.formSection ? { ...base.formSection, ...source.formSection } : (unpackedConfig.formSection ? { ...base.formSection, ...unpackedConfig.formSection } : base.formSection),
+    faq: Array.isArray(source.faq) ? source.faq : (Array.isArray(unpackedConfig.faq) ? unpackedConfig.faq : base.faq),
+    headerNav: source.headerNav ? { ...base.headerNav, ...source.headerNav } : (unpackedConfig.headerNav ? { ...base.headerNav, ...unpackedConfig.headerNav } : base.headerNav),
+    footer: source.footer ? { ...base.footer, ...source.footer } : (unpackedConfig.footer ? { ...base.footer, ...unpackedConfig.footer } : base.footer),
     photoGrid,
     visibility,
     sectionOrder: sectionOrder as any,

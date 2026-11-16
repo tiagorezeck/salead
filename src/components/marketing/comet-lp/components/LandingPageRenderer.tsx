@@ -87,6 +87,7 @@ import {
 } from "lucide-react";
 import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-viewer";
 import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 
 interface LandingPageRendererProps {
   page: LandingPage;
@@ -602,7 +603,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
     setIsSurveyLeadFormOpen(false);
 
     // Se houver pesquisa vinculada E for uma pesquisa ativa cadastrada (purpose === min ou diferente do padrão fictício), inicia pesquisa
-    const hasRealSurvey = assignedSurvey && (assignedSurvey.id !== "default-survey-hero" || lp?.surveyId);
+    const hasRealSurvey = assignedSurvey && (assignedSurvey.id !== "default-survey-hero" || (page as any)?.surveyId);
     if (hasRealSurvey) {
       setIsSurveyModalOpen(true);
       toast.success("✅ Cadastro confirmado! Iniciando pesquisa...");
@@ -983,18 +984,16 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
               metadata: payload,
             };
 
-            const rawLoc = localStorage.getItem("comet_local_leads");
-            const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
-            localStorage.setItem("comet_local_leads", JSON.stringify([newLeadObj, ...curLoc.filter((x: any) => x.id !== newLeadObj.id)]));
-
-            const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
-            const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
-            localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([newLeadObj, ...curQueue]));
+            cloudStore.mutate(
+              (draft) => {
+                draft.leads = [newLeadObj, ...(draft.leads || []).filter((x: any) => x.id !== newLeadObj.id)];
+              },
+              { immediate: true }
+            );
 
             window.dispatchEvent(new CustomEvent("lead-submitted", { detail: newLeadObj }));
-            window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
           } catch (stErr) {
-            console.warn("Storage persistence notice:", stErr);
+            console.warn("Cloud persistence notice:", stErr);
           }
         }
 
@@ -8247,8 +8246,15 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                         name: leadContact?.name || surveyLeadData?.name || leadName || "Lead Qualificado",
                         email: leadContact?.email || surveyLeadData?.email || leadEmail || "",
                         whatsapp: leadContact?.whatsapp || surveyLeadData?.whatsapp || leadPhone || "",
+                        company: leadContact?.company || surveyLeadData?.company || "",
                         quizAnswers: answers,
-                        score: calculatedScore,
+                        surveyAnswers: answers,
+                        score: calculatedScore ?? (leadContact as any)?.score ?? 85,
+                        minScore: (leadContact as any)?.minScore || "MIN",
+                        minQualification: (leadContact as any)?.minQualification,
+                        temperature: (leadContact as any)?.temperature || "Quente",
+                        surveyId: surveyToUse.id,
+                        surveyName: surveyToUse.name,
                         source: "comet-survey-flow",
                       };
                       if (onLeadSubmit) {

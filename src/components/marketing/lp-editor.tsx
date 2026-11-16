@@ -565,11 +565,21 @@ export function LPEditor({ lp, onClose, onSave }: LPEditorProps) {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    console.log("handleSave triggered, form:", form);
     onSave(form);
-    toast.success("Landing Page Salva com Sucesso!", {
-      description: `Página "${form.name}" salva e pronta para publicação.`
-    });
+    
+    // Explicitly push to Google Drive if configured
+    try {
+      console.log("Attempting to push to Google Drive...");
+      const { pushToGoogleDrive } = await import("@/services/googleDriveDatabaseService");
+      const res = await pushToGoogleDrive(form);
+      console.log("pushToGoogleDrive result:", res);
+      toast.success("Landing Page salva e sincronizada com Google Sheets!");
+    } catch (err) {
+      console.error("Erro ao sincronizar com Google Drive:", err);
+      toast.error("Landing Page salva localmente, mas erro ao sincronizar com Google Sheets.");
+    }
   };
 
   const currentGeneratedUrl = `${window.location.origin}/lp/${form.slug || form.id}?utm_source=${form.utmSource}&utm_medium=${form.utmMedium}&utm_campaign=${form.utmCampaign}`;

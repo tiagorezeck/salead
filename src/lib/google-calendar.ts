@@ -44,18 +44,25 @@ export interface GoogleCalendarEventRecord {
 }
 
 const STORAGE_KEY = "comet_google_calendar_connection";
+let inMemoryCalendarConnection: GoogleCalendarConnection = { connected: false };
 
 /**
- * Gets the current Google Calendar connection state from localStorage.
+ * Gets the current Google Calendar connection state from RAM / sessionStorage.
  */
 export function getCalendarConnectionState(): GoogleCalendarConnection {
   if (typeof window === "undefined") {
     return { connected: false };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { connected: false };
-    const conn: GoogleCalendarConnection = JSON.parse(raw);
+    let conn = inMemoryCalendarConnection;
+    if (!conn.connected && typeof sessionStorage !== "undefined") {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        conn = JSON.parse(raw);
+        inMemoryCalendarConnection = conn;
+      }
+    }
+    if (!conn.connected) return { connected: false };
     
     // Check if token expired
     if (conn.expiresAt && Date.now() >= conn.expiresAt) {
@@ -70,12 +77,15 @@ export function getCalendarConnectionState(): GoogleCalendarConnection {
 }
 
 /**
- * Saves Google Calendar connection state to localStorage.
+ * Saves Google Calendar connection state to RAM / sessionStorage.
  */
 export function saveCalendarConnectionState(conn: GoogleCalendarConnection): void {
+  inMemoryCalendarConnection = conn;
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conn));
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(conn));
+    }
   } catch (err) {
     console.error("[Google Calendar] Erro ao salvar estado da conexão:", err);
   }
@@ -85,8 +95,13 @@ export function saveCalendarConnectionState(conn: GoogleCalendarConnection): voi
  * Disconnects Google Calendar account.
  */
 export function disconnectGoogleCalendar(): void {
+  inMemoryCalendarConnection = { connected: false };
   if (typeof window === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {}
   toast.info("Google Agenda desconectada com sucesso.");
 }
 

@@ -6,6 +6,7 @@ import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-vie
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
 import { Loader2, AlertTriangle, ArrowLeft } from "lucide-react";
 import { type Survey } from "@/hooks/use-data";
+import { cloudStore } from "@/services/cloudStorageService";
 
 export const Route = createFileRoute("/survey/$id")({
   component: PublicSurveyRoute,
@@ -17,12 +18,15 @@ function PublicSurveyRoute() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    function loadSurvey() {
+    let active = true;
+
+    async function loadSurvey() {
       setLoading(true);
 
-      // 1. Verifica se é um preset direto (ex: qualificacao-min-1min, qualificacao-temperatura, pesquisa-satisfacao-csat-nps, pesquisa-tendencias-mercado)
-      const foundPreset = SURVEY_PRESETS.find(p => p.id === id);
+      // 1. Verifica se é um preset direto
+      const foundPreset = SURVEY_PRESETS.find((p) => p.id === id);
       if (foundPreset) {
+        if (!active) return;
         setSurvey({
           id: foundPreset.id,
           name: foundPreset.name,
@@ -33,56 +37,78 @@ function PublicSurveyRoute() {
             description: foundPreset.description,
             buttonText: "Iniciar Questionário",
             thankYouMessage: "Obrigado por responder!",
-            accentColor: foundPreset.accentColor || "#FF6B00"
-          }
+            accentColor: foundPreset.accentColor || "#FF6B00",
+          },
         });
         setLoading(false);
         return;
       }
 
-      // 2. Consulta no localStorage
       try {
-        const rawLocal = localStorage.getItem("comet_crm_data");
-        if (rawLocal) {
-          const parsed = JSON.parse(rawLocal);
-          const found = Array.isArray(parsed.surveys) && parsed.surveys.find((s: any) => s.id === id);
-          if (found) {
-            setSurvey(found);
+        // 2. Verifica primeiro no estado em RAM já sincronizado do cloudStore
+        const ramFound = (cloudStore.getState().surveys || []).find((s: any) => s.id === id || s.slug === id);
+        if (ramFound && active) {
+          setSurvey(ramFound);
+          setLoading(false);
+          return;
+        }
+
+        // 3. Busca direta ao vivo na nuvem Google Apps Script / API Express
+        const cloudFound = await cloudStore.fetchPublicSurvey(id);
+        if (cloudFound && active) {
+          setSurvey(cloudFound);
+          setLoading(false);
+          return;
+        }
+
+        // 4. Bootstrap completo caso ainda não tenha baixado
+        if (!cloudStore.getStatus().loadedFromCloud) {
+          const db = await cloudStore.bootstrap();
+          const bootedFound = (db.surveys || []).find((s: any) => s.id === id || s.slug === id);
+          if (bootedFound && active) {
+            setSurvey(bootedFound);
             setLoading(false);
             return;
           }
         }
 
-        // 3. Fallback inteligente: se não encontrou pelo ID customizado, usa o preset mais compatível
-        const defaultPreset = SURVEY_PRESETS[0];
-        setSurvey({
-          id: id,
-          name: defaultPreset.name,
-          questions: defaultPreset.questions,
-          status: "active",
-          settings: {
-            headline: defaultPreset.name,
-            description: defaultPreset.description,
-            buttonText: "Iniciar Questionário",
-            thankYouMessage: "Obrigado por responder ao nosso questionário!",
-            accentColor: defaultPreset.accentColor || "#FF6B00"
-          }
-        });
+        // 5. Fallback para preset compatível caso não encontrado
+        if (active) {
+          const defaultPreset = SURVEY_PRESETS[0];
+          setSurvey({
+            id: id,
+            name: defaultPreset.name,
+            questions: defaultPreset.questions,
+            status: "active",
+            settings: {
+              headline: defaultPreset.name,
+              description: defaultPreset.description,
+              buttonText: "Iniciar Questionário",
+              thankYouMessage: "Obrigado por responder ao nosso questionário!",
+              accentColor: defaultPreset.accentColor || "#FF6B00",
+            },
+          });
+        }
       } catch (err: any) {
         console.error("Erro ao carregar pesquisa:", err);
-        const defaultPreset = SURVEY_PRESETS[0];
-        setSurvey({
-          id: id,
-          name: defaultPreset.name,
-          questions: defaultPreset.questions,
-          status: "active"
-        });
+        if (active) {
+          const defaultPreset = SURVEY_PRESETS[0];
+          setSurvey({
+            id: id,
+            name: defaultPreset.name,
+            questions: defaultPreset.questions,
+            status: "active",
+          });
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
 
     loadSurvey();
+    return () => {
+      active = false;
+    };
   }, [id]);
 
   if (loading) {

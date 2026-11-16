@@ -37,11 +37,9 @@ import { getLPModule, parseUtm } from "@/modules/landing-pages";
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
 import { 
   submitLpLeadToDrive, 
-  recordLpVisitToDrive, 
-  forceReadSpreadsheetFromDrive, 
-  getDriveConfig, 
-  getLocalDatabaseRoot 
+  recordLpVisitToDrive,
 } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 
 const SURVEY_PRESETS: any[] = [
   {
@@ -156,63 +154,54 @@ function PublicLPPage() {
           setLp((prev: any) => {
             const base = prev || targetLp;
             const leads = Number(base.leads || base.leads_count) || 0;
+            const updatedVisits = Math.max(newVisits, leads);
             return {
               ...base,
-              visits: newVisits,
-              viewsCount: newVisits,
-              views_count: newVisits,
-              conv: Math.round((leads / newVisits) * 100)
+              visits: updatedVisits,
+              viewsCount: updatedVisits,
+              views_count: updatedVisits,
+              conv: updatedVisits > 0 ? Math.min(100, Math.round((leads / updatedVisits) * 100)) : 0
             };
           });
         }
 
-        // 2. Atualiza LocalStorage em todas as chaves de Landing Page do sistema
+        // 2. Atualiza estado em RAM e sincroniza com Google Sheets/Drive via cloudStore (0% localStorage)
         if (typeof window !== "undefined") {
           try {
-            const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
-            for (const key of localKeys) {
-              const raw = localStorage.getItem(key);
-              if (raw) {
-                const list = JSON.parse(raw);
-                if (Array.isArray(list)) {
-                  const updatedList = list.map((p: any) => {
-                    if (p && (p.id === targetLp.id || p.id === id || p.slug === targetLp.slug || p.slug === id)) {
-                      const leads = Number(p.leads || p.leads_count) || 0;
-                      return {
-                        ...p,
-                        visits: newVisits,
-                        viewsCount: newVisits,
-                        views_count: newVisits,
-                        conv: Math.round((leads / newVisits) * 100),
-                        updated_at: new Date().toISOString()
-                      };
-                    }
-                    return p;
-                  });
-                  localStorage.setItem(key, JSON.stringify(updatedList));
+            cloudStore.mutate((draft) => {
+              const list = Array.isArray(draft.landingPages) ? draft.landingPages : [];
+              draft.landingPages = list.map((p: any) => {
+                if (p && (p.id === targetLp.id || p.id === id || p.slug === targetLp.slug || p.slug === id)) {
+                  const lpLeads = Number(p.leads || p.leads_count) || 0;
+                  const updatedVisits = Math.max(newVisits, lpLeads);
+                  return {
+                    ...p,
+                    visits: updatedVisits,
+                    viewsCount: updatedVisits,
+                    views_count: updatedVisits,
+                    conv: updatedVisits > 0 ? Math.min(100, Math.round((lpLeads / updatedVisits) * 100)) : 0,
+                    updated_at: new Date().toISOString()
+                  };
                 }
-              }
-            }
+                return p;
+              });
 
-            const activePrev = localStorage.getItem("active_preview_page");
-            if (activePrev) {
-              const parsed = JSON.parse(activePrev);
-              if (parsed && (parsed.id === targetLp.id || parsed.id === id || parsed.slug === targetLp.slug || parsed.slug === id)) {
-                const leads = Number(parsed.leads || parsed.leads_count) || 0;
-                localStorage.setItem("active_preview_page", JSON.stringify({
-                  ...parsed,
-                  visits: newVisits,
-                  viewsCount: newVisits,
-                  views_count: newVisits,
-                  conv: Math.round((leads / newVisits) * 100)
-                }));
+              if (draft.activePreviewPage && (draft.activePreviewPage.id === targetLp.id || draft.activePreviewPage.id === id || draft.activePreviewPage.slug === targetLp.slug || draft.activePreviewPage.slug === id)) {
+                const lpLeads = Number(draft.activePreviewPage.leads || draft.activePreviewPage.leads_count) || 0;
+                const updatedVisits = Math.max(newVisits, lpLeads);
+                draft.activePreviewPage = {
+                  ...draft.activePreviewPage,
+                  visits: updatedVisits,
+                  viewsCount: updatedVisits,
+                  views_count: updatedVisits,
+                  conv: updatedVisits > 0 ? Math.min(100, Math.round((lpLeads / updatedVisits) * 100)) : 0,
+                };
               }
-            }
+            });
 
-            window.dispatchEvent(new Event("storage"));
             window.dispatchEvent(new CustomEvent("lp_visit_incremented", { detail: { id: targetId, visits: newVisits } }));
-          } catch (lsErr) {
-            console.warn("Aviso ao atualizar visitas no LocalStorage:", lsErr);
+          } catch (csErr) {
+            console.warn("Aviso ao atualizar visitas no cloudStore:", csErr);
           }
         }
 
@@ -257,121 +246,89 @@ function PublicLPPage() {
         } catch {}
       };
 
+      const matchesTarget = (p: any) => {
+        if (!p) return false;
+        if (deletedIds.has(p.id) || deletedIds.has(p.slug)) return false;
+        if (p.id === id || p.slug === id || p.previewToken === id || p.originalId === id) return true;
+        if (p.name && normalizeSlug(p.name) === normId) return true;
+        if (p.title && normalizeSlug(p.title) === normId) return true;
+        return false;
+      };
+
       try {
         // =====================================================================
-        // PASSO 1: BUSCA SÍNCRONA NO ARMAZENAMENTO LOCAL (0ms - MÁXIMA VELOCIDADE)
+        // PASSO 1: BUSCA SÍNCRONA EM MEMÓRIA RAM (cloudStore)
         // =====================================================================
-        let foundLocally: any = null;
-        try {
-          // 1a. Verifica active_preview_page primeiro
-          const activeRaw = localStorage.getItem("active_preview_page");
-          if (activeRaw) {
-            const activeObj = JSON.parse(activeRaw);
-            if (activeObj && !deletedIds.has(activeObj.id) && !deletedIds.has(activeObj.slug)) {
-              if (activeObj.id === id || activeObj.slug === id || activeObj.previewToken === id || (activeObj.name && normalizeSlug(activeObj.name) === normId) || (activeObj.title && normalizeSlug(activeObj.title) === normId)) {
-                foundLocally = activeObj;
-              }
-            }
-          }
+        const db = cloudStore.getState();
+        let foundInRam: any = null;
+        if (db.activePreviewPage && matchesTarget(db.activePreviewPage)) {
+          foundInRam = db.activePreviewPage;
+        } else if (Array.isArray(db.landingPages)) {
+          foundInRam = db.landingPages.find(matchesTarget) || null;
+        }
 
-          // 1b. Verifica coleções locais
-          if (!foundLocally) {
-            const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
-            for (const key of localKeys) {
-              const rawLocal = localStorage.getItem(key);
-              if (!rawLocal) continue;
-
-              let parsed = JSON.parse(rawLocal);
-              if (!parsed) continue;
-              if (!Array.isArray(parsed)) parsed = [parsed];
-
-              const localMatch = parsed.find((p: any) => {
-                if (!p) return false;
-                if (deletedIds.has(p.id) || deletedIds.has(p.slug)) return false;
-                if (p.id === id || p.slug === id || p.previewToken === id) return true;
-                if (p.name && normalizeSlug(p.name) === normId) return true;
-                if (p.title && normalizeSlug(p.title) === normId) return true;
-                return false;
-              });
-
-              if (localMatch) {
-                foundLocally = localMatch;
-                break;
-              }
-            }
-          }
-        } catch {}
-
-        if (foundLocally && isMounted) {
-          setLp(foundLocally);
+        if (foundInRam && isMounted) {
+          setLp(foundInRam);
           setLoading(false);
-          recordVisitForLP(foundLocally).catch(() => {});
-
-          // Revalidação em background com o servidor sem bloquear o carregamento
-          fetchPageFromServerPreview(id).then((serverPage) => {
-            if (serverPage && !deletedIds.has(serverPage.id) && isMounted) {
-              const localTime = new Date((foundLocally as any).updatedAt || (foundLocally as any).updated_at || (foundLocally as any).createdAt || 0).getTime();
-              const serverTime = new Date((serverPage as any).updatedAt || (serverPage as any).updated_at || (serverPage as any).createdAt || 0).getTime();
-              
-              if (serverTime > localTime) {
-                setLp(serverPage);
-              } else if (localTime > serverTime) {
-                // Se o local for mais novo que o servidor, atualiza o servidor em background
-                syncPageWithServerPreview(foundLocally).catch(() => {});
-              }
-            }
-          }).catch(() => {});
+          recordVisitForLP(foundInRam).catch(() => {});
           return;
         }
 
         // =====================================================================
-        // PASSO 2: BUSCA NO SERVIDOR EXPRESS / API (PARA OUTROS DISPOSITIVOS E NAVEGADORES)
+        // PASSO 2: BUSCA DIRETA NO GOOGLE APPS SCRIPT (GET_PUBLIC_LP) E SERVIDOR EXPRESS
+        // Garante abertura fiel (modelo hero, seções e tema) em nova aba / guia anônima
         // =====================================================================
         try {
-          const serverPage = await fetchPageFromServerPreview(id);
-          if (serverPage && !deletedIds.has(serverPage.id) && isMounted) {
-            setLp(serverPage);
+          const [cloudPage, serverPage] = await Promise.all([
+            cloudStore.fetchPublicLP(id).catch(() => null),
+            fetchPageFromServerPreview(id).catch(() => null),
+          ]);
+          const remotePage = cloudPage || serverPage;
+          if (remotePage && !deletedIds.has(remotePage.id) && isMounted) {
+            setLp(remotePage);
             setLoading(false);
-            recordVisitForLP(serverPage).catch(() => {});
+            recordVisitForLP(remotePage).catch(() => {});
             return;
           }
         } catch (srvErr) {
-          console.info("Server fetch notice:", srvErr);
+          console.error("Step 2 (Cloud/Express Fetch) error:", srvErr);
         }
 
         // =====================================================================
-        // PASSO 3: RESOLUÇÃO NO CACHE LOCAL DO GOOGLE DRIVE / SHEETS
+        // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE CASO NECESSÁRIO
         // =====================================================================
-        try {
-          const driveRoot: any = getLocalDatabaseRoot();
-          let candidateLps = Array.isArray(driveRoot?.landingPages) 
-            ? driveRoot.landingPages 
-            : (Array.isArray(driveRoot?.data?.landingPages) ? driveRoot.data.landingPages : []);
+        if (!cloudStore.getStatus().loadedFromCloud) {
+          try {
+            const booted = await cloudStore.bootstrap();
+            const liveMatch =
+              (booted.activePreviewPage && matchesTarget(booted.activePreviewPage) ? booted.activePreviewPage : null) ||
+              (Array.isArray(booted.landingPages) ? booted.landingPages.find(matchesTarget) : null);
 
-          if (Array.isArray(candidateLps) && candidateLps.length > 0) {
-            const driveMatch = candidateLps.find((p: any) => {
-              if (!p) return false;
-              if (deletedIds.has(p.id) || deletedIds.has(p.slug)) return false;
-              if (p.id === id || p.slug === id || p.previewToken === id) return true;
-              if (p.name && normalizeSlug(p.name) === normId) return true;
-              if (p.title && normalizeSlug(p.title) === normId) return true;
-              return false;
-            });
-
-            if (driveMatch && isMounted) {
-              setLp(driveMatch);
+            if (liveMatch && isMounted) {
+              setLp(liveMatch);
               setLoading(false);
-              recordVisitForLP(driveMatch).catch(() => {});
+              recordVisitForLP(liveMatch).catch(() => {});
               return;
             }
+          } catch (liveErr) {
+            console.error("Step 3 (Bootstrap Cloud) error:", liveErr);
           }
-        } catch (driveErr) {
-          console.info("Drive LP lookup notice:", driveErr);
         }
 
         // =====================================================================
-        // PASSO 4: RESOLUÇÃO EM TEMPLATES PRÉ-CONFIGURADOS (APENAS SE ID EXATO)
+        // PASSO 4: RESOLUÇÃO EM TEMPLATES PRÉ-CONFIGURADOS (APENAS SE ID EXATO OU ÍNDICE NUMÉRICO)
         // =====================================================================
+        const numIdx = parseInt(id, 10);
+        if (!isNaN(numIdx) && numIdx > 0 && numIdx <= PRESET_TEMPLATES.length) {
+          const presetByIndex = PRESET_TEMPLATES[numIdx - 1];
+          if (presetByIndex && isMounted) {
+            setLp(presetByIndex);
+            setLoading(false);
+            recordVisitForLP(presetByIndex).catch(() => {});
+            return;
+          }
+        }
+
         const presetMatch = PRESET_TEMPLATES.find((p) => {
           if (p.id === id || p.slug === id) return true;
           if (normalizeSlug(p.id) === normId) return true;
@@ -417,63 +374,94 @@ function PublicLPPage() {
     };
   }, [id]);
 
-  // Carrega a pesquisa vinculada se houver surveyId ou atribui a pesquisa de qualificação padrão
+  // Carrega a pesquisa vinculada se houver surveyId ou constrói a partir do quiz da LP
   useEffect(() => {
     const surveyId = lp?.surveyId || (lp as any)?.config?.surveyId || (lp as any)?.minSurveyId || (lp as any)?.survey_id;
-    if (!surveyId) {
-      setAssignedSurvey(undefined);
+    
+    if (surveyId) {
+      // 1. Procura no array local primeiro
+      const foundInLocal = surveys.find((s) => s.id === surveyId || s.slug === surveyId);
+      if (foundInLocal) {
+        setAssignedSurvey(foundInLocal);
+        return;
+      }
+
+      // 2. Procura nos presets pré-configurados
+      const foundPreset = SURVEY_PRESETS.find((p) => p.id === surveyId);
+      if (foundPreset) {
+        setAssignedSurvey({
+          ...foundPreset,
+          status: "active",
+          settings: {
+            headline: foundPreset.name,
+            description: foundPreset.description,
+            buttonText: "Iniciar Diagnóstico",
+            thankYouMessage: "Obrigado por responder nosso diagnóstico!",
+            accentColor: foundPreset.accentColor || "#FF6B00",
+          },
+        });
+        return;
+      }
+
+      // 3. Busca direta na nuvem Google Apps Script / API Express (/api/surveys/:id) com fallback para o quiz próprio da LP
+      cloudStore
+        .fetchPublicSurvey(surveyId)
+        .then((cloudSurvey) => {
+          if (cloudSurvey) {
+            setAssignedSurvey(cloudSurvey);
+          } else if (lp?.quiz?.questions && lp.quiz.questions.length > 0) {
+            setAssignedSurvey({
+              id: surveyId,
+              name: lp.name || lp.title || "Diagnóstico Personalizado",
+              description: lp.hero?.subheadline || "",
+              questions: lp.quiz.questions,
+              settings: {
+                headline: lp.quiz.title || lp.name || "Diagnóstico",
+                description: lp.quiz.subtitle || lp.hero?.subheadline || "",
+                buttonText: lp.hero?.ctaText || "Iniciar",
+                thankYouMessage: lp.quiz.resultDescription || "Obrigado!",
+              },
+            });
+          }
+        })
+        .catch(() => {
+          if (lp?.quiz?.questions && lp.quiz.questions.length > 0) {
+            setAssignedSurvey({
+              id: surveyId,
+              name: lp.name || lp.title || "Diagnóstico Personalizado",
+              description: lp.hero?.subheadline || "",
+              questions: lp.quiz.questions,
+              settings: {
+                headline: lp.quiz.title || lp.name || "Diagnóstico",
+                description: lp.quiz.subtitle || lp.hero?.subheadline || "",
+                buttonText: lp.hero?.ctaText || "Iniciar",
+                thankYouMessage: lp.quiz.resultDescription || "Obrigado!",
+              },
+            });
+          }
+        });
       return;
     }
 
-    // 1. Procura no array local primeiro
-    const foundInLocal = surveys.find((s) => s.id === surveyId);
-    if (foundInLocal) {
-      setAssignedSurvey(foundInLocal);
-      return;
-    }
-
-    // 2. Procura nos presets pré-configurados
-    const foundPreset = SURVEY_PRESETS.find((p) => p.id === surveyId);
-    if (foundPreset) {
+    // Se NÃO houver surveyId explícito, mas a LP possui quiz customizado próprio (lp.quiz), constrói a pesquisa a partir do quiz da página
+    if (lp?.quiz?.questions && lp.quiz.questions.length > 0) {
       setAssignedSurvey({
-        ...foundPreset,
-        status: "active",
+        id: `survey_${lp.id || "local"}`,
+        name: lp.name || lp.title || "Diagnóstico da Página",
+        description: lp.hero?.subheadline || "",
+        questions: lp.quiz.questions,
         settings: {
-          headline: foundPreset.name,
-          description: foundPreset.description,
-          buttonText: "Iniciar Diagnóstico",
-          thankYouMessage: "Obrigado por responder nosso diagnóstico!",
-          accentColor: foundPreset.accentColor || "#FF6B00",
-        },
+          headline: lp.quiz.title || lp.name || "Diagnóstico",
+          description: lp.quiz.subtitle || lp.hero?.subheadline || "",
+          buttonText: lp.hero?.ctaText || "Iniciar",
+          thankYouMessage: lp.quiz.resultDescription || "Obrigado!",
+        }
       });
       return;
     }
 
-    // 3. Procura no localStorage de surveys
-    try {
-      const rawStored = localStorage.getItem("surveys");
-      if (rawStored) {
-        const parsed = JSON.parse(rawStored);
-        if (Array.isArray(parsed)) {
-          const match = parsed.find((s: any) => s.id === surveyId);
-          if (match) {
-            setAssignedSurvey(match);
-            return;
-          }
-        }
-      }
-    } catch {}
-
-    // 4. Busca na API Express (/api/surveys/:id)
-    fetch(`/api/surveys/${encodeURIComponent(surveyId)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.survey) {
-          setAssignedSurvey(data.survey);
-        }
-      })
-      .catch(() => {});
-  }, [lp?.surveyId, (lp as any)?.config?.surveyId, (lp as any)?.minSurveyId, (lp as any)?.survey_id, surveys]);
+    setAssignedSurvey(undefined);
+  }, [lp?.surveyId, (lp as any)?.config?.surveyId, (lp as any)?.minSurveyId, (lp as any)?.survey_id, lp?.quiz, surveys]);
 
   // Verifica se há parâmetros de pesquisa/cadastro na URL para abrir o fluxo do sistema
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -514,9 +502,18 @@ function PublicLPPage() {
 
   const hasAttachedSurvey = Boolean(lp?.surveyId || (lp as any)?.config?.surveyId || (lp as any)?.minSurveyId || (lp as any)?.survey_id || assignedSurvey);
 
+  const isExternalLP = Boolean(
+    lp?.externalUrl &&
+    String(lp.externalUrl).trim() !== "" &&
+    String(lp.externalUrl) !== "null" &&
+    String(lp.externalUrl) !== "undefined" &&
+    (lp.type === "URL Externa" || lp.template === "External" || lp.isExternal === true) &&
+    !lp.hero
+  );
+
   // Redirecionamento automático para LPs com URL externa APENAS se NÃO houver pesquisa vinculada e NÃO for ação de formulário
   useEffect(() => {
-    if (lp?.externalUrl && !hasAttachedSurvey && !hasSurveyParam && typeof window !== "undefined") {
+    if (isExternalLP && !hasAttachedSurvey && !hasSurveyParam && typeof window !== "undefined") {
       const finalUrl = buildRedirectUrl(lp.externalUrl, window.location.search);
       // Timeout gracioso para garantir registro da visita
       const timer = setTimeout(() => {
@@ -524,7 +521,7 @@ function PublicLPPage() {
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [lp, hasAttachedSurvey, hasSurveyParam]);
+  }, [isExternalLP, lp, hasAttachedSurvey, hasSurveyParam]);
 
   if (loading) {
     return (
@@ -578,7 +575,7 @@ function PublicLPPage() {
   // ============================================================================
   // CASO 1: LANDING PAGE EXTERNA (MODELO 1)
   // ============================================================================
-  if (lp.externalUrl) {
+  if (isExternalLP) {
     if (!hasAttachedSurvey && !hasSurveyParam) {
       // Caso 1A: Redirecionamento automático e limpo para evitar iframes/cortes
       return (
@@ -811,12 +808,20 @@ function PublicLPPage() {
                           utm,
                         },
                       }),
-                    }).catch(() => {});
+                    })
+                      .then(res => res.json())
+                      .then(data => console.log("Survey response submitted:", data))
+                      .catch(err => console.error("Survey submission failed:", err));
 
                     fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
                       method: "POST",
-                    }).catch(() => {});
-                  } catch {}
+                    })
+                      .then(res => res.json())
+                      .then(data => console.log("Conversion incremented:", data))
+                      .catch(err => console.error("Conversion increment failed:", err));
+                  } catch (e) {
+                    console.error("Survey submission catch block:", e);
+                  }
 
                   toast.success("✅ Cadastro e respostas enviadas com sucesso!");
                 }}
@@ -940,7 +945,7 @@ function PublicLPPage() {
             console.warn("Direct database submit notice:", dbErr);
           }
 
-          // Persistência local imediata e sincronização cross-tab com a Base de Leads do CRM
+          // Persistência imediata no cloudStore (RAM + Push imediato Apps Script/Sheets)
           if (typeof window !== "undefined") {
             try {
               const fullLeadRecord = {
@@ -957,18 +962,21 @@ function PublicLPPage() {
                 ],
               };
 
-              const rawLoc = localStorage.getItem("comet_local_leads");
-              const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
-              localStorage.setItem("comet_local_leads", JSON.stringify([fullLeadRecord, ...curLoc.filter((x: any) => x.id !== fullLeadRecord.id)]));
-
-              const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
-              const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
-              localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([fullLeadRecord, ...curQueue]));
+              cloudStore.mutate(
+                (draft) => {
+                  draft.leads = [fullLeadRecord, ...(draft.leads || []).filter((x: any) => x.id !== fullLeadRecord.id)];
+                  draft.landingPages = (draft.landingPages || []).map((p: any) =>
+                    p && (p.id === lp.id || (lp.slug && p.slug === lp.slug))
+                      ? { ...p, leads: (Number(p.leads || p.leads_count) || 0) + 1 }
+                      : p
+                  );
+                },
+                { immediate: true }
+              );
 
               window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
-              window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
             } catch (storageErr) {
-              console.warn("Storage persistence notice in LP submit:", storageErr);
+              console.warn("Cloud persistence notice in LP submit:", storageErr);
             }
           }
 
@@ -1156,7 +1164,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         console.warn("Direct database submit notice:", dbErr);
       }
 
-      // Persistência local imediata e sincronização cross-tab com a Base de Leads do CRM
+      // Persistência imediata no cloudStore (RAM + Push imediato Apps Script/Sheets)
       if (typeof window !== "undefined") {
         try {
           const fullLeadRecord = {
@@ -1173,18 +1181,21 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
             ],
           };
 
-          const rawLoc = localStorage.getItem("comet_local_leads");
-          const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
-          localStorage.setItem("comet_local_leads", JSON.stringify([fullLeadRecord, ...curLoc.filter((x: any) => x.id !== fullLeadRecord.id)]));
-
-          const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
-          const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
-          localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([fullLeadRecord, ...curQueue]));
+          cloudStore.mutate(
+            (draft) => {
+              draft.leads = [fullLeadRecord, ...(draft.leads || []).filter((x: any) => x.id !== fullLeadRecord.id)];
+              draft.landingPages = (draft.landingPages || []).map((p: any) =>
+                p && (p.id === lp.id || (lp.slug && p.slug === lp.slug))
+                  ? { ...p, leads: (Number(p.leads || p.leads_count) || 0) + 1 }
+                  : p
+              );
+            },
+            { immediate: true }
+          );
 
           window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
-          window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
         } catch (storageErr) {
-          console.warn("Storage persistence notice in Direct form submit:", storageErr);
+          console.warn("Cloud persistence notice in Direct form submit:", storageErr);
         }
       }
 

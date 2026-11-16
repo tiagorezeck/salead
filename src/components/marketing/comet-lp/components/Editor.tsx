@@ -17,11 +17,12 @@ import { THEME_CONFIGS } from "../utils/theme";
 import { LandingPageRenderer } from "./LandingPageRenderer";
 import { generateStandaloneHtml } from "../utils/htmlExporter";
 import { saveLandingPageToStorage, syncPageWithServerPreview } from "../utils/storage";
+import { cloudStore } from "@/services/cloudStorageService";
 import { DynamicIcon } from "./DynamicIcon";
 import { ImagePickerModal } from "./ImagePickerModal";
 import { LogoManagerModal } from "./LogoManagerModal";
 import { IconPickerModal } from "./IconPickerModal";
-import { HeroModelSelector } from "./HeroModelSelector";
+import { HeroModelSelector, HERO_MODELS } from "./HeroModelSelector";
 import { NetworkPreviewModal } from "./NetworkPreviewModal";
 import { VisualElementControlModal } from "./VisualElementControlModal";
 import { FloatingImagesManagerModal } from "./FloatingImagesManagerModal";
@@ -111,6 +112,17 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [copyNotification, setCopyNotification] = useState<string | null>(null);
+
+  // Sync page state when a different LP is opened
+  useEffect(() => {
+    if (initialPage && initialPage.id) {
+      setPage(initialPage);
+      historyRef.current = [JSON.parse(JSON.stringify(initialPage))];
+      historyIndexRef.current = 0;
+      setCanUndo(false);
+      setCanRedo(false);
+    }
+  }, [initialPage?.id]);
 
   // Sync with browser fullscreen state
   useEffect(() => {
@@ -283,8 +295,14 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
   const handleSave = () => {
     setSaveStatus("saving");
+    const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
     const updatedPageWithTimestamp = {
       ...page,
+      heroModel: activeHeroModel,
+      hero: {
+        ...page.hero,
+        model: activeHeroModel,
+      },
       updatedAt: new Date().toISOString(),
     };
     saveLandingPageToStorage(updatedPageWithTimestamp);
@@ -323,6 +341,16 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
       const updated = updater(prev);
       const withTime = { ...updated, updatedAt: new Date().toISOString() };
       
+      // Instantly persist to cloudStore RAM + Cloud sync for real-time preview across tabs
+      if (typeof window !== "undefined") {
+        try {
+          cloudStore.mutate((draft) => {
+            draft.activePreviewPage = withTime;
+          });
+          saveLandingPageToStorage(withTime);
+        } catch {}
+      }
+
       // Update history safely without closure traps
       if (isUndoRedoActionRef.current) {
         isUndoRedoActionRef.current = false;
@@ -951,6 +979,75 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                   {/* HERO VISUAL CONTROLS */}
                   {activeSectionEdit === "hero" && (
                     <div className="space-y-5">
+                      {/* Hero Visual Model Selector */}
+                      <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-purple-500/40 space-y-3 shadow-lg shadow-purple-950/20">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                            <span>Modelo Visual da Hero</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setIsHeroModelModalOpen(true)}
+                            className="text-[10px] px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold transition-all cursor-pointer shadow-sm hover:scale-105"
+                          >
+                            Catálogo Completo (14)
+                          </button>
+                        </div>
+
+                        {/* Current selected model summary */}
+                        <div className="p-2.5 rounded-xl bg-zinc-950 border border-purple-500/30 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-extrabold text-white truncate flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                              <span>{HERO_MODELS.find((m) => m.id === (page.hero.model || page.heroModel))?.title || "Modelo 1: Split com Imagem"}</span>
+                            </div>
+                            <div className="text-[9px] text-zinc-400 truncate pl-3.5">
+                              {HERO_MODELS.find((m) => m.id === (page.hero.model || page.heroModel))?.subtitle || "Clássico 2 Colunas"}
+                            </div>
+                          </div>
+                          <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-800 font-bold shrink-0">
+                            {HERO_MODELS.find((m) => m.id === (page.hero.model || page.heroModel))?.badge || "Ativo"}
+                          </span>
+                        </div>
+
+                        {/* Quick switch chip grid */}
+                        <div className="grid grid-cols-2 gap-1.5 pt-1">
+                          {HERO_MODELS.slice(0, 8).map((mod) => {
+                            const isCurrent = (page.hero.model || page.heroModel || "split_image") === mod.id;
+                            const IconComp = mod.icon;
+                            return (
+                              <button
+                                key={mod.id}
+                                type="button"
+                                onClick={() => {
+                                  updatePage((p) => ({
+                                    ...p,
+                                    heroModel: mod.id,
+                                    hero: {
+                                      ...p.hero,
+                                      model: mod.id,
+                                    },
+                                  }));
+                                  showNotification(`Modelo "${mod.title}" aplicado!`);
+                                }}
+                                className={`p-2 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
+                                  isCurrent
+                                    ? "bg-purple-600/30 border-purple-400 text-white shadow-sm ring-1 ring-purple-400"
+                                    : "bg-zinc-950/80 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-white"
+                                }`}
+                              >
+                                <IconComp className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${isCurrent ? "text-purple-300" : "text-zinc-500"}`} />
+                                <div className="min-w-0">
+                                  <div className="text-[10px] font-bold truncate leading-tight">{mod.title.split(":")[0]}</div>
+                                  <div className="text-[8px] text-zinc-400 truncate leading-tight">{mod.title.split(":")[1] || mod.subtitle}</div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       {/* Text Alignment */}
                       <div className="space-y-2">
                         <label className="block text-xs font-medium text-zinc-300">
@@ -4158,6 +4255,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
           onSelectModel={(newModel) => {
             updatePage((p) => ({
               ...p,
+              heroModel: newModel,
               hero: {
                 ...p.hero,
                 model: newModel,

@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useData } from "@/hooks/use-data";
 import { 
   Search, Plus, LayoutGrid, List, Users as UsersIcon, ChevronDown, Eye, Calendar, Lock, Ban, Layers,
-  Phone, Mail, MessageCircle, ArrowRight, CheckCircle2, Clock, Sparkles
+  Phone, Mail, MessageCircle, ArrowRight, CheckCircle2, Clock, Sparkles, Settings2, ArrowRightLeft,
+  ArrowDownToLine, GitFork
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -11,6 +12,10 @@ import { NewLeadModal } from "@/components/crm/new-lead-modal";
 import { KanbanCard } from "@/components/crm/kanban-card";
 import { NewTaskModal } from "@/components/crm/new-task-modal";
 import { ScheduleModal } from "@/components/crm/schedule-modal";
+import { PipelineManagerModal } from "@/components/crm/pipeline-manager-modal";
+import { TransferLeadModal } from "@/components/crm/transfer-lead-modal";
+import { PullLeadModal } from "@/components/crm/pull-lead-modal";
+import { LeadRoutingModal } from "@/components/crm/lead-routing-modal";
 import { toast } from "sonner";
 import { isWithinInterval, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -22,13 +27,17 @@ export const Route = createFileRoute("/app/crm")({
 });
 
 function CRMPage() {
-  const { leads, updateLead, deleteLead, addLead, addTask, pipelines, rolePermissions, users, currentUser, initialized, dateFilter } = useData();
+  const { leads, updateLead, deleteLead, addLead, addTask, pipelines, rolePermissions, users, currentUser, initialized, dateFilter, leadRoutingConfig } = useData();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   const [selectedOwner, setSelectedOwner] = useState<string>("all");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [scheduleModalLead, setScheduleModalLead] = useState<Lead | null>(null);
+  const [transferModalLead, setTransferModalLead] = useState<Lead | null>(null);
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
+  const [showPipelineModal, setShowPipelineModal] = useState(false);
+  const [showPullLeadModal, setShowPullLeadModal] = useState(false);
+  const [showRoutingModal, setShowRoutingModal] = useState(false);
   const [taskModalLead, setTaskModalLead] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string>("");
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
@@ -48,7 +57,7 @@ function CRMPage() {
 
   // Lógica de Visibilidade: SDR vê X, Closer vê Y, Full Stack vê tudo
   const visibleStages = useMemo(() => {
-    const allStages = currentPipeline.stages;
+    const allStages = currentPipeline.stages || [];
     if (!currentUser) return [];
 
     // Se for admin ou head, visualiza todas as abas do pipeline selecionado por padrão
@@ -57,6 +66,7 @@ function CRMPage() {
     }
 
     const allowedStageNames = rolePermissions[currentUser.role] || [];
+    if (allowedStageNames.length === 0) return allStages;
     return allStages.filter((s: PipelineStage) => allowedStageNames.includes(s.name));
   }, [currentPipeline, currentUser, rolePermissions]);
 
@@ -68,9 +78,10 @@ function CRMPage() {
       // SÓ MOSTRA LEADS ATIVOS NO CRM
       if (l.status !== 'Ativo') return false;
 
-      // Filtra por pipeline ativa
-      if (l.pipelineId !== activePipelineId && l.pipelineId !== undefined && l.pipelineId !== "default") {
-         if (activePipelineId !== "prospection") return false; 
+      // Filtra por pipeline ativa (fallback para prospection se não definido)
+      const leadPipe = l.pipelineId || "prospection";
+      if (activePipelineId && leadPipe !== activePipelineId && activePipelineId !== "all") {
+        return false;
       }
 
       // Validação de data segura com type narrowing explícito para a closure
@@ -82,7 +93,7 @@ function CRMPage() {
         if (!inPeriod) return false;
       }
 
-      const matchesSearch = [l.name, l.company, l.source].some(v => v?.toLowerCase().includes(search.toLowerCase()));
+      const matchesSearch = [l.name, l.company, l.source, l.email, l.whatsapp].some(v => v?.toLowerCase().includes(search.toLowerCase()));
       const matchesOwner = selectedOwner === "all" || l.owner === selectedOwner;
       
       return matchesSearch && matchesOwner;
@@ -115,18 +126,32 @@ function CRMPage() {
       <div className="p-4 md:p-6 border-b border-border bg-card flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto">
           {/* Seletor de Pipeline */}
-          <div className="relative group">
-            <Layers className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-primary" />
-            <select 
-              value={activePipelineId}
-              onChange={(e) => setActivePipelineId(e.target.value)}
-              className="pl-9 pr-10 py-2.5 bg-primary/5 border border-primary/20 rounded-xl text-xs font-black uppercase tracking-widest appearance-none focus:outline-none hover:bg-primary/10 transition-all cursor-pointer shadow-sm"
-              disabled={pipelines.length === 0}
+          <div className="flex items-center gap-2">
+            <div className="relative group">
+              <Layers className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-primary" />
+              <select 
+                value={activePipelineId}
+                onChange={(e) => setActivePipelineId(e.target.value)}
+                className="pl-9 pr-10 py-2.5 bg-primary/5 border border-primary/20 rounded-xl text-xs font-black uppercase tracking-widest appearance-none focus:outline-none hover:bg-primary/10 transition-all cursor-pointer shadow-sm"
+                disabled={pipelines.length === 0}
+              >
+                {pipelines.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.functionRole ? `(${p.functionRole})` : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3 w-3 text-primary pointer-events-none" />
+            </div>
+
+            <button
+              onClick={() => setShowPipelineModal(true)}
+              className="p-2.5 rounded-xl border border-border bg-card hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-all cursor-pointer shadow-sm flex items-center gap-1.5 text-xs font-bold"
+              title="Gerenciar Pipelines, Etapas e SLAs"
             >
-              {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              {pipelines.length === 0 && <option value="" disabled>Nenhum pipeline cadastrado</option>}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3 w-3 text-primary pointer-events-none" />
+              <Settings2 className="h-4 w-4 text-primary" />
+              <span className="hidden sm:inline">Configurar Funis</span>
+            </button>
           </div>
 
           <div className="h-6 w-px bg-border hidden sm:block" />
@@ -137,12 +162,38 @@ function CRMPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
           <div className="relative flex-1 sm:flex-none">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input placeholder="Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-muted/50 border border-border rounded-xl text-sm focus:ring-2 focus:ring-primary/20 sm:w-48 lg:w-64" />
           </div>
-          <button onClick={() => setShowNewLeadModal(true)} className="bg-primary text-primary-foreground h-10 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-elegant hover:scale-105 transition-transform shrink-0"><Plus className="h-4 w-4" /> NOVO REGISTRO</button>
+
+          {/* Botão de puxar lead da base direto para o funil selecionado */}
+          <button 
+            onClick={() => setShowPullLeadModal(true)}
+            className="h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm hover:scale-102 active:scale-95 transition-all cursor-pointer shrink-0"
+            title="Buscar e puxar leads liberados da base para este pipeline"
+          >
+            <ArrowDownToLine className="h-4 w-4" />
+            <span className="hidden sm:inline">Puxar da Base</span>
+          </button>
+
+          {/* Botão para regras de distribuição e entrada */}
+          <button 
+            onClick={() => setShowRoutingModal(true)}
+            className="h-10 px-3.5 rounded-xl border border-border bg-card hover:bg-muted/80 text-foreground text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+            title="Configurar quem recebe os novos leads da base (LDR, SDR, Seller)"
+          >
+            <GitFork className="h-4 w-4 text-primary" />
+            <span className="hidden md:inline">Distribuição</span>
+            {leadRoutingConfig?.enabled && (
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            )}
+          </button>
+
+          <button onClick={() => setShowNewLeadModal(true)} className="bg-primary text-primary-foreground h-10 px-5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-elegant hover:scale-105 transition-transform shrink-0 cursor-pointer">
+            <Plus className="h-4 w-4" /> NOVO REGISTRO
+          </button>
         </div>
       </div>
 
@@ -188,6 +239,10 @@ function CRMPage() {
                         onDragStart={(e) => handleDragStart(lead.id, e)} 
                         onDragEnd={() => { setDraggedLeadId(null); setDragOverStage(null); }}
                         onSchedule={() => setScheduleModalLead(lead)}
+                        onTransfer={(e) => {
+                          e?.stopPropagation();
+                          setTransferModalLead(lead);
+                        }}
                         onMoveStage={(newStage) => {
                           updateLead(lead.id, { stage: newStage });
                           toast.success(`Lead movido para "${newStage}"`);
@@ -286,13 +341,22 @@ function CRMPage() {
                           </div>
                         </td>
                         <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => setSelectedLeadId(lead.id)}
-                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                            title="Ver detalhes"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setTransferModalLead(lead)}
+                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                              title="Transferir de Funil"
+                            >
+                              <ArrowRightLeft className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => setSelectedLeadId(lead.id)}
+                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              title="Ver detalhes"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -331,6 +395,36 @@ function CRMPage() {
       )}
 
       {showNewLeadModal && <NewLeadModal onClose={() => setShowNewLeadModal(false)} onAdd={addLead} />}
+
+      {showPipelineModal && (
+        <PipelineManagerModal
+          isOpen={showPipelineModal}
+          onClose={() => setShowPipelineModal(false)}
+          activePipelineId={activePipelineId}
+          onSelectPipeline={(id) => setActivePipelineId(id)}
+        />
+      )}
+
+      {transferModalLead && (
+        <TransferLeadModal
+          isOpen={!!transferModalLead}
+          onClose={() => setTransferModalLead(null)}
+          lead={transferModalLead}
+        />
+      )}
+
+      {/* Modal para puxar lead da base diretamente no CRM */}
+      <PullLeadModal
+        open={showPullLeadModal}
+        onClose={() => setShowPullLeadModal(false)}
+        initialTargetPipelineId={activePipelineId}
+      />
+
+      {/* Modal de configuração de distribuição de leads entrantes (LDR/SDR/Seller) */}
+      <LeadRoutingModal
+        open={showRoutingModal}
+        onClose={() => setShowRoutingModal(false)}
+      />
     </div>
   );
 }

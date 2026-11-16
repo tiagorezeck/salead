@@ -2,7 +2,7 @@
 
 import { localStorageProvider, type StorageProvider } from "../providers/storage-provider";
 import { createLocalAnalytics, type AnalyticsProvider } from "../providers/analytics-provider";
-import { getLocalDatabaseRoot, saveLocalDatabaseRoot, pushToGoogleDrive } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 
 export interface LPUser {
   id: string;
@@ -78,26 +78,13 @@ const defaultCrm: CrmAdapter = {
         }
       };
 
-      // 1. Salva no LocalStorage do CRM
-      if (typeof window !== "undefined") {
-        try {
-          const raw = localStorage.getItem("comet_local_leads") || "[]";
-          const list = JSON.parse(raw);
-          list.unshift(leadPayload);
-          localStorage.setItem("comet_local_leads", JSON.stringify(list));
-        } catch {}
-      }
+      // 1. Salva no Cloud Engine em RAM e sincroniza imediatamente com Google Drive / Sheets
+      cloudStore.mutate((draft) => {
+        if (!Array.isArray(draft.leads)) draft.leads = [];
+        draft.leads.unshift(leadPayload);
+      }, { immediate: true });
 
-      // 2. Salva no Snapshot do Google Drive
-      try {
-        const root = getLocalDatabaseRoot();
-        if (!Array.isArray(root.leads)) root.leads = [];
-        root.leads.unshift(leadPayload);
-        saveLocalDatabaseRoot(root);
-        pushToGoogleDrive(root).catch(() => {});
-      } catch {}
-
-      // 3. Envia para o servidor backend Express
+      // 2. Envia para o servidor backend Express
       try {
         fetch("/api/leads", {
           method: "POST",

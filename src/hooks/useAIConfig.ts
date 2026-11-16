@@ -9,87 +9,102 @@ import {
   AIProvider,
   AIModel
 } from '../types/ai';
+import { cloudStore } from '@/services/cloudStorageService';
 
-const STORAGE_KEY = 'lan_ai_config';
+function normalizeAIConfig(raw: any): AIConfig {
+  if (!raw || typeof raw !== 'object') return DEFAULT_AI_CONFIG;
+  try {
+    const parsed = {
+      ...raw,
+      googleKey: raw.googleKey || raw.google_key,
+      openRouterKey: raw.openRouterKey || raw.openrouter_key,
+      modelId: raw.modelId || raw.model_id,
+      modelName: raw.modelName || raw.model_name,
+      activeProvider: raw.activeProvider || raw.provider || DEFAULT_AI_CONFIG.activeProvider,
+    };
+
+    const hasOutdatedGoogle = !parsed.customModels?.google || 
+      parsed.customModels.google.some((m: any) => m.id?.includes("gemini-1.5") || m.id?.includes("gemini-2.0"));
+
+    const googleModels = hasOutdatedGoogle 
+      ? DEFAULT_AI_CONFIG.customModels.google 
+      : parsed.customModels.google;
+
+    const hasOutdatedOpenRouter = !parsed.customModels?.openrouter ||
+      parsed.customModels.openrouter.some((m: any) => m.id?.includes("gemini-flash-1.5"));
+
+    const openrouterModels = hasOutdatedOpenRouter
+      ? DEFAULT_AI_CONFIG.customModels.openrouter
+      : parsed.customModels.openrouter;
+
+    const customPaidModels = parsed.customModels?.custom_paid || DEFAULT_AI_CONFIG.customModels.custom_paid;
+
+    const merged: AIConfig = { 
+      ...DEFAULT_AI_CONFIG, 
+      ...parsed,
+      googleKey: parsed.googleKey?.trim() ? parsed.googleKey.trim() : SYSTEM_GOOGLE_KEY,
+      openRouterKey: parsed.openRouterKey?.trim() ? parsed.openRouterKey.trim() : SYSTEM_OPENROUTER_KEY,
+      customPaidKey: parsed.customPaidKey?.trim() || '',
+      customEndpoint: parsed.customEndpoint || 'https://api.openai.com/v1',
+      customModels: {
+        google: googleModels,
+        openrouter: openrouterModels,
+        custom_paid: customPaidModels
+      }
+    };
+
+    if (merged.activeProvider === "google") {
+      if (merged.modelId?.includes("gemini-1.5") || merged.modelId?.includes("gemini-2.0") || !merged.modelId) {
+        merged.modelId = "gemini-3.8-flash";
+        merged.modelName = "Gemini 3.8 Flash (Padrão Oficial - Recomendado)";
+      }
+    } else if (merged.activeProvider === "openrouter" && merged.modelId?.includes("gemini-flash-1.5")) {
+      merged.modelId = "google/gemini-2.5-flash";
+      merged.modelName = "Gemini 2.5 Flash (Google via OpenRouter)";
+    }
+
+    const currentModels = merged.customModels[merged.activeProvider] || [];
+    const exists = currentModels.some(m => m.id === merged.modelId);
+    
+    if (!exists && currentModels.length > 0) {
+      merged.modelId = currentModels[0].id;
+      merged.modelName = currentModels[0].name;
+    }
+
+    return merged;
+  } catch {
+    return DEFAULT_AI_CONFIG;
+  }
+}
+
+function persistAIConfigToCloud(newConfig: AIConfig) {
+  cloudStore.mutate((draft) => {
+    draft.aiConfig = {
+      ...(draft.aiConfig || {}),
+      ...newConfig,
+      openrouter_key: newConfig.openRouterKey,
+      google_key: newConfig.googleKey,
+      model_id: newConfig.modelId,
+      model_name: newConfig.modelName,
+      provider: newConfig.activeProvider,
+    };
+  }, { immediate: true });
+}
 
 export function useAIConfig() {
   const [aiConfig, setAIConfigState] = useState<AIConfig>(() => {
     if (typeof window === 'undefined') return DEFAULT_AI_CONFIG;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('finbase_ai_config');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        
-        // Check if cached google models are using outdated models
-        const hasOutdatedGoogle = !parsed.customModels?.google || 
-          parsed.customModels.google.some((m: any) => m.id?.includes("gemini-1.5") || m.id?.includes("gemini-2.0"));
-
-        const googleModels = hasOutdatedGoogle 
-          ? DEFAULT_AI_CONFIG.customModels.google 
-          : parsed.customModels.google;
-
-        const hasOutdatedOpenRouter = !parsed.customModels?.openrouter ||
-          parsed.customModels.openrouter.some((m: any) => m.id?.includes("gemini-flash-1.5"));
-
-        const openrouterModels = hasOutdatedOpenRouter
-          ? DEFAULT_AI_CONFIG.customModels.openrouter
-          : parsed.customModels.openrouter;
-
-        const customPaidModels = parsed.customModels?.custom_paid || DEFAULT_AI_CONFIG.customModels.custom_paid;
-
-        const merged: AIConfig = { 
-          ...DEFAULT_AI_CONFIG, 
-          ...parsed,
-          googleKey: parsed.googleKey?.trim() ? parsed.googleKey.trim() : SYSTEM_GOOGLE_KEY,
-          openRouterKey: parsed.openRouterKey?.trim() ? parsed.openRouterKey.trim() : SYSTEM_OPENROUTER_KEY,
-          customPaidKey: parsed.customPaidKey?.trim() || '',
-          customEndpoint: parsed.customEndpoint || 'https://api.openai.com/v1',
-          customModels: {
-            google: googleModels,
-            openrouter: openrouterModels,
-            custom_paid: customPaidModels
-          }
-        };
-
-        // Upgrade legacy active model selection if outdated or standard
-        if (merged.activeProvider === "google") {
-          if (merged.modelId?.includes("gemini-1.5") || merged.modelId?.includes("gemini-2.0") || !merged.modelId) {
-            merged.modelId = "gemini-3.8-flash";
-            merged.modelName = "Gemini 3.8 Flash (Padrão Oficial - Recomendado)";
-          }
-        } else if (merged.activeProvider === "openrouter" && merged.modelId?.includes("gemini-flash-1.5")) {
-          merged.modelId = "google/gemini-2.5-flash";
-          merged.modelName = "Gemini 2.5 Flash (Google via OpenRouter)";
-        }
-
-        const currentModels = merged.customModels[merged.activeProvider] || [];
-        const exists = currentModels.some(m => m.id === merged.modelId);
-        
-        if (!exists && currentModels.length > 0) {
-          merged.modelId = currentModels[0].id;
-          merged.modelName = currentModels[0].name;
-        }
-
-        return merged;
-      }
-    } catch (e) {
-      console.error('Erro ao carregar config de IA:', e);
-    }
-    return DEFAULT_AI_CONFIG;
+    return normalizeAIConfig(cloudStore.getState().aiConfig);
   });
 
-  // Listen for storage changes across tabs / windows
   useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          setAIConfigState(prev => ({ ...prev, ...parsed }));
-        } catch {}
+    const unsubscribe = cloudStore.subscribe(() => {
+      const cloudCfg = cloudStore.getState().aiConfig;
+      if (cloudCfg && typeof cloudCfg === 'object') {
+        setAIConfigState(normalizeAIConfig(cloudCfg));
       }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    });
+    return unsubscribe;
   }, []);
 
   const setAIConfig = useCallback(async (config: Partial<AIConfig>) => {
@@ -119,11 +134,7 @@ export function useAIConfig() {
         customEndpoint: updatedCustomEndpoint
       };
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
-      } catch (e) {
-        console.error("Erro ao salvar config no localStorage:", e);
-      }
+      persistAIConfigToCloud(newConfig);
       return newConfig;
     });
   }, []);
@@ -144,9 +155,7 @@ export function useAIConfig() {
         }
       };
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
-      } catch (e) {}
+      persistAIConfigToCloud(newConfig);
       return newConfig;
     });
   }, []);
@@ -174,9 +183,7 @@ export function useAIConfig() {
         }
       };
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
-      } catch (e) {}
+      persistAIConfigToCloud(newConfig);
       return newConfig;
     });
   }, []);
@@ -198,9 +205,7 @@ export function useAIConfig() {
 
   const resetToDefaults = useCallback(() => {
     setAIConfigState(DEFAULT_AI_CONFIG);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_AI_CONFIG));
-    } catch {}
+    persistAIConfigToCloud(DEFAULT_AI_CONFIG);
   }, []);
 
   return { 

@@ -26,7 +26,11 @@ import {
   Folder,
   Share2,
   Smartphone,
-  Zap
+  Zap,
+  Key,
+  Lock,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import {
   getDriveConfig,
@@ -41,12 +45,12 @@ import {
   pushToGoogleDrive,
   fetchFromGoogleDrive,
   forceReadSpreadsheetFromDrive,
-  getLocalDatabaseRoot,
-  saveLocalDatabaseRoot,
   getSpreadsheetExportUrl,
+  setScriptSecuritySecret,
   type DriveConfig,
   type DriveFileInfo,
 } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 import { SALEAD_GOOGLE_APPS_SCRIPT_CODE } from "@/lib/gdrive-apps-script-code";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -60,10 +64,13 @@ interface GoogleDriveSyncModalProps {
 export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalProps) {
   const [config, setConfig] = useState<DriveConfig>(getDriveConfig());
   const [webappUrlInput, setWebappUrlInput] = useState(config.webappUrl || "");
+  const [apiTokenInput, setApiTokenInput] = useState(config.apiToken || "");
+  const [showToken, setShowToken] = useState(false);
+  const [isSettingSecret, setIsSettingSecret] = useState(false);
   const [autoSyncInput, setAutoSyncInput] = useState(config.autoSync ?? true);
   
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; spreadsheetUrl?: string; spreadsheetName?: string } | null>(null);
   
   const [isCreatingCheckpoint, setIsCreatingCheckpoint] = useState(false);
   const [isLoadingCheckpoints, setIsLoadingCheckpoints] = useState(false);
@@ -83,6 +90,7 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
       const current = getDriveConfig();
       setConfig(current);
       setWebappUrlInput(current.webappUrl || "");
+      setApiTokenInput(current.apiToken || "");
       setAutoSyncInput(current.autoSync ?? true);
       setTestResult(null);
 
@@ -116,7 +124,8 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await testDriveConnection(cleanUrl);
+      const cleanToken = apiTokenInput.trim();
+      const res = await testDriveConnection(cleanUrl, cleanToken || undefined);
       setTestResult({ 
         success: res.success, 
         message: res.message,
@@ -150,8 +159,10 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
     }
     setWebappUrlInput(cleanUrl);
 
+    const cleanToken = apiTokenInput.trim();
     const updated = saveDriveConfig({
       webappUrl: cleanUrl,
+      apiToken: cleanToken || undefined,
       autoSync: autoSyncInput
     });
     setConfig(updated);
@@ -159,7 +170,7 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await testDriveConnection(cleanUrl);
+      const res = await testDriveConnection(cleanUrl, cleanToken || undefined);
       setTestResult({ 
         success: res.success, 
         message: res.message,
@@ -178,22 +189,37 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
           const remoteDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
           const leadsCount = Array.isArray(remoteDb?.leads) ? remoteDb.leads.length : (Array.isArray(remoteDb?.data?.leads) ? remoteDb.data.leads.length : 0);
           const pagesCount = Array.isArray(remoteDb?.landingPages) ? remoteDb.landingPages.length : (Array.isArray(remoteDb?.data?.landingPages) ? remoteDb.data.landingPages.length : 0);
-          
-          toast.success("Dados lidos do Google Sheets com sucesso!", {
-            description: `${leadsCount} leads e ${pagesCount} landing pages importados em tempo real.`
-          });
-          setConfig(getDriveConfig());
-        } catch (syncErr: any) {
-          console.warn("Aviso na leitura inicial do Sheets:", syncErr.message);
-        }
+          if (leadsCount > 0 || pagesCount > 0) {
+            toast.success(`Sincronizados ${leadsCount} leads e ${pagesCount} páginas da nuvem!`);
+          }
+        } catch {}
       } else {
-        toast.error("Falha na validação do link:", { description: res.message });
+        toast.error("Falha ao conectar:", { description: res.message });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message });
       toast.error(err.message);
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleSalvarSegredoNoScript = async () => {
+    const cleanUrl = cleanWebAppUrl(webappUrlInput.trim());
+    if (!cleanUrl) {
+      toast.error("Insira a URL do Web App primeiro.");
+      return;
+    }
+    const cleanToken = apiTokenInput.trim();
+    setIsSettingSecret(true);
+    try {
+      const res = await setScriptSecuritySecret(cleanToken, cleanUrl);
+      toast.success(res.message);
+      setConfig(getDriveConfig());
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao salvar chave de segurança no script.");
+    } finally {
+      setIsSettingSecret(false);
     }
   };
 
@@ -238,50 +264,39 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
 
     setIsSyncingDown(true);
     try {
-      // 1. Limpa marcas de exclusão locais legadas para permitir reimportação limpa de tudo no Sheets
-      if (typeof window !== "undefined") {
-        try {
-          const keysToRemove: string[] = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith("deleted_") || key.includes("deleted_lps") || key.includes("deleted_leads"))) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach(k => localStorage.removeItem(k));
-        } catch {}
-      }
+      // 1. Limpa marcas de exclusão na nuvem/RAM para permitir reimportação limpa de tudo no Sheets
+      cloudStore.mutate((draft) => {
+        draft.deletedLpIds = [];
+      }, { skipPush: true });
 
-      // 2. Baixa todos os dados consolidados do Google Sheets + Drive
-      const remoteData = await forceReadSpreadsheetFromDrive<any>(targetUrl);
+      // 2. Baixa todos os dados consolidados do Google Sheets + Drive via CloudEngine
+      await cloudStore.pullNow(true);
 
-      // 3. Garante também a fusão com os leads capturados da API local
+      // 3. Garante também a fusão com os leads capturados da API local do servidor
       try {
         const localLeadsRes = await fetch("/api/leads");
         if (localLeadsRes.ok) {
           const rawApi = await localLeadsRes.json();
           const leadsFromApi = Array.isArray(rawApi) ? rawApi : (Array.isArray(rawApi?.leads) ? rawApi.leads : []);
           if (leadsFromApi.length > 0) {
-            const currentRoot = getLocalDatabaseRoot() || {};
-            const existingLeads = Array.isArray(currentRoot.leads) ? currentRoot.leads : [];
-            const ids = new Set(existingLeads.map((l: any) => l.id));
-            leadsFromApi.forEach((l: any) => {
-              if (!ids.has(l.id)) {
-                existingLeads.push(l);
-              }
-            });
-            currentRoot.leads = existingLeads;
-            saveLocalDatabaseRoot(currentRoot);
+            cloudStore.mutate((draft) => {
+              const existingLeads = Array.isArray(draft.leads) ? [...draft.leads] : [];
+              const ids = new Set(existingLeads.map((l: any) => l.id));
+              leadsFromApi.forEach((l: any) => {
+                if (!ids.has(l.id)) {
+                  existingLeads.push(l);
+                }
+              });
+              draft.leads = existingLeads;
+            }, { skipPush: true });
           }
         }
       } catch {}
 
       toast.success("Leitura completa do Google Sheets e Apps Script realizada com sucesso!", {
-        description: "Todos os dados da planilha foram lidos e sincronizados. Recarregando..."
+        description: "Todos os dados da planilha foram atualizados em tempo real no sistema."
       });
-      setTimeout(() => {
-        window.location.reload();
-      }, 800);
+      setConfig(getDriveConfig());
     } catch (err: any) {
       toast.error("Erro ao ler dados da planilha do Sheets: " + err.message);
     } finally {
@@ -618,10 +633,10 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
                   <div className="p-3 rounded-xl bg-card border border-border space-y-1 shadow-sm">
                     <div className="flex items-center gap-2 font-bold text-xs text-foreground">
                       <span className="h-5 w-5 rounded-full bg-primary text-primary-foreground text-[10px] font-black flex items-center justify-center shrink-0">2</span>
-                      Implantar WebApp
+                      Implantar WebApp (Nova versão)
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Clique em <strong>Implantar &gt; Nova implantação</strong>. No ícone de engrenagem, selecione <strong>App da Web</strong>.
+                      No editor do Apps Script, clique em <strong>Implantar &gt; Gerenciar implantações &gt; Editar &gt; Nova versão</strong> (ou <em>Nova implantação &gt; App da Web</em>).
                     </p>
                   </div>
 
@@ -637,39 +652,118 @@ export function GoogleDriveSyncModal({ isOpen, onClose }: GoogleDriveSyncModalPr
                 </div>
               </div>
 
+              {/* Badges de Performance & Segurança do Motor v2.0 */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 rounded-xl bg-card border border-border flex flex-col gap-1 shadow-sm">
+                  <div className="flex items-center gap-1.5 text-amber-500 font-bold text-[11px] uppercase tracking-wider">
+                    <Zap className="h-3.5 w-3.5" /> Cache em Memória
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">CacheService &lt;100ms</span>
+                </div>
+                <div className="p-3 rounded-xl bg-card border border-border flex flex-col gap-1 shadow-sm">
+                  <div className="flex items-center gap-1.5 text-blue-500 font-bold text-[11px] uppercase tracking-wider">
+                    <Lock className="h-3.5 w-3.5" /> Lock Atômico
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">LockService 30s anti-colisão</span>
+                </div>
+                <div className="p-3 rounded-xl bg-card border border-border flex flex-col gap-1 shadow-sm">
+                  <div className="flex items-center gap-1.5 text-emerald-500 font-bold text-[11px] uppercase tracking-wider">
+                    <FileSpreadsheet className="h-3.5 w-3.5" /> Batch Processing
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">Gravação 100% em bloco</span>
+                </div>
+                <div className="p-3 rounded-xl bg-card border border-border flex flex-col gap-1 shadow-sm">
+                  <div className="flex items-center gap-1.5 text-indigo-500 font-bold text-[11px] uppercase tracking-wider">
+                    <ShieldCheck className="h-3.5 w-3.5" /> API Secret
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    {config.apiToken ? "Protegido por Token" : "Modo Flexível"}
+                  </span>
+                </div>
+              </div>
+
               {/* Input URL e Botão Conectar & Sincronizar */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-foreground uppercase tracking-wider">
-                    URL do WebApp do Apps Script
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleTestConnection}
-                    disabled={isTesting || !webappUrlInput.trim()}
-                    className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                  >
-                    <Sparkles className="h-3 w-3" /> Testar Conexão / Ping
-                  </button>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-foreground uppercase tracking-wider">
+                      URL do WebApp do Apps Script
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleTestConnection}
+                      disabled={isTesting || !webappUrlInput.trim()}
+                      className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                    >
+                      <Sparkles className="h-3 w-3" /> Testar Conexão / Ping
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={webappUrlInput}
+                      onChange={(e) => setWebappUrlInput(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="flex-1 bg-muted/50 border border-border rounded-xl px-4 py-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 font-mono shadow-inner"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleConectarESincronizar}
+                      disabled={isTesting || !webappUrlInput.trim()}
+                      className="px-5 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                    >
+                      {isTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                      CONECTAR & SINCRONIZAR
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="url"
-                    value={webappUrlInput}
-                    onChange={(e) => setWebappUrlInput(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/.../exec"
-                    className="flex-1 bg-muted/50 border border-border rounded-xl px-4 py-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 font-mono shadow-inner"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleConectarESincronizar}
-                    disabled={isTesting || !webappUrlInput.trim()}
-                    className="px-5 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0 disabled:opacity-50"
-                  >
-                    {isTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                    CONECTAR & SINCRONIZAR
-                  </button>
+                {/* Chave de Segurança Opcional (API Secret / Bearer Token) */}
+                <div className="p-4 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Key className="h-4 w-4 text-indigo-500" />
+                      <span className="text-xs font-bold text-foreground uppercase tracking-wider">
+                        Chave de Segurança / Token da API (Opcional)
+                      </span>
+                    </div>
+                    {config.apiToken && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        Ativa
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Blindagem opcional: Configure um segredo para proteger seus dados. Quando ativado, apenas requisições com este token são aceitas pelo Google Apps Script.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={showToken ? "text" : "password"}
+                        value={apiTokenInput}
+                        onChange={(e) => setApiTokenInput(e.target.value)}
+                        placeholder="Ex: secret_token_minha_empresa_123"
+                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 pr-10 text-xs font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30 shadow-inner"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowToken(!showToken)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSalvarSegredoNoScript}
+                      disabled={isSettingSecret || !webappUrlInput.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                    >
+                      {isSettingSecret ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                      {isSettingSecret ? "SALVANDO..." : "SALVAR NO SCRIPT"}
+                    </button>
+                  </div>
                 </div>
 
                 {testResult && (

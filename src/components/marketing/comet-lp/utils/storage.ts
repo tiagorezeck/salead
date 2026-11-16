@@ -1,12 +1,13 @@
 import { LandingPage, LeadSubmission, DEFAULT_HEADER_NAV } from "../types/landingPage";
 import { PRESET_TEMPLATES } from "../data/templates";
-
-const STORAGE_KEY = "people_cro_landing_pages_v1";
-const LEADS_STORAGE_KEY = "people_cro_leads_v1";
+import { cloudStore } from "@/services/cloudStorageService";
 
 function normalizePage(page: LandingPage): LandingPage {
+  const activeModel = page.heroModel || page.hero?.model || (page.hero as any)?.model || "split_image";
   return {
     ...page,
+    heroModel: activeModel,
+    hero: page.hero ? { ...page.hero, model: activeModel } : page.hero,
     headerNav: page.headerNav
       ? {
           ...DEFAULT_HEADER_NAV,
@@ -23,61 +24,47 @@ export function loadSavedLandingPages(): LandingPage[] {
   if (typeof window === "undefined") return PRESET_TEMPLATES.map(normalizePage);
 
   try {
-    const keys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
+    const db = cloudStore.getState();
+    const deletedSet = new Set((db.deletedLpIds || []).map(String));
     const mergedMap = new Map<string, LandingPage>();
 
-    for (const key of keys) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          for (const p of parsed) {
-            if (p && (p.id || p.slug)) {
-              const itemKey = p.id || p.slug;
-              if (!mergedMap.has(itemKey)) {
-                mergedMap.set(itemKey, normalizePage(p));
-              } else {
-                // Se já existir, mantém a versão com timestamp mais recente
-                const existing = mergedMap.get(itemKey)!;
-                const existingTime = new Date(existing.updatedAt || (existing as any).updated_at || 0).getTime();
-                const newTime = new Date(p.updatedAt || p.updated_at || 0).getTime();
-                if (newTime >= existingTime) {
-                  mergedMap.set(itemKey, normalizePage({ ...existing, ...p }));
-                }
-              }
-            }
-          }
-        }
-      } catch {}
-    }
-
-    // Se houver uma página ativa de preview editada, integra ela
-    try {
-      const activeRaw = localStorage.getItem("active_preview_page");
-      if (activeRaw) {
-        const active = JSON.parse(activeRaw);
-        if (active && (active.id || active.slug)) {
-          const itemKey = active.id || active.slug;
-          mergedMap.set(itemKey, normalizePage(active));
+    for (const p of (db.landingPages || []) as any[]) {
+      if (!p || (!p.id && !p.slug)) continue;
+      if (deletedSet.has(String(p.id)) || (p.slug && deletedSet.has(String(p.slug)))) continue;
+      const itemKey = String(p.id || p.slug);
+      const existing = mergedMap.get(itemKey);
+      if (!existing) {
+        mergedMap.set(itemKey, normalizePage(p));
+      } else {
+        const existingTime = new Date(existing.updatedAt || (existing as any).updated_at || 0).getTime();
+        const newTime = new Date(p.updatedAt || p.updated_at || 0).getTime();
+        if (newTime >= existingTime) {
+          mergedMap.set(itemKey, normalizePage({ ...existing, ...p }));
         }
       }
-    } catch {}
+    }
+
+    if (db.activePreviewPage && (db.activePreviewPage.id || db.activePreviewPage.slug)) {
+      const active = db.activePreviewPage;
+      if (!deletedSet.has(String(active.id)) && !(active.slug && deletedSet.has(String(active.slug)))) {
+        const itemKey = String(active.id || active.slug);
+        const existing = mergedMap.get(itemKey);
+        const existingTime = new Date(existing?.updatedAt || (existing as any)?.updated_at || 0).getTime();
+        const activeTime = new Date(active.updatedAt || active.updated_at || 0).getTime();
+        if (!existing || activeTime >= existingTime) {
+          mergedMap.set(itemKey, normalizePage({ ...(existing || {}), ...active }));
+        }
+      }
+    }
 
     const results = Array.from(mergedMap.values());
     if (results.length > 0) {
       return results;
     }
 
-    // Seed com presets caso esteja totalmente vazio
-    const normalized = PRESET_TEMPLATES.map(normalizePage);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-      localStorage.setItem("comet_local_landing_pages", JSON.stringify(normalized));
-    } catch {}
-    return normalized;
+    return PRESET_TEMPLATES.map(normalizePage);
   } catch (err) {
-    console.error("Failed to load landing pages from storage:", err);
+    console.error("Failed to load landing pages from cloudStore:", err);
     return PRESET_TEMPLATES.map(normalizePage);
   }
 }
@@ -85,37 +72,36 @@ export function loadSavedLandingPages(): LandingPage[] {
 export function saveLandingPages(pages: LandingPage[]): void {
   if (typeof window === "undefined") return;
   try {
-    const serialized = JSON.stringify(pages);
-    localStorage.setItem(STORAGE_KEY, serialized);
-    localStorage.setItem("comet_local_landing_pages", serialized);
-    localStorage.setItem("app:lps:v1", serialized);
+    const normalized = pages.map(normalizePage);
+    cloudStore.mutate((draft) => {
+      draft.landingPages = normalized as any[];
+    });
   } catch (err) {
-    console.error("Failed to save landing pages to storage:", err);
+    console.error("Failed to save landing pages to cloudStore:", err);
   }
 }
 
 export function saveSingleLandingPage(page: LandingPage): LandingPage[] {
   const pages = loadSavedLandingPages();
-  const index = pages.findIndex((p) => p.id === page.id || (page.slug && p.slug === page.slug));
-  let updated: LandingPage[];
+  const normalizedInput = normalizePage(page);
+  const index = pages.findIndex((p) => p.id === normalizedInput.id || (normalizedInput.slug && p.slug === normalizedInput.slug));
   const pageWithUpdatedTimestamp: LandingPage = {
-    ...page,
+    ...normalizedInput,
     updatedAt: new Date().toISOString(),
-    ...(page as any),
   };
 
+  let updated: LandingPage[];
   if (index >= 0) {
     updated = [...pages];
-    updated[index] = { ...updated[index], ...pageWithUpdatedTimestamp };
+    updated[index] = normalizePage({ ...updated[index], ...pageWithUpdatedTimestamp });
   } else {
     updated = [pageWithUpdatedTimestamp, ...pages];
   }
 
-  saveLandingPages(updated);
-
-  try {
-    localStorage.setItem("active_preview_page", JSON.stringify(pageWithUpdatedTimestamp));
-  } catch {}
+  cloudStore.mutate((draft) => {
+    draft.landingPages = updated as any[];
+    draft.activePreviewPage = pageWithUpdatedTimestamp;
+  });
 
   // Sincronização assíncrona imediata com o servidor (preview + persistência física)
   syncPageWithServerPreview(pageWithUpdatedTimestamp).catch(() => {});
@@ -135,7 +121,7 @@ export async function syncPageWithServerPreview(page: LandingPage): Promise<bool
     const res = await fetch("/api/pages/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(page),
+      body: JSON.stringify(normalizePage(page)),
     });
     return res.ok;
   } catch {
@@ -147,17 +133,16 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
   if (!tokenOrId) return null;
   const cleanId = encodeURIComponent(tokenOrId.trim());
 
-  // Executa buscas simultâneas em paralelo com timeout de 2.5 segundos para máxima velocidade
   const fetchEndpoint = async (url: string): Promise<LandingPage | null> => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
       clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
-        const pageData = data?.page || data?.landingPage;
-        if (pageData && (pageData.title || pageData.name)) {
+        const pageData = data?.page || data?.landingPage || (data?.id && (data?.hero || data?.title || data?.name) ? data : null);
+        if (pageData && (pageData.title || pageData.name || pageData.hero)) {
           return normalizePage(pageData);
         }
       }
@@ -168,17 +153,31 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
   };
 
   try {
-    const results = await Promise.allSettled([
-      fetchEndpoint(`/api/public/lp/${cleanId}`),
-      fetchEndpoint(`/api/landing-pages/${cleanId}`),
-      fetchEndpoint(`/api/pages/preview?id=${cleanId}`),
-      fetchEndpoint(`/api/pages/preview/${cleanId}`),
+    const [cloudResult, apiResults] = await Promise.all([
+      cloudStore.fetchPublicLP(tokenOrId).catch(() => null),
+      Promise.allSettled([
+        fetchEndpoint(`/api/public/lp/${cleanId}`),
+        fetchEndpoint(`/api/landing-pages/${cleanId}`),
+        fetchEndpoint(`/api/pages/preview?id=${cleanId}`),
+        fetchEndpoint(`/api/pages/preview/${cleanId}`),
+      ]),
     ]);
 
-    for (const r of results) {
+    const candidates: LandingPage[] = [];
+    if (cloudResult) candidates.push(normalizePage(cloudResult as any));
+    for (const r of apiResults) {
       if (r.status === "fulfilled" && r.value) {
-        return r.value;
+        candidates.push(r.value);
       }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => {
+        const tA = new Date(a.updatedAt || (a as any).updated_at || 0).getTime();
+        const tB = new Date(b.updatedAt || (b as any).updated_at || 0).getTime();
+        return tB - tA;
+      });
+      return candidates[0];
     }
   } catch {}
 
@@ -191,51 +190,20 @@ export const saveLandingPageToStorage = saveSingleLandingPage;
 
 export function deleteLandingPage(id: string): LandingPage[] {
   const pages = loadSavedLandingPages();
-  const updated = pages.filter((p) => p.id !== id);
-  saveLandingPages(updated);
+  const updated = pages.filter((p) => p.id !== id && p.slug !== id);
 
-  // Sync with global deletion tracking
+  cloudStore.mutate(
+    (draft) => {
+      draft.deletedLpIds = Array.from(new Set([...(draft.deletedLpIds || []), id]));
+      draft.landingPages = updated as any[];
+      if (draft.activePreviewPage?.id === id || draft.activePreviewPage?.slug === id) {
+        draft.activePreviewPage = null;
+      }
+    },
+    { immediate: true }
+  );
+
   if (typeof window !== "undefined") {
-    try {
-      const rawDel = localStorage.getItem("comet_deleted_lp_ids");
-      const delList = rawDel ? JSON.parse(rawDel) : [];
-      if (Array.isArray(delList) && !delList.includes(id)) {
-        delList.push(id);
-        localStorage.setItem("comet_deleted_lp_ids", JSON.stringify(delList));
-      }
-    } catch {}
-
-    try {
-      const cometRaw = localStorage.getItem("comet_local_landing_pages");
-      if (cometRaw) {
-        const cometList = JSON.parse(cometRaw);
-        if (Array.isArray(cometList)) {
-          localStorage.setItem("comet_local_landing_pages", JSON.stringify(cometList.filter((p: any) => p.id !== id)));
-        }
-      }
-    } catch {}
-
-    try {
-      const v1Raw = localStorage.getItem("app:lps:v1");
-      if (v1Raw) {
-        const v1List = JSON.parse(v1Raw);
-        if (Array.isArray(v1List)) {
-          localStorage.setItem("app:lps:v1", JSON.stringify(v1List.filter((p: any) => p.id !== id)));
-        }
-      }
-    } catch {}
-
-    try {
-      const activePrev = localStorage.getItem("active_preview_page");
-      if (activePrev) {
-        const parsed = JSON.parse(activePrev);
-        if (parsed?.id === id) {
-          localStorage.removeItem("active_preview_page");
-        }
-      }
-    } catch {}
-
-    // Limpa preview em memória do servidor
     fetch(`/api/pages/preview/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
   }
 
@@ -263,7 +231,7 @@ export function loadStoredLeads(): LeadSubmission[] {
   return [];
 }
 
-export function recordLocalLead(lead: LeadSubmission): void {
-  // Desativado: leads agora são gravados 100% direto no banco de dados
+export function recordLocalLead(_lead: LeadSubmission): void {
+  // Desativado: leads agora são gravados 100% direto no cloudStore e Google Sheets
 }
 

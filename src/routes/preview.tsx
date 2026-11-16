@@ -8,6 +8,7 @@ import { ensureCometLP } from "@/components/marketing/comet-lp/utils/cometAdapte
 import { getInitialAILandingPages } from "@/hooks/use-data";
 import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 import { fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
+import { cloudStore } from "@/services/cloudStorageService";
 import { parseUtm } from "@/modules/landing-pages";
 import { getStoredTracking } from "@/components/marketing/lp-tracking-capture";
 import {
@@ -71,35 +72,47 @@ export function PreviewPage() {
   useEffect(() => {
     let isMounted = true;
 
+    const findMatchingPage = (list: any[], searchId: string) => {
+      const normTarget = normalizeSlug(searchId);
+      return list.find((p: any) => {
+        if (!p) return false;
+        if (p.id === searchId || p.slug === searchId || p.previewToken === searchId) return true;
+        if (p.name && normalizeSlug(p.name) === normTarget) return true;
+        if (p.title && normalizeSlug(p.title) === normTarget) return true;
+        return false;
+      });
+    };
+
     async function resolvePage() {
+      const db = cloudStore.getState();
+
       if (!targetId) {
-        // Se nenhum ID for passado, tenta pegar a última página editada ativa
-        try {
-          const activeRaw = localStorage.getItem("active_preview_page");
-          if (activeRaw) {
-            const activeObj = JSON.parse(activeRaw);
-            if (activeObj && isMounted) {
-              setPage(activeObj);
+        if (db.activePreviewPage && isMounted) {
+          setPage(db.activePreviewPage);
+          setLoading(false);
+          return;
+        }
+        if (Array.isArray(db.landingPages) && db.landingPages.length > 0 && isMounted) {
+          setPage(db.landingPages[0]);
+          setLoading(false);
+          return;
+        }
+
+        if (!cloudStore.getStatus().loadedFromCloud) {
+          try {
+            const booted = await cloudStore.bootstrap();
+            if (booted.activePreviewPage && isMounted) {
+              setPage(booted.activePreviewPage);
               setLoading(false);
               return;
             }
-          }
-
-          const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
-          for (const key of localKeys) {
-            const raw = localStorage.getItem(key);
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list) && list.length > 0) {
-                if (isMounted) {
-                  setPage(list[0]);
-                  setLoading(false);
-                }
-                return;
-              }
+            if (Array.isArray(booted.landingPages) && booted.landingPages.length > 0 && isMounted) {
+              setPage(booted.landingPages[0]);
+              setLoading(false);
+              return;
             }
-          }
-        } catch {}
+          } catch {}
+        }
 
         if (PRESET_TEMPLATES.length > 0 && isMounted) {
           setPage(PRESET_TEMPLATES[0]);
@@ -116,79 +129,58 @@ export function PreviewPage() {
 
       setErrorMsg(null);
 
-      // PASSO 1: Busca síncrona imediata no localStorage local (0ms para o navegador atual)
-      let localFound: any = null;
+      // PASSO 1: Busca instantânea no estado em RAM do cloudStore
+      let ramFound: any = null;
+      if (db.activePreviewPage && findMatchingPage([db.activePreviewPage], targetId)) {
+        ramFound = db.activePreviewPage;
+      } else if (Array.isArray(db.landingPages)) {
+        ramFound = findMatchingPage(db.landingPages, targetId);
+      }
+
+      if (ramFound && isMounted) {
+        setPage(ramFound);
+        setLoading(false);
+      }
+
+      // PASSO 2: Busca ao vivo no Google Apps Script (GET_PUBLIC_LP) e servidor Express
       try {
-        const normTarget = normalizeSlug(targetId);
-
-        // 1a. Verifica active_preview_page primeiro
-        const activeRaw = localStorage.getItem("active_preview_page");
-        if (activeRaw) {
-          const activeObj = JSON.parse(activeRaw);
-          if (activeObj && (activeObj.id === targetId || activeObj.slug === targetId || activeObj.previewToken === targetId || (activeObj.name && normalizeSlug(activeObj.name) === normTarget) || (activeObj.title && normalizeSlug(activeObj.title) === normTarget))) {
-            localFound = activeObj;
-            if (isMounted) {
-              setPage(activeObj);
-              setLoading(false);
-            }
-          }
-        }
-
-        // 1b. Verifica listas locais
-        if (!localFound) {
-          const localKeys = ["comet_local_landing_pages", "people_cro_landing_pages_v1", "app:lps:v1"];
-          for (const key of localKeys) {
-            const rawLocal = localStorage.getItem(key);
-            if (!rawLocal) continue;
-            
-            let parsed = JSON.parse(rawLocal);
-            if (!parsed) continue;
-            if (!Array.isArray(parsed)) parsed = [parsed];
-
-            if (Array.isArray(parsed)) {
-              const found = parsed.find((p: any) => {
-                if (!p) return false;
-                if (p.id === targetId || p.slug === targetId || p.previewToken === targetId) return true;
-                if (p.name && normalizeSlug(p.name) === normTarget) return true;
-                if (p.title && normalizeSlug(p.title) === normTarget) return true;
-                return false;
-              });
-
-              if (found) {
-                localFound = found;
-                if (isMounted) {
-                  setPage(found);
-                  setLoading(false);
-                }
-                break;
-              }
-            }
-          }
-        }
-      } catch {}
-
-      // PASSO 2: Busca no servidor Express / Supabase / Vercel API (para outros navegadores e dispositivos)
-      try {
-        const serverPage = await fetchPageFromServerPreview(targetId);
-        if (serverPage && isMounted) {
-          const localTime = new Date((localFound as any)?.updatedAt || (localFound as any)?.updated_at || (localFound as any)?.createdAt || 0).getTime();
-          const serverTime = new Date((serverPage as any)?.updatedAt || (serverPage as any)?.updated_at || (serverPage as any)?.createdAt || 0).getTime();
-
-          if (!localFound || serverTime >= localTime) {
-            setPage(serverPage);
+        const [cloudPage, serverPage] = await Promise.all([
+          cloudStore.fetchPublicLP(targetId).catch(() => null),
+          fetchPageFromServerPreview(targetId).catch(() => null),
+        ]);
+        const remoteBest = cloudPage || serverPage;
+        if (remoteBest && isMounted) {
+          const ramTime = new Date((ramFound as any)?.updatedAt || (ramFound as any)?.updated_at || (ramFound as any)?.createdAt || 0).getTime();
+          const remoteTime = new Date((remoteBest as any)?.updatedAt || (remoteBest as any)?.updated_at || (remoteBest as any)?.createdAt || 0).getTime();
+          if (!ramFound || remoteTime >= ramTime) {
+            setPage(remoteBest);
             setLoading(false);
             return;
           }
         }
       } catch {}
 
-      // PASSO 3: Se já encontramos localmente, encerra
-      if (localFound && isMounted) {
+      if (ramFound && isMounted) {
         setLoading(false);
         return;
       }
 
-      // PASSO 4: Fallback apenas se corresponder estritamente pelo ID de template pré-configurado
+      // PASSO 3: Bootstrap completo da nuvem se outro navegador acabou de abrir a aba
+      if (!cloudStore.getStatus().loadedFromCloud) {
+        try {
+          const booted = await cloudStore.bootstrap();
+          const bootedMatch =
+            (booted.activePreviewPage && findMatchingPage([booted.activePreviewPage], targetId)) ||
+            findMatchingPage(booted.landingPages || [], targetId);
+          if (bootedMatch && isMounted) {
+            setPage(bootedMatch);
+            setLoading(false);
+            return;
+          }
+        } catch {}
+      }
+
+      // PASSO 4: Fallback para templates pré-configurados apenas por ID/slug exato
       const normTarget = normalizeSlug(targetId);
       const presetFound = PRESET_TEMPLATES.find((p) => {
         if (p.id === targetId || p.slug === targetId) return true;
@@ -223,8 +215,29 @@ export function PreviewPage() {
 
     resolvePage();
 
+    const unsubscribe = cloudStore.subscribe(() => {
+      if (!isMounted) return;
+      const db = cloudStore.getState();
+      if (!targetId) {
+        if (db.activePreviewPage) setPage(db.activePreviewPage);
+        return;
+      }
+      const match =
+        (db.activePreviewPage && findMatchingPage([db.activePreviewPage], targetId)) ||
+        findMatchingPage(db.landingPages || [], targetId);
+      if (match) {
+        setPage((prev: any) => {
+          const prevTime = new Date(prev?.updatedAt || prev?.updated_at || 0).getTime();
+          const nextTime = new Date(match?.updatedAt || match?.updated_at || 0).getTime();
+          return !prev || nextTime >= prevTime ? match : prev;
+        });
+        setLoading(false);
+      }
+    });
+
     return () => {
       isMounted = false;
+      unsubscribe();
     };
   }, [targetId]);
 
@@ -280,7 +293,34 @@ export function PreviewPage() {
       },
     };
 
-    // Envia direto para o banco de dados do sistema e Google Drive/Sheets
+    // Persiste imediatamente no cloudStore + API do servidor
+    const newLeadObj = {
+      id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: leadData.name || "Lead Teste Preview",
+      company: `${leadData.name || "Lead Teste"} (Preview: ${page?.title || page?.name || "LP"})`,
+      email: leadData.email || "",
+      whatsapp: leadData.whatsapp || "",
+      stage: "Leads",
+      source: source || "preview-test",
+      classification: "Lead Teste",
+      temperature: "Quente",
+      type: "Inbound",
+      landingPage: page?.title || page?.name || targetId,
+      tags: ["preview-test", "leadtest", source || "direct"].filter(Boolean),
+      createdAt: new Date().toISOString(),
+      metadata: payload.metadata,
+    };
+
+    cloudStore.mutate(
+      (draft) => {
+        draft.leads = [newLeadObj, ...(draft.leads || []).filter((l: any) => l.id !== newLeadObj.id)];
+      },
+      { immediate: true }
+    );
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("lead-submitted", { detail: newLeadObj }));
+    }
+
     try {
       await fetch("/api/submit-lead", {
         method: "POST",

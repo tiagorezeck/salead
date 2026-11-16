@@ -6,6 +6,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { cloudStore, purgeLegacyBusinessLocalStorage } from "@/services/cloudStorageService";
 
 function NotFoundComponent() {
   return (
@@ -54,6 +55,9 @@ function RootComponent() {
     } else {
       document.documentElement.classList.add("dark");
     }
+
+    purgeLegacyBusinessLocalStorage();
+    cloudStore.startRealtimeEngine();
   }, []);
 
   return (

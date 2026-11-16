@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { SMART_LINK_SOURCES, generateSmartUrl } from "@/lib/link-generator";
 import { cn } from "@/lib/utils";
 import { saveLandingPageToStorage, syncPageWithServerPreview, loadSavedLandingPages } from "./comet-lp/utils/storage";
+import { cloudStore } from "@/services/cloudStorageService";
 
 interface SmartLinkModalProps {
   lpId: string;
@@ -30,17 +31,14 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
   
   const [copied, setCheckCopied] = useState(false);
 
-  // Identifica e sincroniza o objeto real e editado da LP
+  // Identifica e sincroniza o objeto real e editado da LP a partir do cloudStore
   const resolvedLP = useMemo(() => {
     if (lp) return lp;
     if (typeof window !== "undefined") {
       try {
-        const activeRaw = localStorage.getItem("active_preview_page");
-        if (activeRaw) {
-          const active = JSON.parse(activeRaw);
-          if (active && (active.id === lpId || (slug && active.slug === slug) || active.slug === lpId)) {
-            return active;
-          }
+        const active = cloudStore.getState().activePreviewPage;
+        if (active && (active.id === lpId || (slug && active.slug === slug) || active.slug === lpId)) {
+          return active;
         }
         const saved = loadSavedLandingPages();
         const found = saved.find((p: any) => p.id === lpId || (slug && p.slug === slug) || p.slug === lpId);
@@ -50,7 +48,10 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
     return null;
   }, [lp, lpId, slug]);
 
-  // Garante que a LP editada atual esteja salva e sincronizada no servidor de preview ao abrir o modal
+  const isExt = Boolean(isExternal || lp?.isExternal || resolvedLP?.isExternal || externalUrl || lp?.externalUrl || resolvedLP?.externalUrl);
+  const targetExternalUrl = externalUrl || lp?.externalUrl || resolvedLP?.externalUrl || "";
+
+  // Garante que a LP editada atual esteja salva e sincronizada na nuvem ao abrir o modal
   useEffect(() => {
     const target = resolvedLP || lp;
     if (target) {
@@ -62,15 +63,33 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(target),
         }).catch(() => {});
+
+        cloudStore.mutate(
+          (draft) => {
+            const list = Array.isArray(draft.landingPages) ? [...draft.landingPages] : [];
+            const exists = list.some((p: any) => p.id === target.id || (target.slug && p.slug === target.slug));
+            draft.landingPages = exists
+              ? list.map((p: any) => (p.id === target.id || (target.slug && p.slug === target.slug) ? { ...p, ...target } : p))
+              : [target, ...list];
+            draft.activePreviewPage = target;
+          },
+          { immediate: true }
+        );
       } catch {}
     }
   }, [resolvedLP, lp]);
 
   const baseUrl = useMemo(() => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
+    
+    // Se for URL Externa conectada (Modelo 1)
+    if (isExt && targetExternalUrl) {
+      return targetExternalUrl.startsWith("http") ? targetExternalUrl : `https://${targetExternalUrl}`;
+    }
+
     const targetIdentifier = resolvedLP?.slug || lp?.slug || slug || lpId;
     return `${origin}/lp/${targetIdentifier}`;
-  }, [lpId, slug, lp, resolvedLP]);
+  }, [lpId, slug, lp, resolvedLP, isExt, targetExternalUrl]);
 
   const generatedUrl = useMemo(() => {
     try {

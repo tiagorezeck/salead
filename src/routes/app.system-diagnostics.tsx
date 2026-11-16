@@ -6,13 +6,14 @@ import {
 } from "lucide-react";
 import { useData } from "@/hooks/use-data";
 import { useDriveSync } from "@/hooks/use-drive-sync";
+import { getCurrentUser } from "@/lib/auth-service";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/system-diagnostics")({
   beforeLoad: () => {
-    const user = JSON.parse(localStorage.getItem("comet_user") || "{}");
-    if (user.role && user.role !== "Admin Geral") {
+    const user = getCurrentUser();
+    if (user?.role && user.role !== "Admin Geral" && user.role !== "Admin") {
       throw redirect({ to: "/app/dashboard" });
     }
   },

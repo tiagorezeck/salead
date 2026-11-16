@@ -4,6 +4,8 @@ import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import { applyThematicImagesToPage } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
+import { SURVEY_PRESETS } from "../../../../lib/survey-templates";
+import { GLOBAL_GAS_CONFIG, normalizeGasUrl } from "../../../../config/gasConfig";
 function isUUID(str?: string): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
@@ -334,22 +336,59 @@ function writeStoredLandingPages(pages: any[]) {
   scheduleBackgroundWrite(LP_DATA_FILE, pages);
 }
 
+const DEFAULT_SERVER_SURVEYS: any[] = SURVEY_PRESETS.map((p) => ({
+  id: p.id,
+  name: p.name,
+  type: (p.id.includes("min") || p.id.includes("qualificacao")) ? "individual" : "mass",
+  purpose: (p.id.includes("min") || p.id.includes("qualificacao")) ? "min" : "common",
+  status: "active",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  questions: p.questions || [],
+  settings: {
+    headline: p.name,
+    description: p.description,
+    buttonText: "Iniciar Diagnóstico",
+    thankYouMessage: "Obrigado por responder nosso diagnóstico!",
+    accentColor: p.accentColor || "#FF6B00",
+  },
+  reward: {
+    title: "Diagnóstico Completo",
+    type: "whatsapp",
+    value: "",
+  },
+  template: "Modern",
+  completions: 0,
+  visits: 0,
+  created_at: new Date().toISOString(),
+}));
+
 function readStoredSurveys(): any[] {
-  if (memorySurveys) return memorySurveys;
+  if (memorySurveys && memorySurveys.length > 0) return memorySurveys;
+  let surveysList: any[] = [];
   try {
     ensureDataDir();
     if (fs.existsSync(SURVEYS_DATA_FILE)) {
       const raw = fs.readFileSync(SURVEYS_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        memorySurveys = parsed;
-        return memorySurveys;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        surveysList = parsed;
       }
     }
   } catch (e) {
     console.error("Failed to read stored surveys:", e);
   }
-  memorySurveys = [];
+
+  const mergedMap = new Map<string, any>();
+  DEFAULT_SERVER_SURVEYS.forEach((s) => mergedMap.set(s.id, s));
+  surveysList.forEach((s) => {
+    if (s && s.id) {
+      const prev = mergedMap.get(s.id);
+      mergedMap.set(s.id, { ...(prev || {}), ...s });
+    }
+  });
+
+  memorySurveys = Array.from(mergedMap.values());
   return memorySurveys;
 }
 
@@ -386,14 +425,19 @@ function writeStoredSurveyResponses(resps: any[]) {
 // GOOGLE SHEETS & DRIVE SERVER-SIDE BIDIRECTIONAL SYNC
 // ============================================================================
 export function getDriveWebAppUrlServer(): string {
-  try {
-    const driveCfgPath = path.join(process.cwd(), "drive_config.json");
-    if (fs.existsSync(driveCfgPath)) {
-      const raw = JSON.parse(fs.readFileSync(driveCfgPath, "utf-8"));
-      return raw.webappUrl || "";
-    }
-  } catch {}
-  return "";
+  const envUrl = process.env.GAS_WEBAPP_URL || process.env.VITE_GAS_WEBAPP_URL || "";
+  if (envUrl) return normalizeGasUrl(envUrl);
+  for (const cfgName of ["drive_config.json", "server-config.json"]) {
+    try {
+      const driveCfgPath = path.join(process.cwd(), cfgName);
+      if (fs.existsSync(driveCfgPath)) {
+        const raw = JSON.parse(fs.readFileSync(driveCfgPath, "utf-8"));
+        const url = raw.webappUrl || raw.WEBAPP_URL || "";
+        if (url) return normalizeGasUrl(url);
+      }
+    } catch {}
+  }
+  return normalizeGasUrl(GLOBAL_GAS_CONFIG.WEBAPP_URL);
 }
 
 export function syncDriveDataToDisk(driveData: any): { leadsCount: number; pagesCount: number } {
@@ -914,6 +958,38 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
   const { tokenOrId } = req.params;
   if (!tokenOrId) {
     return res.status(400).json({ error: "Missing tokenOrId" });
+  }
+
+  // 1. Consulta direta ao Google Apps Script (fonte mestre em nuvem) quando configurado
+  const webappUrl = getDriveWebAppUrlServer();
+  if (webappUrl) {
+    try {
+      const urlObj = new URL(webappUrl);
+      urlObj.searchParams.set("action", "GET_PUBLIC_LP");
+      urlObj.searchParams.set("id", tokenOrId);
+      urlObj.searchParams.set("slug", tokenOrId);
+      urlObj.searchParams.set("t", Date.now().toString());
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const gasRes = await fetch(urlObj.toString(), { method: "GET", redirect: "follow", signal: controller.signal });
+      clearTimeout(timeout);
+      const text = await gasRes.text();
+      if (text && !text.trim().startsWith("<")) {
+        const parsed = JSON.parse(text);
+        const cloudLp = parsed?.landingPage || parsed?.lp || parsed?.page;
+        if (cloudLp && cloudLp.id) {
+          previewPagesStore.set(cloudLp.id, cloudLp);
+          if (cloudLp.slug) previewPagesStore.set(cloudLp.slug, cloudLp);
+          return res.json({
+            success: true,
+            page: cloudLp,
+            landingPage: cloudLp,
+            survey: parsed?.survey || null,
+            source: "google-cloud",
+          });
+        }
+      }
+    } catch {}
   }
 
   const page = await findLandingPageAnywhere(tokenOrId);
@@ -2175,9 +2251,15 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
     });
 
     const pageId = body.id && typeof body.id === "string" && body.id.trim() ? body.id : fallbackId;
+    const effectiveHeroModel = body.heroModel || body.hero?.model || "split_image";
     const newPage = {
       ...body,
       id: pageId,
+      heroModel: effectiveHeroModel,
+      hero: {
+        ...(body.hero || {}),
+        model: effectiveHeroModel,
+      },
       name: body.name || body.title || "Nova Landing Page",
       title: body.title || body.name || "Nova Landing Page",
       template: body.template || "COMET",
@@ -2219,9 +2301,16 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     const nextStatus = body.status || existing?.status;
     const isExitingTestMode = prevStatus === "Teste" && (nextStatus === "Ativa" || nextStatus === "Pausada");
 
+    const effectiveHeroModel = body.heroModel || body.hero?.model || existing?.heroModel || existing?.hero?.model || "split_image";
     let updatedPage = {
       ...(existing || {}),
       ...body,
+      heroModel: effectiveHeroModel,
+      hero: {
+        ...(existing?.hero || {}),
+        ...(body.hero || {}),
+        model: effectiveHeroModel,
+      },
       id: existing?.id || id,
       updated_at: new Date().toISOString(),
     };
@@ -2392,11 +2481,64 @@ cometLpRouter.get("/api/surveys/:id", async (req, res) => {
     const { id } = req.params;
     if (!id) return res.status(400).json({ error: "Missing survey ID" });
 
+    // 0. Google Apps Script (fonte mestre em nuvem)
+    const webappUrl = getDriveWebAppUrlServer();
+    if (webappUrl) {
+      try {
+        const urlObj = new URL(webappUrl);
+        urlObj.searchParams.set("action", "GET_PUBLIC_SURVEY");
+        urlObj.searchParams.set("id", id);
+        urlObj.searchParams.set("surveyId", id);
+        urlObj.searchParams.set("t", Date.now().toString());
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const gasRes = await fetch(urlObj.toString(), { method: "GET", redirect: "follow", signal: controller.signal });
+        clearTimeout(timeout);
+        const text = await gasRes.text();
+        if (text && !text.trim().startsWith("<")) {
+          const parsed = JSON.parse(text);
+          if (parsed?.survey && parsed.survey.id) {
+            return res.json({ success: true, survey: parsed.survey, source: "google-cloud" });
+          }
+        }
+      } catch {}
+    }
+
     // 1. Disco / Memória
     const diskSurveys = readStoredSurveys();
     const foundDisk = diskSurveys.find((s) => s.id === id || s.slug === id || (s.name && s.name.toLowerCase() === id.toLowerCase()));
     if (foundDisk) {
       return res.json({ success: true, survey: foundDisk });
+    }
+
+    // 2. Preset Fallback
+    const foundPreset = SURVEY_PRESETS.find(p => p.id === id || p.id.toLowerCase() === id.toLowerCase() || (p.name && p.name.toLowerCase() === id.toLowerCase()));
+    if (foundPreset) {
+      const asSurvey = {
+        id: foundPreset.id,
+        name: foundPreset.name,
+        questions: foundPreset.questions || [],
+        status: "active",
+        type: (foundPreset.id.includes("min") || foundPreset.id.includes("qualificacao")) ? "individual" : "mass",
+        purpose: (foundPreset.id.includes("min") || foundPreset.id.includes("qualificacao")) ? "min" : "common",
+        settings: {
+          headline: foundPreset.name,
+          description: foundPreset.description,
+          buttonText: "Iniciar Diagnóstico",
+          thankYouMessage: "Obrigado por responder nosso diagnóstico!",
+          accentColor: foundPreset.accentColor || "#FF6B00",
+        },
+        reward: {
+          title: "Diagnóstico Completo",
+          type: "whatsapp",
+          value: "",
+        },
+        template: "Modern",
+        completions: 0,
+        visits: 0,
+        created_at: new Date().toISOString(),
+      };
+      return res.json({ success: true, survey: asSurvey });
     }
 
     res.status(404).json({ error: "Survey not found" });
@@ -2457,6 +2599,7 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
   try {
     const body = req.body || {};
     const { surveyId, leadForm, answers, duration, extraPayload, tracking } = body;
+    console.log("Submitting survey response:", { surveyId, leadForm, answers });
 
     const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const nowIso = new Date().toISOString();
@@ -2504,11 +2647,14 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
 
     // 3. Cadastra ou atualiza o lead na Base de Leads do CRM com qualificação MIN
     let leadRecord: any = null;
+    console.log("Processing lead for survey response, leadForm:", leadForm);
     if (leadForm?.name || leadForm?.whatsapp || leadForm?.email || extraPayload?.leadName) {
       const lName = (leadForm?.name || extraPayload?.leadName || "Lead Participante").trim();
       const lPhone = normalizePhoneServer(leadForm?.whatsapp || extraPayload?.leadWhatsapp || "");
       const lEmail = (leadForm?.email || extraPayload?.leadEmail || "").trim().toLowerCase();
       const pTitle = extraPayload?.surveyName || extraPayload?.pageTitle || "Pesquisa Interativa";
+      
+      console.log("Normalized lead data:", { lName, lPhone, lEmail });
 
       // Calcula ou extrai parâmetros de pontuação e qualificação MIN
       let calculatedScore = Number(extraPayload?.score || body.score) || 75;
@@ -2519,6 +2665,8 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
 
       // Análise heurística das respostas caso não venha predeterminado
       const allAnsValues = Object.values(answers || {}).map(v => String(v).toLowerCase());
+      console.log("Analyzing answers for qualification:", allAnsValues);
+      
       const hotKeywords = ["sim, frequentemente", "compromete o crescimento", "sim, com alta prioridade", "imediato (esta semana)", "sim, prontos para investir", "crítico e urgente", "tomador de decisão", "sim, verba já aprovada", "excelente", "superou as expectativas", "vendas", "imediato", "urgente"];
       const coldKeywords = ["não enfrento", "pouco impacto", "talvez em outro momento", "sem pressa", "ainda não temos orçamento", "impacto baixo", "apenas pesquisando", "não temos verba", "péssimo", "não atendeu", "planejamento"];
 
@@ -2528,6 +2676,8 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
         if (hotKeywords.some(hk => val.includes(hk))) hotCount++;
         if (coldKeywords.some(ck => val.includes(ck))) coldCount++;
       });
+      
+      console.log("Qualification counts:", { hotCount, coldCount });
 
       if (hotCount >= 2 || calculatedTemp === "Quente") {
         calculatedTemp = "Quente";
@@ -2547,6 +2697,8 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
       const minClassification = calculatedTemp.toUpperCase() as "QUENTE" | "MORNO" | "FRIO" | "DESCARTE";
       const minScoreCode = minTotal === 3 ? "MIN" : (minTotal === 2 ? "MI" : (minTotal === 1 ? "M" : "Nenhum"));
 
+      console.log("Final qualification:", { calculatedScore, calculatedTemp, minClassification, minScoreCode });
+
       const minQualification = {
         m: minM,
         i: minI,
@@ -2563,6 +2715,8 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
                (lPhone && l.whatsapp && (l.whatsapp === lPhone || l.whatsapp.replace(/\D/g, "") === lPhone.replace(/\D/g, ""))) ||
                (lEmail && l.email && l.email.toLowerCase() === lEmail)
       );
+
+      console.log("Existing lead index found:", existingIndex);
 
       if (existingIndex !== -1) {
         // Atualiza o lead existente com as respostas da pesquisa e qualificação MIN
@@ -2595,6 +2749,7 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
           },
         };
         curLeads[existingIndex] = leadRecord;
+        console.log("Lead updated in CRM base.");
       } else {
         // Cria novo lead com qualificação MIN completa
         leadRecord = {
@@ -2636,6 +2791,7 @@ cometLpRouter.post("/api/surveys/responses", async (req, res) => {
           },
         };
         curLeads.unshift(leadRecord);
+        console.log("New lead created in CRM base.");
       }
 
       if (curLeads.length > 500) curLeads.pop();

@@ -11,13 +11,22 @@
     "utms": {
       "utm_source": "instagram"
     },
-    "source": "instagram",
+    "source": "Landing Page",
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha", "instagram"],
+    "tags": [
+      "LP",
+      "Campanha",
+      "instagram"
+    ],
     "submittedAt": "2026-09-13T01:30:00.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T01:30:00.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_lp_1789275700000_teste",
@@ -31,13 +40,22 @@
     "utms": {
       "utm_source": "instagram"
     },
-    "source": "instagram",
+    "source": "Landing Page",
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha", "instagram"],
+    "tags": [
+      "LP",
+      "Campanha",
+      "instagram"
+    ],
     "submittedAt": "2026-09-13T02:00:00.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T02:00:00.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_lp_1789329759070_28nd",
@@ -55,9 +73,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-13T16:35:59.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T16:35:59.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_1789329756672_qf34n",
@@ -75,9 +101,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-13T16:35:56.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T16:35:56.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_1789353772967_dsa8y",
@@ -95,9 +129,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-13T23:16:12.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T23:16:12.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_lp_1789353777690_nijf",
@@ -115,9 +157,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-13T23:16:17.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T23:16:17.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_1789353953998_jdhgu",
@@ -135,9 +185,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-13T23:19:13.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T23:19:13.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_lp_1789353958662_xzv5",
@@ -155,9 +213,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-13T23:19:18.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-13T23:19:18.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_lp_1789356587983_r703",
@@ -175,9 +241,17 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-14T00:03:07.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-14T00:03:07.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   },
   {
     "id": "lead_1789356586197_dptp5",
@@ -195,8 +269,775 @@
     "stage": "Leads",
     "temperature": "Quente",
     "score": 85,
-    "tags": ["LP", "Campanha: venda..."],
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
     "submittedAt": "2026-09-14T00:03:06.000Z",
-    "webhookStatus": "skipped"
+    "webhookStatus": "skipped",
+    "value": 0,
+    "owner": "",
+    "createdAt": "2026-09-14T00:03:06.000Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1792798268856_59bi",
+    "name": "Tiago da Silva Sauro",
+    "company": "Tiago da Silva Sauro (LP: Mentoria High-Ticket & CRO)",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99932-7422",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "Inbound LP",
+    "temperature": "Quente",
+    "source": "direto",
+    "score": 85,
+    "tags": [
+      "inbound",
+      "landing-page"
+    ],
+    "createdAt": "23-10-2026-20:31",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789525999471_r8uog",
+    "name": "COMET Consultoria, Mentoria e Treinamento",
+    "company": "COMET Consultoria, Mentoria e Treinamento (LP: Mentoria High-Ticket & CRO)",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "evento",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789526006798_m6hm",
+    "name": "COMET Consultoria, Mentoria e Treinamento",
+    "company": "COMET Consultoria, Mentoria e Treinamento (LP: Mentoria High-Ticket & CRO)",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "evento",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526009275_mvqx3",
+    "name": "COMET Consultoria, Mentoria e Treinamento",
+    "company": "COMET Consultoria, Mentoria e Treinamento (LP: Mentoria High-Ticket & CRO)",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Evento",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526011225",
+    "name": "COMET Consultoria, Mentoria e Treinamento",
+    "company": "COMET Consultoria, Mentoria e Treinamento (Leads)",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Evento",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526114100_qi1tj",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-35",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789526119565_76zh",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-35",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526121291_tuk69",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "WhatsApp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-35",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526124613",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (Leads)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "WhatsApp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-35",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526776200_au2xt",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "instagram",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-46",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789526782497_w1e9",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "instagram",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-46",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526784423_gqkp0",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Instagram",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-46",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789526786247",
+    "name": "Tiago Rezeck Rezeck",
+    "company": "Tiago Rezeck Rezeck (Leads)",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Instagram",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-15_23-46",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789528091621_u2muy",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-08",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789528098954_vz2f",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-08",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789528101210_bjd71",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-08",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789528104557",
+    "name": "COMET Systems",
+    "company": "COMET Systems (Leads)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Landing Page Form",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-08",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789528286516_a79ie",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-11",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789528823114_x44i",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-20",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789528847694_p8k8w",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-20",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789528850864",
+    "name": "COMET Systems",
+    "company": "COMET Systems (Leads)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Landing Page Form",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_00-20",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789532070148_n7hby",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_01-14",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789532081495_v73n",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_01-14",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789567811219_hlshf",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_11-10",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789567853259_g6io",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_11-10",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789578498146_d54yd",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "google_orgânico",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_14-08",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789578536823_1n6x",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "google_orgânico",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_14-08",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789578556872_9g4gv",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "google_orgânico",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_14-09",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789578585843_d5n5",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Mentoria High-Ticket & CRO)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "google_orgânico",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-16_14-09",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789655581978_6essf",
+    "name": "tiago teste",
+    "company": "tiago teste (LP: Mentoria High-Ticket & CRO)",
+    "email": "mnfg@fkdngho",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-17_11-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789655591014_1ckc",
+    "name": "tiago teste",
+    "company": "tiago teste (LP: Mentoria High-Ticket & CRO)",
+    "email": "mnfg@fkdngho",
+    "whatsapp": "(24) 99999-9999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-17_11-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789655672600_nwe7w",
+    "name": "Teste outro navegador",
+    "company": "Teste outro navegador (LP: Mentoria High-Ticket & CRO)",
+    "email": "ofjag@fdjibgspdf",
+    "whatsapp": "(24) 88888-8888",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-17_11-34",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789655680082_mma8",
+    "name": "Teste outro navegador",
+    "company": "Teste outro navegador (LP: Mentoria High-Ticket & CRO)",
+    "email": "ofjag@fdjibgspdf",
+    "whatsapp": "(24) 88888-8888",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-17_11-34",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1789655743719_fybah",
+    "name": "Teste outro navegador 2",
+    "company": "Teste outro navegador 2 (LP: Mentoria High-Ticket & CRO)",
+    "email": "ofjag@fdfdhjgmghsrtikj",
+    "whatsapp": "(24) 8888-8877",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-17_11-35",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789655751682_kxrl",
+    "name": "Teste outro navegador 2",
+    "company": "Teste outro navegador 2 (LP: Mentoria High-Ticket & CRO)",
+    "email": "ofjag@fdfdhjgmghsrtikj",
+    "whatsapp": "(24) 8888-8877",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "2026-09-17_11-35",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "327399fb-3511-41a4-bd01-cf3b803aa859",
+    "name": "Tiago Rezeck",
+    "company": "tiagorezeck@hotmail.com",
+    "email": "tiagorezeck@hotmail.com",
+    "whatsapp": "(11) 98888-7777",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "Usuarios",
+    "score": 85,
+    "tags": [
+      "Usuarios"
+    ],
+    "createdAt": "2026-09-17T19:17:19.932Z",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789274030691_zcx2",
+    "name": "Gisele Rezeck",
+    "company": "Gisele Rezeck (LP: Campanha: venda...)",
+    "email": "olv.gisele@gmail.com",
+    "whatsapp": "24999202070",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "instagram",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
+    "createdAt": "2026-09-13_01-33",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_lp_1789275691284_govk",
+    "name": "teste",
+    "company": "teste (LP: Campanha: venda...)",
+    "email": "teste@gmail.com",
+    "whatsapp": "24999999999",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "instagram",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Campanha: venda..."
+    ],
+    "createdAt": "2026-09-13_02-01",
+    "lastInteraction": "Importado da aba [Leads]",
+    "updatedAt": "2026-11-16T17:15:17.721Z"
   }
 ]

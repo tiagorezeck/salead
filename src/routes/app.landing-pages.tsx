@@ -16,6 +16,7 @@ import { ExternalLPModal } from "@/components/marketing/comet-lp/components/Exte
 import { SmartLinkModal } from "@/components/marketing/smart-link-modal";
 import { ensureCometLP, createBlankCometLP } from "@/components/marketing/comet-lp/utils/cometAdapter";
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
+import { HERO_MODELS } from "@/components/marketing/comet-lp/components/HeroModelSelector";
 import { cn } from "@/lib/utils";
 import { uid } from "@/lib/lp-store";
 
@@ -209,9 +210,13 @@ function LPPage() {
 
     const cometPage = ensureCometLP(selectedLP);
     const hero = cometPage.hero;
+    const activeModel = cometPage.heroModel || hero?.model || "split_image";
+    const foundModel = HERO_MODELS.find((m) => m.id === activeModel);
 
     return {
       isExternal: false,
+      model: activeModel,
+      modelTitle: foundModel?.title || "Modelo 1: Split com Imagem",
       badge: hero?.badgeText || (
         selectedLP.status === "Ativa" 
           ? "PÁGINA ATIVA NO AR" 
@@ -349,6 +354,26 @@ function LPPage() {
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
         <span className="text-xs text-muted-foreground font-semibold">Sincronizando Módulo de Landing Pages...</span>
       </div>
+    );
+  }
+
+  if (editingLP) {
+    const cometPage = ensureCometLP(editingLP);
+    return (
+      <Editor
+        page={cometPage}
+        onSave={async (updatedPage) => {
+          try {
+            await updateLandingPage(updatedPage.id, updatedPage);
+            setEditingLP(updatedPage);
+            toast.success("Alterações da Landing Page salvas com sucesso!");
+          } catch (e) {
+            console.error("Erro ao salvar LP:", e);
+            toast.error("Erro ao salvar alterações da Landing Page.");
+          }
+        }}
+        onBackToDashboard={() => setEditingLP(null)}
+      />
     );
   }
 
@@ -578,8 +603,8 @@ function LPPage() {
                 <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-64 h-36 bg-primary/20 blur-3xl rounded-full pointer-events-none" />
                 <div className="absolute inset-0 bg-[radial-gradient(#ffffff0a_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
 
-                {/* Top Pill / Badge da Hero */}
-                <div className="relative z-10 flex items-center justify-center">
+                {/* Top Pill / Badge da Hero & Modelo Visual */}
+                <div className="relative z-10 flex items-center justify-center gap-2 flex-wrap">
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-900/80 border border-zinc-700/60 text-[8px] sm:text-[10px] text-zinc-300 font-semibold shadow">
                     <div className="flex items-center gap-0.5">
                       <span className="h-1 w-1 rounded-full bg-primary" />
@@ -588,6 +613,13 @@ function LPPage() {
                     </div>
                     <span className="tracking-wider uppercase">{heroDisplay.badge}</span>
                   </div>
+
+                  {!heroDisplay.isExternal && (heroDisplay as any).modelTitle && (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-500/50 text-[8px] sm:text-[10px] text-purple-200 font-bold shadow">
+                      <Sparkles className="h-2.5 w-2.5 text-purple-400" />
+                      <span className="tracking-wider uppercase">{(heroDisplay as any).modelTitle}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Central Headlines & CTA da Hero Real */}
@@ -621,27 +653,87 @@ function LPPage() {
                   </div>
                 </div>
 
-                {/* Inset Mockup Card com Imagem e Métricas Reais da LP */}
+                {/* Inset Mockup Card com Imagem e Métricas Reais da LP adaptadas ao Modelo */}
                 <div className="relative z-10 w-full max-w-sm sm:max-w-md mx-auto rounded-xl border border-zinc-700/60 bg-zinc-900/90 shadow-2xl overflow-hidden backdrop-blur-sm">
-                  <div className="relative h-14 sm:h-20 md:h-24 w-full overflow-hidden">
-                    <img
-                      src={heroDisplay.image}
-                      alt={heroDisplay.headline}
-                      className="w-full h-full object-cover object-center brightness-90 group-hover:scale-105 transition-transform duration-500"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
-                    
-                    {/* Bottom stats inside the mockup */}
-                    <div className="absolute bottom-1 sm:bottom-1.5 inset-x-1 sm:inset-x-2 bg-zinc-950/80 backdrop-blur-md rounded-lg border border-zinc-800/80 py-1 px-2 grid grid-cols-3 gap-1 text-center">
-                      {heroDisplay.stats.map((st, i) => (
-                        <div key={i} className="border-r last:border-none border-zinc-800/80">
-                          <div className="text-[6px] sm:text-[8px] uppercase tracking-wider text-zinc-400 font-bold">{st.label}</div>
-                          <div className="text-[8px] sm:text-[11px] font-extrabold text-white">{st.value}</div>
+                  {(heroDisplay as any).model === "split_video" ? (
+                    <div className="relative h-14 sm:h-20 md:h-24 w-full overflow-hidden bg-black flex items-center justify-center">
+                      <img
+                        src={heroDisplay.image}
+                        alt={heroDisplay.headline}
+                        className="w-full h-full object-cover object-center opacity-60 group-hover:scale-105 transition-transform duration-500"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30" />
+                      <div className="absolute inset-0 flex items-center justify-center gap-2">
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-purple-600/90 text-white flex items-center justify-center shadow-lg border border-purple-400">
+                          <Play className="w-4 h-4 ml-0.5 fill-current" />
                         </div>
-                      ))}
+                        <span className="text-[9px] sm:text-xs font-bold text-white drop-shadow">Vídeo VSL 4:5</span>
+                      </div>
+                      <div className="absolute bottom-1 sm:bottom-1.5 inset-x-2 flex justify-between items-center text-[8px] text-zinc-300">
+                        <span className="bg-black/60 px-1.5 py-0.5 rounded">Nota 4.9/5 ★</span>
+                        <span className="bg-black/60 px-1.5 py-0.5 rounded">Alta Conversão</span>
+                      </div>
                     </div>
-                  </div>
+                  ) : (heroDisplay as any).model === "split_lead_form" ? (
+                    <div className="h-14 sm:h-20 md:h-24 w-full bg-zinc-950/90 p-2 sm:p-2.5 flex flex-col justify-center gap-1 sm:gap-1.5">
+                      <div className="text-[8px] sm:text-[10px] font-bold text-white text-center">
+                        Receba Acesso Imediato no WhatsApp
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 text-[7px] sm:text-[9px]">
+                        <div className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1 text-zinc-400">Seu Nome</div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1 text-zinc-400">Seu WhatsApp</div>
+                      </div>
+                      <div className="bg-emerald-600 rounded text-center text-white font-extrabold text-[8px] sm:text-[9px] py-1">
+                        QUERO BAIXAR AGORA
+                      </div>
+                    </div>
+                  ) : (heroDisplay as any).model === "b2b_metrics" ? (
+                    <div className="h-14 sm:h-20 md:h-24 w-full bg-zinc-950/90 p-2 sm:p-2.5 flex items-center justify-around gap-1 text-center">
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 flex-1">
+                        <div className="text-[10px] sm:text-xs font-black text-purple-400">+340%</div>
+                        <div className="text-[6px] sm:text-[8px] text-zinc-400 font-bold uppercase">Crescimento</div>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 flex-1">
+                        <div className="text-[10px] sm:text-xs font-black text-emerald-400">99.4%</div>
+                        <div className="text-[6px] sm:text-[8px] text-zinc-400 font-bold uppercase">Satisfação</div>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 flex-1">
+                        <div className="text-[10px] sm:text-xs font-black text-amber-400">10 Min</div>
+                        <div className="text-[6px] sm:text-[8px] text-zinc-400 font-bold uppercase">Resposta VIP</div>
+                      </div>
+                    </div>
+                  ) : (heroDisplay as any).model === "urgency_counter" ? (
+                    <div className="h-14 sm:h-20 md:h-24 w-full bg-gradient-to-r from-red-950/60 to-purple-950/60 p-2 sm:p-2.5 flex flex-col items-center justify-center gap-1 text-center">
+                      <div className="text-[7px] sm:text-[9px] font-bold text-red-300 uppercase tracking-wider flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+                        Vagas Limitadas • Condição Especial Expira em:
+                      </div>
+                      <div className="text-xs sm:text-sm font-black text-white font-mono bg-black/60 px-3 py-0.5 rounded-md border border-red-500/40">
+                        14 : 59 : 00
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="relative h-14 sm:h-20 md:h-24 w-full overflow-hidden">
+                      <img
+                        src={heroDisplay.image}
+                        alt={heroDisplay.headline}
+                        className="w-full h-full object-cover object-center brightness-90 group-hover:scale-105 transition-transform duration-500"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
+                      
+                      {/* Bottom stats inside the mockup */}
+                      <div className="absolute bottom-1 sm:bottom-1.5 inset-x-1 sm:inset-x-2 bg-zinc-950/80 backdrop-blur-md rounded-lg border border-zinc-800/80 py-1 px-2 grid grid-cols-3 gap-1 text-center">
+                        {heroDisplay.stats.map((st, i) => (
+                          <div key={i} className="border-r last:border-none border-zinc-800/80">
+                            <div className="text-[6px] sm:text-[8px] uppercase tracking-wider text-zinc-400 font-bold">{st.label}</div>
+                            <div className="text-[8px] sm:text-[11px] font-extrabold text-white">{st.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Hover Action Overlay */}

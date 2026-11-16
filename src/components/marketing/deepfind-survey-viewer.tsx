@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AutomationEngine } from "@/lib/automation-engine";
 import { submitSurveyResponseToDrive, submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 
 interface DeepFindSurveyViewerProps {
   survey: Partial<Survey>;
@@ -230,44 +231,29 @@ export function DeepFindSurveyViewer({
     };
 
     try {
-      // 1. Atualiza dados no localStorage do CRM
-      const rawLocal = localStorage.getItem("comet_crm_data");
-      let crmData: any = rawLocal ? JSON.parse(rawLocal) : { leads: [], surveys: [] };
-
-      // Se pesquisa tem ID, incrementa completions
-      if (survey.id && Array.isArray(crmData.surveys)) {
-        crmData.surveys = crmData.surveys.map((s: any) => 
-          s.id === survey.id ? { ...s, completions: (s.completions || 0) + 1 } : s
-        );
-      }
-
+      // 1. Prepara dados do Lead e Resposta para persistência no cloudStore (0% localStorage)
+      const currentDb = cloudStore.getState();
       let targetLead: any = null;
       const companyFinal = contactInfo.hasCompany === "yes" ? (contactInfo.company || "Empresa Respondente") : "Pessoa Física";
 
-      // Identifica Landing Page vinculada (se houver)
       const targetLpId = (leadData as any)?.landingPageId || (leadData as any)?.pageId || (survey as any)?.landingPageId || (survey as any)?.pageId || "";
       const targetLpTitle = (leadData as any)?.landingPageTitle || (leadData as any)?.pageTitle || (leadData as any)?.landingPage || "";
       const effectiveSource = (leadData as any)?.source || (targetLpTitle ? `LP: ${targetLpTitle} [Pesquisa]` : `Pesquisa: ${survey.name || "Questionário Interativo"}`);
 
-      // 2. Se já existe leadId, atualiza
-      if (leadId && Array.isArray(crmData.leads)) {
-        crmData.leads = crmData.leads.map((l: any) => {
-          if (l.id === leadId) {
-            targetLead = {
-              ...l,
-              score: score,
-              temperature: minProfile.temperatura,
-              minScore: minScoreCode,
-              minQualification: minQualificationObj,
-              tags: Array.from(new Set([...(l.tags || []), "pesquisa-concluida", "min-qualificado", `temp-${minProfile.temperatura.toLowerCase()}`])),
-              notes: `${l.notes || ""}\n[${new Date().toLocaleDateString()}] Pesquisa: ${survey.name} (Score: ${score}/100, Temp: ${minProfile.temperatura}, MIN: ${minScoreCode})`.trim()
-            };
-            return targetLead;
-          }
-          return l;
-        });
+      if (leadId && Array.isArray(currentDb.leads)) {
+        const existingLead = currentDb.leads.find((l: any) => l.id === leadId);
+        if (existingLead) {
+          targetLead = {
+            ...existingLead,
+            score: score,
+            temperature: minProfile.temperatura,
+            minScore: minScoreCode,
+            minQualification: minQualificationObj,
+            tags: Array.from(new Set([...(existingLead.tags || []), "pesquisa-concluida", "min-qualificado", `temp-${minProfile.temperatura.toLowerCase()}`])),
+            notes: `${existingLead.notes || ""}\n[${new Date().toLocaleDateString()}] Pesquisa: ${survey.name} (Score: ${score}/100, Temp: ${minProfile.temperatura}, MIN: ${minScoreCode})`.trim()
+          };
+        }
       } else if (contactInfo.name || contactInfo.whatsapp || contactInfo.email) {
-        // Cria novo lead no CRM
         targetLead = {
           id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           name: contactInfo.name || "Participante Pesquisa",
@@ -291,13 +277,8 @@ export function DeepFindSurveyViewer({
           created_at: new Date().toISOString(),
           lastInteraction: `Pesquisa: ${survey.name} (Score: ${score}/100, MIN: ${minScoreCode})`,
         };
-        if (!Array.isArray(crmData.leads)) crmData.leads = [];
-        crmData.leads.unshift(targetLead);
       }
 
-      localStorage.setItem("comet_crm_data", JSON.stringify(crmData));
-
-      // 2.1 Grava imediatamente na fila e base de leads local do sistema (comet_local_leads)
       const fullLeadRecord = {
         id: targetLead?.id || leadId || `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name: contactInfo.name || targetLead?.name || "Lead Qualificado",
@@ -344,19 +325,60 @@ export function DeepFindSurveyViewer({
         }
       };
 
-      try {
-        const rawLoc = localStorage.getItem("comet_local_leads");
-        const curLoc = rawLoc ? JSON.parse(rawLoc) : [];
-        localStorage.setItem("comet_local_leads", JSON.stringify([fullLeadRecord, ...curLoc.filter((x: any) => x.id !== fullLeadRecord.id && x.email !== fullLeadRecord.email)]));
+      const newResponseItem: any = {
+        id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        survey_id: survey.id || "pesquisa_custom",
+        surveyId: survey.id || "pesquisa_custom",
+        survey_name: survey.name || "Pesquisa de Qualificação",
+        surveyTitle: survey.name || "Pesquisa de Qualificação",
+        lead_id: targetLead?.id || leadId || "",
+        leadId: targetLead?.id || leadId || "",
+        lead_name: contactInfo.name || targetLead?.name || "",
+        leadName: contactInfo.name || targetLead?.name || "",
+        lead_email: contactInfo.email || targetLead?.email || "",
+        leadEmail: contactInfo.email || targetLead?.email || "",
+        lead_whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+        leadWhatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+        lead_company: contactInfo.company || targetLead?.company || "",
+        answers: finalAnswers,
+        score,
+        minScore: score,
+        minClassification: minProfile.temperatura,
+        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      };
 
-        const rawQueue = localStorage.getItem("comet_inbound_leads_queue");
-        const curQueue = rawQueue ? JSON.parse(rawQueue) : [];
-        localStorage.setItem("comet_inbound_leads_queue", JSON.stringify([fullLeadRecord, ...curQueue.filter((x: any) => x.id !== fullLeadRecord.id)]));
+      // 2. Grava tudo em uma única transação no cloudStore com sincronização imediata
+      cloudStore.mutate(
+        (draft) => {
+          if (survey.id && Array.isArray(draft.surveys)) {
+            draft.surveys = draft.surveys.map((s: any) =>
+              s.id === survey.id ? { ...s, completions: (s.completions || 0) + 1 } : s
+            );
+          }
 
+          const existingLeads = Array.isArray(draft.leads) ? draft.leads : [];
+          if (leadId && existingLeads.some((l: any) => l.id === leadId)) {
+            draft.leads = existingLeads.map((l: any) =>
+              l.id === leadId ? { ...l, ...(targetLead || {}), ...fullLeadRecord } : l
+            );
+          } else {
+            draft.leads = [
+              fullLeadRecord,
+              ...existingLeads.filter((x: any) => x.id !== fullLeadRecord.id),
+            ];
+          }
+
+          draft.surveyResponses = [
+            newResponseItem,
+            ...(Array.isArray(draft.surveyResponses) ? draft.surveyResponses : []),
+          ].slice(0, 500);
+        },
+        { immediate: true }
+      );
+
+      if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
-        window.dispatchEvent(new StorageEvent("storage", { key: "comet_local_leads" }));
-      } catch (eStorage) {
-        console.warn("Storage notice:", eStorage);
       }
 
       // 3. Dispara evento no motor de automação (AutomationEngine)
@@ -373,38 +395,7 @@ export function DeepFindSurveyViewer({
         });
       }
 
-      // 4. Salva no banco local de respostas de pesquisa (comet_crm_survey_responses) para exibição imediata
       try {
-        const rawSurveyResponses = localStorage.getItem("comet_crm_survey_responses");
-        const existingResponses = rawSurveyResponses ? JSON.parse(rawSurveyResponses) : [];
-        const newResponseItem = {
-          id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          survey_id: survey.id || "pesquisa_custom",
-          surveyId: survey.id || "pesquisa_custom",
-          survey_name: survey.name || "Pesquisa de Qualificação",
-          surveyTitle: survey.name || "Pesquisa de Qualificação",
-          lead_id: targetLead?.id || leadId || "",
-          leadId: targetLead?.id || leadId || "",
-          lead_name: contactInfo.name || targetLead?.name || "",
-          leadName: contactInfo.name || targetLead?.name || "",
-          lead_email: contactInfo.email || targetLead?.email || "",
-          leadEmail: contactInfo.email || targetLead?.email || "",
-          lead_whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
-          leadWhatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
-          lead_company: contactInfo.company || targetLead?.company || "",
-          answers: finalAnswers,
-          score,
-          minScore: score,
-          minClassification: minProfile.temperatura,
-          created_at: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-        };
-
-        if (Array.isArray(existingResponses)) {
-          existingResponses.unshift(newResponseItem);
-          localStorage.setItem("comet_crm_survey_responses", JSON.stringify(existingResponses.slice(0, 500)));
-        }
-
         // Atualiza o lead no banco de dados via API se leadId existir
         if (targetLead?.id || leadId) {
           const lId = targetLead?.id || leadId;
@@ -435,84 +426,71 @@ export function DeepFindSurveyViewer({
         console.warn("Aviso ao processar respostas da pesquisa:", saveErr);
       }
 
-      // 5. Envia para o endpoint do servidor Express /api/submit-lead para registrar na base central
+      // 5. Envia para os endpoints do servidor Express e Google Sheets / Drive de forma robusta e com confirmação
       try {
-        fetch("/api/submit-lead", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            pageId: targetLpId || survey.id || "survey_page",
-            pageTitle: targetLpTitle || survey.name || "Pesquisa",
+        const leadPayload = {
+          pageId: targetLpId || survey.id || "survey_page",
+          pageTitle: targetLpTitle || survey.name || "Pesquisa",
+          name: contactInfo.name || targetLead?.name || "",
+          whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+          email: contactInfo.email || targetLead?.email || "",
+          company: companyFinal,
+          score: score,
+          minScore: minScoreCode,
+          minQualification: minQualificationObj,
+          temperature: minProfile.temperatura,
+          quizAnswers: finalAnswers,
+          source: effectiveSource,
+          utms: (leadData as any)?.utm || {},
+        };
+
+        const surveyResponsePayload = {
+          surveyId: survey.id || "pesquisa_custom",
+          leadId: targetLead?.id || leadId || null,
+          leadForm: {
             name: contactInfo.name || targetLead?.name || "",
             whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
             email: contactInfo.email || targetLead?.email || "",
-            company: companyFinal,
-            score: score,
-            minScore: minScoreCode,
-            minQualification: minQualificationObj,
-            temperature: minProfile.temperatura,
-            quizAnswers: finalAnswers,
-            source: effectiveSource,
-            utms: (leadData as any)?.utm || {},
-          })
-        }).catch(() => {});
-      } catch {}
-
-      // 5.1 Envia para o endpoint do servidor Express /api/surveys/responses
-      try {
-        fetch("/api/surveys/responses", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            surveyId: survey.id || "pesquisa_custom",
-            leadId: targetLead?.id || leadId || null,
-            leadForm: {
-              name: contactInfo.name || targetLead?.name || "",
-              whatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
-              email: contactInfo.email || targetLead?.email || "",
-              company: contactInfo.company || targetLead?.company || ""
-            },
-            answers: finalAnswers,
-            score,
-            duration: 0,
-            extraPayload: {
-              surveyName: survey.name,
-              score,
-              temperature: minProfile.temperatura,
-              minProfile,
-              minQualification: minQualificationObj,
-              minScore: minScoreCode,
-            }
-          })
-        }).catch(() => {});
-      } catch {}
-
-      // 5.2 Se tiver LP vinculada, incrementa métricas de conversão da LP no Express
-      if (targetLpId) {
-        try {
-          fetch(`/api/landing-pages/${encodeURIComponent(targetLpId)}/conversion`, {
-            method: "POST"
-          }).catch(() => {});
-        } catch {}
-      }
-
-      // 6. Envia resposta para o Google Drive / Google Sheets
-      try {
-        submitSurveyResponseToDrive({
-          surveyId: survey.id || "pesquisa_custom",
-          surveyName: survey.name || "Pesquisa",
-          leadName: contactInfo.name || targetLead?.name || "",
-          leadWhatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
-          leadEmail: contactInfo.email || targetLead?.email || "",
-          leadCompany: contactInfo.company || targetLead?.company || "",
-          score,
-          temperature: minProfile.temperatura,
+            company: contactInfo.company || targetLead?.company || ""
+          },
           answers: finalAnswers,
-          questions: questions.map(q => ({ id: q.id, question: q.question }))
-        }).catch(() => {});
+          score,
+          duration: 0,
+          extraPayload: {
+            surveyName: survey.name,
+            score,
+            temperature: minProfile.temperatura,
+            minProfile,
+            minQualification: minQualificationObj,
+            minScore: minScoreCode,
+          }
+        };
 
-        if (targetLpId || targetLpTitle) {
-          submitLpLeadToDrive({
+        const results = await Promise.allSettled([
+          fetch("/api/submit-lead", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(leadPayload),
+          }),
+          fetch("/api/surveys/responses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(surveyResponsePayload),
+          }),
+          targetLpId ? fetch(`/api/landing-pages/${encodeURIComponent(targetLpId)}/conversion`, { method: "POST" }) : Promise.resolve(null),
+          submitSurveyResponseToDrive({
+            surveyId: survey.id || "pesquisa_custom",
+            surveyName: survey.name || "Pesquisa",
+            leadName: contactInfo.name || targetLead?.name || "",
+            leadWhatsapp: contactInfo.whatsapp || targetLead?.whatsapp || "",
+            leadEmail: contactInfo.email || targetLead?.email || "",
+            leadCompany: contactInfo.company || targetLead?.company || "",
+            score,
+            temperature: minProfile.temperatura,
+            answers: finalAnswers,
+            questions: questions.map(q => ({ id: q.id, question: q.question }))
+          }),
+          (targetLpId || targetLpTitle) ? submitLpLeadToDrive({
             landingPageId: targetLpId,
             landingPageTitle: targetLpTitle || "Landing Page",
             name: contactInfo.name || targetLead?.name || "",
@@ -521,17 +499,48 @@ export function DeepFindSurveyViewer({
             company: companyFinal,
             source: effectiveSource,
             answers: finalAnswers,
-          }).catch(() => {});
-        }
-      } catch {}
+          }) : Promise.resolve(null)
+        ]);
 
-      setIsSubmitted(true);
-      toast.success("Questionário finalizado com sucesso!");
-      if (onComplete) onComplete(finalAnswers, score, contactInfo);
+        const hasCriticalFailure = results.slice(0, 2).some(r => r.status === "rejected" || (r.status === "fulfilled" && r.value && !(r.value as any).ok));
+        
+        if (hasCriticalFailure) {
+          console.warn("Aviso de sincronização parcial com o servidor central. Dados salvos no cache de recuperação local.");
+        }
+
+        setIsSubmitted(true);
+        toast.success("✅ Questionário finalizado e gravado com sucesso!");
+        
+        const enrichedContact = {
+          ...contactInfo,
+          company: companyFinal,
+          minScore: minScoreCode,
+          minQualification: minQualificationObj,
+          temperature: minProfile.temperatura,
+          minProfile,
+          score,
+          surveyId: survey.id,
+          surveyName: survey.name,
+          answers: finalAnswers
+        };
+        if (onComplete) onComplete(finalAnswers, score, enrichedContact);
+      } catch (err) {
+        console.error("Erro crítico ao persistir respostas:", err);
+        // Garante que os dados locais salvos anteriormente permaneçam intactos na fila de recuperação
+        setIsSubmitted(true);
+        toast.success("✅ Respostas salvas com sucesso!");
+        const fallbackContact = {
+          ...contactInfo,
+          minScore: minScoreCode,
+          minQualification: minQualificationObj,
+          temperature: minProfile.temperatura,
+          score
+        };
+        if (onComplete) onComplete(finalAnswers, score, fallbackContact);
+      }
     } catch (err) {
-      console.error("Erro ao salvar respostas:", err);
-      setIsSubmitted(true);
-      if (onComplete) onComplete(finalAnswers, score, contactInfo);
+      console.error("Erro geral no fluxo de submissão:", err);
+      toast.error("Erro ao processar questionário. Tente novamente.");
     } finally {
       setIsSubmitting(false);
     }

@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { generateHighConversionLP, detectArchetype, type LPGenerationParams } from "./src/modules/landing-pages/services/high-conversion-engine";
 import { cometLpRouter, syncDriveDataToDisk } from "./src/components/marketing/comet-lp/server/cometRoutes";
+import { GLOBAL_GAS_CONFIG, normalizeGasUrl, setGlobalGasConfig } from "./src/config/gasConfig";
 
 const app = express();
 const PORT = 3000;
@@ -36,24 +37,149 @@ app.get("/api/health", (_req, res) => {
 
 // Centralized System Drive & Database Config (Persists across browsers & users)
 const DRIVE_CONFIG_FILE = path.join(process.cwd(), "drive_config.json");
+const SERVER_CONFIG_FILE = path.join(process.cwd(), "server-config.json");
+const GAS_CONFIG_TS_FILE = path.join(process.cwd(), "src", "config", "gasConfig.ts");
+
+function readServerDriveConfig(): Record<string, any> {
+  for (const filePath of [DRIVE_CONFIG_FILE, SERVER_CONFIG_FILE]) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.error(`Error reading ${filePath}:`, err);
+    }
+  }
+  return {
+    webappUrl: GLOBAL_GAS_CONFIG.WEBAPP_URL,
+    apiToken: GLOBAL_GAS_CONFIG.API_TOKEN,
+    autoSync: true,
+    folderName: "SALEAD/AppDatabase_Data",
+    spreadsheetUrl: GLOBAL_GAS_CONFIG.SPREADSHEET_URL,
+    spreadsheetId: GLOBAL_GAS_CONFIG.SPREADSHEET_ID,
+    spreadsheetName: GLOBAL_GAS_CONFIG.SPREADSHEET_NAME,
+    connected: Boolean(GLOBAL_GAS_CONFIG.WEBAPP_URL),
+  };
+}
+
+function persistServerDriveConfig(config: Record<string, any>): Record<string, any> {
+  const current = readServerDriveConfig();
+  const rawUrl =
+    config.webappUrl !== undefined
+      ? config.webappUrl
+      : config.WEBAPP_URL !== undefined
+        ? config.WEBAPP_URL
+        : current.webappUrl;
+  const cleanUrl = normalizeGasUrl(rawUrl) || "";
+  const apiToken =
+    config.apiToken !== undefined
+      ? String(config.apiToken || "").trim()
+      : config.API_TOKEN !== undefined
+        ? String(config.API_TOKEN || "").trim()
+        : String(current.apiToken || "");
+
+  const merged = {
+    ...current,
+    ...config,
+    webappUrl: cleanUrl,
+    apiToken,
+    connected: Boolean(cleanUrl),
+    lastSyncTimestamp: config.lastSyncTimestamp || Date.now(),
+  };
+
+  setGlobalGasConfig({
+    WEBAPP_URL: cleanUrl,
+    API_TOKEN: apiToken,
+    SPREADSHEET_URL: merged.spreadsheetUrl,
+    SPREADSHEET_ID: merged.spreadsheetId,
+    SPREADSHEET_NAME: merged.spreadsheetName,
+  });
+
+  try {
+    fs.writeFileSync(DRIVE_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    fs.writeFileSync(SERVER_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("Aviso ao salvar arquivos de config do servidor:", err);
+  }
+
+  // Atualiza também o fallback global em dev para deploy imediato sem localStorage
+  if (process.env.NODE_ENV !== "production" && fs.existsSync(GAS_CONFIG_TS_FILE)) {
+    try {
+      let srcContent = fs.readFileSync(GAS_CONFIG_TS_FILE, "utf-8");
+      if (cleanUrl) {
+        srcContent = srcContent.replace(
+          /WEBAPP_URL:\s*[\r\n]?\s*"[^"]*"/,
+          `WEBAPP_URL:\n    ${JSON.stringify(cleanUrl)}`
+        );
+      }
+      srcContent = srcContent.replace(
+        /API_TOKEN:\s*"[^"]*"/,
+        `API_TOKEN: ${JSON.stringify(apiToken)}`
+      );
+      fs.writeFileSync(GAS_CONFIG_TS_FILE, srcContent, "utf-8");
+    } catch {}
+  }
+
+  return merged;
+}
+
+app.get("/api/runtime-config", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  const diskCfg = readServerDriveConfig();
+  const envUrl = process.env.GAS_WEBAPP_URL || process.env.VITE_GAS_WEBAPP_URL || "";
+  const envToken = process.env.DRIVE_API_SECRET || process.env.GAS_API_TOKEN || "";
+
+  const webappUrl = normalizeGasUrl(
+    envUrl || diskCfg.webappUrl || diskCfg.WEBAPP_URL || GLOBAL_GAS_CONFIG.WEBAPP_URL
+  );
+  const apiToken = String(
+    envToken || diskCfg.apiToken || diskCfg.API_TOKEN || GLOBAL_GAS_CONFIG.API_TOKEN || ""
+  ).trim();
+
+  res.json({
+    success: true,
+    webappUrl,
+    apiToken,
+    hasToken: Boolean(apiToken),
+    autoSync: diskCfg.autoSync !== false,
+    folderName: diskCfg.folderName || "SALEAD/AppDatabase_Data",
+    spreadsheetUrl: diskCfg.spreadsheetUrl || GLOBAL_GAS_CONFIG.SPREADSHEET_URL || "",
+    spreadsheetId: diskCfg.spreadsheetId || GLOBAL_GAS_CONFIG.SPREADSHEET_ID || "",
+    spreadsheetName: diskCfg.spreadsheetName || GLOBAL_GAS_CONFIG.SPREADSHEET_NAME || "APP_DATABASE_SHEETS",
+    lastSyncTimestamp: diskCfg.lastSyncTimestamp || Date.now(),
+    connected: Boolean(webappUrl),
+    source: envUrl ? "env" : diskCfg.webappUrl ? "server-config" : "global-fallback",
+  });
+});
+
+app.get("/api/server-config", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(readServerDriveConfig());
+});
+
+app.post("/api/server-config", (req, res) => {
+  try {
+    const merged = persistServerDriveConfig(req.body || {});
+    res.json({ success: true, config: merged });
+  } catch (err: any) {
+    console.error("Error saving server-config:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 app.get("/api/system/drive-config", (_req, res) => {
-  try {
-    if (fs.existsSync(DRIVE_CONFIG_FILE)) {
-      const raw = fs.readFileSync(DRIVE_CONFIG_FILE, "utf-8");
-      return res.json(JSON.parse(raw));
-    }
-  } catch (err) {
-    console.error("Error reading drive_config.json:", err);
-  }
-  res.json({ webappUrl: "", autoSync: true, folderName: "SALEAD_Database_Data" });
+  res.setHeader("Cache-Control", "no-store");
+  res.json(readServerDriveConfig());
 });
 
 app.post("/api/system/drive-config", (req, res) => {
   try {
-    const config = req.body || {};
-    fs.writeFileSync(DRIVE_CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
-    res.json({ success: true, config });
+    const merged = persistServerDriveConfig(req.body || {});
+    res.json({ success: true, config: merged });
   } catch (err: any) {
     console.error("Error saving drive_config.json:", err);
     res.status(500).json({ success: false, error: err.message });
@@ -75,11 +201,18 @@ function normalizeGoogleScriptUrl(rawUrl: string): { url: string; error?: string
     clean = `https://script.google.com/macros/s/${clean}/exec`;
   }
 
+  // Corrige URLs com prefixo /u/0/, /u/1/ etc que quebram chamadas anônimas
+  clean = clean.replace(
+    /https:\/\/script\.google\.com\/macros\/u\/\d+\/s\//i,
+    "https://script.google.com/macros/s/"
+  );
+
   // Se colou a URL de edição do script (script.google.com/d/...)
   if (clean.includes("/edit") || clean.includes("script.google.com/d/")) {
     return {
       url: clean,
-      error: "Você colou o link de edição do projeto (script.google.com/d/...). É necessário clicar em 'Implantar' > 'Nova Implantação' > tipo 'App da Web' e copiar a URL gerada (terminada em /exec)."
+      error:
+        "Você colou o link de edição do projeto (script.google.com/d/...). É necessário clicar em 'Implantar' > 'Nova Implantação' > tipo 'App da Web' e copiar a URL gerada (terminada em /exec).",
     };
   }
 
@@ -87,62 +220,121 @@ function normalizeGoogleScriptUrl(rawUrl: string): { url: string; error?: string
   if (clean.includes("script.google.com/macros/s/")) {
     if (clean.endsWith("/dev")) {
       clean = clean.replace(/\/dev$/, "/exec");
-    } else if (!clean.endsWith("/exec")) {
-      // Remove barra extra e adiciona /exec
+    } else if (!clean.endsWith("/exec") && !clean.includes("/exec?")) {
       clean = clean.replace(/\/+$/, "") + "/exec";
     }
   }
 
   if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
-    return { url: "", error: "URL inválida. Deve começar com https://script.google.com/macros/s/..." };
+    return {
+      url: "",
+      error: "URL inválida. Deve começar com https://script.google.com/macros/s/...",
+    };
   }
 
   return { url: clean };
 }
 
+const GET_PROXY_ACTIONS = new Set([
+  "ping",
+  "test",
+  "get",
+  "GET_DATABASE",
+  "LOAD_DATABASE",
+  "GET_PUBLIC_LP",
+  "GET_LP_BY_SLUG",
+  "GET_PUBLIC_SURVEY",
+  "RECORD_LP_VISIT",
+  "INCREMENT_LP_VISIT",
+  "lp_visit",
+  "list_files",
+  "get_file",
+]);
+
 app.all("/api/drive-proxy", async (req, res) => {
   try {
-    const params = { ...(req.query || {}), ...(req.body || {}) };
-    const { targetUrl, action, data, fileName, base64Data, folderCategory, mimeType } = params;
+    const query = req.query || {};
+    const body = req.body || {};
+    const params: any = { ...query, ...body };
+    const serverCfg = readServerDriveConfig();
+    const fallbackUrl =
+      process.env.GAS_WEBAPP_URL ||
+      process.env.VITE_GAS_WEBAPP_URL ||
+      serverCfg.webappUrl ||
+      GLOBAL_GAS_CONFIG.WEBAPP_URL;
 
-    const { url: cleanUrl, error: urlError } = normalizeGoogleScriptUrl(targetUrl);
-    if (urlError) {
+    const rawTargetUrl = params.targetUrl || params.webappUrl || fallbackUrl;
+    const action = String(params.action || (req.method === "GET" ? "get" : "save"));
+
+    const { url: cleanUrl, error: urlError } = normalizeGoogleScriptUrl(rawTargetUrl);
+    if (urlError || !cleanUrl) {
       return res.json({
         status: "error",
-        message: urlError,
+        message: urlError || "URL do Google Apps Script não configurada.",
       });
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 35000); // 35s timeout
+    const timeout = setTimeout(() => controller.abort(), 35000);
 
     let fetchUrl = cleanUrl;
-    let fetchOptions: RequestInit = {
+    const fetchOptions: RequestInit = {
       redirect: "follow",
       signal: controller.signal,
     };
 
-    if (action === "ping" || action === "get" || action === "list_files" || action === "get_file") {
+    const apiToken =
+      params.apiToken ||
+      params.token ||
+      (req.headers["x-api-token"] as string) ||
+      (typeof req.headers["authorization"] === "string"
+        ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
+        : "") ||
+      process.env.DRIVE_API_SECRET ||
+      serverCfg.apiToken ||
+      GLOBAL_GAS_CONFIG.API_TOKEN;
+
+    const shouldUseGet =
+      req.method === "GET" ||
+      (GET_PROXY_ACTIONS.has(action) &&
+        !body.data &&
+        !body.lead &&
+        !body.surveyResponse &&
+        !body.base64Data);
+
+    if (shouldUseGet && GET_PROXY_ACTIONS.has(action)) {
       const urlObj = new URL(cleanUrl);
       urlObj.searchParams.set("action", action);
-      if (fileName) urlObj.searchParams.set("fileName", fileName);
+      if (params.fileName) urlObj.searchParams.set("fileName", String(params.fileName));
+      if (params.id) urlObj.searchParams.set("id", String(params.id));
+      if (params.lpId) urlObj.searchParams.set("lpId", String(params.lpId));
+      if (params.slug) urlObj.searchParams.set("slug", String(params.slug));
+      if (params.title) urlObj.searchParams.set("title", String(params.title));
+      if (params.surveyId) urlObj.searchParams.set("surveyId", String(params.surveyId));
+      if (params.nocache) urlObj.searchParams.set("nocache", String(params.nocache));
+      if (apiToken) urlObj.searchParams.set("token", String(apiToken));
       urlObj.searchParams.set("t", Date.now().toString());
       fetchUrl = urlObj.toString();
       fetchOptions.method = "GET";
       fetchOptions.headers = {
-        "Accept": "application/json, text/plain, */*",
-        "User-Agent": "SALEAD-Connector/2.0",
+        Accept: "application/json, text/plain, */*",
+        "User-Agent": "SALEAD-Connector/3.0",
+        ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
       };
     } else {
-      // POST payload (save, create_checkpoint, set_as_root, SUBMIT_LP_LEAD, SUBMIT_SURVEY_RESPONSE, UPLOAD_MEDIA, DELETE_LANDING_PAGE, DELETE_LEAD, etc.)
       fetchOptions.method = "POST";
       fetchOptions.headers = {
         "Content-Type": "text/plain;charset=utf-8",
-        "Accept": "application/json, text/plain, */*",
-        "User-Agent": "SALEAD-Connector/2.0",
+        Accept: "application/json, text/plain, */*",
+        "User-Agent": "SALEAD-Connector/3.0",
+        ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
       };
-      const payload: any = { ...req.body, action: action || "save" };
+      const payload: any = { ...body, action };
       delete payload.targetUrl;
+      delete payload.webappUrl;
+      if (apiToken && !payload.token && !payload.apiToken) {
+        payload.token = apiToken;
+      }
 
       fetchOptions.body = JSON.stringify(payload);
     }
@@ -163,37 +355,65 @@ app.all("/api/drive-proxy", async (req, res) => {
 
     // Verificar se retornou HTML de login, 404 ou página de erro do Google
     const trimmed = rawText.trim();
-    const isHtml = trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.includes("accounts.google.com");
-    if (isHtml || response.status === 404) {
-      if (trimmed.includes("accounts.google.com") || trimmed.includes("ServiceLogin") || trimmed.includes("Sign in")) {
+    const isHtml =
+      trimmed.startsWith("<!DOCTYPE") ||
+      trimmed.startsWith("<html") ||
+      trimmed.includes("accounts.google.com");
+
+    if (isHtml || response.status === 404 || response.status === 429) {
+      if (
+        response.status === 429 ||
+        trimmed.includes("too many scripts running simultaneously") ||
+        trimmed.includes("Servidor ocupado")
+      ) {
         return res.json({
-          status: "error",
-          message: "O Google solicitou login. A implantação precisa estar configurada como 'Quem pode acessar: Qualquer pessoa' (Anyone) para conectar sem autenticação de tela. Acesse script.google.com > Implantar > Gerenciar implantações > Editar > Quem pode acessar: Qualquer pessoa.",
+          status: "busy",
+          message:
+            "O Google Apps Script está temporariamente ocupado (limite de execuções simultâneas da conta Google). Tentando novamente em instantes.",
         });
       }
-      if (trimmed.includes("Authorization is required") || trimmed.includes("Script function not found")) {
+      if (
+        trimmed.includes("accounts.google.com") ||
+        trimmed.includes("ServiceLogin") ||
+        trimmed.includes("Sign in")
+      ) {
         return res.json({
           status: "error",
-          message: "Autorização pendente no Google: Abra seu projeto no script.google.com, selecione a função 'doGet' no topo e clique em 'Executar' uma vez para conceder permissão ao Google Drive e Sheets.",
+          message:
+            "O Google solicitou login. A implantação precisa estar configurada como 'Quem pode acessar: Qualquer pessoa' (Anyone) para conectar sem autenticação de tela. Acesse script.google.com > Implantar > Gerenciar implantações > Editar > Quem pode acessar: Qualquer pessoa.",
+        });
+      }
+      if (
+        trimmed.includes("Authorization is required") ||
+        trimmed.includes("Script function not found")
+      ) {
+        return res.json({
+          status: "error",
+          message:
+            "Autorização pendente no Google: Abra seu projeto no script.google.com, selecione a função 'doGet' no topo e clique em 'Executar' uma vez para conceder permissão ao Google Drive e Sheets.",
         });
       }
       if (response.status === 404 || trimmed.includes("404") || trimmed.includes("Not Found")) {
         return res.json({
           status: "error",
-          message: "URL do Google Apps Script não encontrada (HTTP 404). Certifique-se de que a implantação existe no script.google.com, o tipo é 'App da Web', o acesso é 'Qualquer pessoa' e a URL termina em '/exec'.",
+          message:
+            "URL do Google Apps Script não encontrada (HTTP 404). Certifique-se de que a implantação existe no script.google.com, o tipo é 'App da Web', o acesso é 'Qualquer pessoa' e a URL termina em '/exec'.",
         });
       }
       return res.json({
         status: "error",
-        message: "O Google Apps Script retornou uma página HTML em vez de JSON. Certifique-se de que a implantação é do tipo 'App da Web' com acesso para 'Qualquer pessoa' e a URL termina em '/exec'.",
+        message:
+          "O Google Apps Script retornou uma página HTML em vez de JSON. Certifique-se de que a implantação é do tipo 'App da Web' com acesso para 'Qualquer pessoa' e a URL termina em '/exec'.",
       });
     }
 
     try {
       const parsed = JSON.parse(rawText);
-      // Sincroniza dados com o disco/banco de dados do servidor se a resposta contiver registros
       const payloadContent = parsed?.data || parsed?.content || parsed;
-      if (payloadContent && (Array.isArray(payloadContent.leads) || Array.isArray(payloadContent.landingPages))) {
+      if (
+        payloadContent &&
+        (Array.isArray(payloadContent.leads) || Array.isArray(payloadContent.landingPages))
+      ) {
         try {
           syncDriveDataToDisk(payloadContent);
         } catch (syncErr) {
@@ -903,13 +1123,24 @@ function applyHeuristicModifications(prompt: string, currentLP: any) {
 }
 
 // Vite and Express server setup
-async function startServer() {
+if (!process.env.VERCEL) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+async function setupVite() {
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("Vite middleware attached successfully");
+    } catch (err) {
+      console.error("Error setting up Vite dev server:", err);
+    }
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -917,16 +1148,11 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-  if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://0.0.0.0:${PORT}`);
-    });
-  }
 }
 
 if (!process.env.VERCEL) {
-  startServer();
+  setupVite();
 }
 
 export default app;
+

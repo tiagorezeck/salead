@@ -11,6 +11,7 @@ export type Role =
   | "SDR" 
   | "Hunter" 
   | "Closer" 
+  | "Seller"
   | "Full Stack Seller"
   | "Onboarding" 
   | "CS (Customer Success)" 
@@ -19,65 +20,279 @@ export type Role =
 
 export type Stage = string;
 
+export type StageType = 
+  | 'NORMAL' 
+  | 'GANHO' 
+  | 'PERDIDO' 
+  | 'STAND_BY' 
+  | 'TRANSFERENCIA' 
+  | 'CONCLUIDO' 
+  | 'CANCELADO';
+
+export type StageColor = 'default' | 'success' | 'destructive' | 'warning' | 'info' | 'primary' | 'purple' | 'emerald' | 'amber' | 'blue' | 'rose';
+
 export interface PipelineStage {
+  id?: string;
   name: string;
-  color?: 'default' | 'success' | 'destructive' | 'warning' | 'info' | 'primary' | 'purple';
+  order?: number;
+  type?: StageType;
+  color?: StageColor;
+  slaHours?: number;
+  active?: boolean;
+  autoAction?: 'NONE' | 'TRANSFER_TO_SDR' | 'TRANSFER_TO_CLOSER' | 'TRANSFER_TO_ONBOARDING' | 'TRANSFER_TO_CS' | 'TRANSFER_TO_FARMER' | 'SCHEDULE_MEETING' | 'CUSTOM_TRANSFER';
+  targetPipelineId?: string;
+  targetStageName?: string;
+  description?: string;
 }
 
 export interface Pipeline {
   id: string;
   name: string;
+  code?: string;
+  functionRole?: Role | string;
+  description?: string;
   stages: PipelineStage[];
   color: string;
+  active?: boolean;
+  order?: number;
+  is_default?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-// PIPELINES PADRÃO DO SISTEMA (HARDCODED)
+export interface PipelineMovementHistory {
+  id: string;
+  leadId: string;
+  previousPipelineId?: string;
+  previousPipelineName?: string;
+  previousStage?: string;
+  newPipelineId?: string;
+  newPipelineName?: string;
+  newStage?: string;
+  previousOwner?: string;
+  newOwner?: string;
+  movementType: 'STAGE_CHANGE' | 'PIPELINE_TRANSFER' | 'OWNER_CHANGE' | 'BATCH_TRANSFER' | 'AUTO_HANDOFF';
+  user: string;
+  timestamp: string;
+  note?: string;
+}
+
+// PIPELINES NATIVOS DO SALEAD (ESTEIRA COMPLETA)
 export const DEFAULT_PIPELINES: Pipeline[] = [
   {
-    id: "prospection",
-    name: "PROSPECÇÃO (LDR)",
+    id: "marketing",
+    name: "MARKETING",
+    code: "MKT",
+    functionRole: "Marketing",
+    description: "Gestão e execução de campanhas, testes e criação de Landing Pages",
     color: "primary",
+    active: true,
+    order: 1,
     stages: [
-      { name: "Leads", color: "default" },
-      { name: "Tentativa de Contato", color: "info" },
-      { name: "Contato Realizado", color: "warning" },
-      { name: "Agendamento Realizado", color: "success" },
-      { name: "Descartado", color: "destructive" }
+      { id: "mkt_1", name: "Campanha / Conteúdo", order: 1, type: "NORMAL", color: "default", active: true },
+      { id: "mkt_2", name: "Criação de Landing Page", order: 2, type: "NORMAL", color: "info", active: true },
+      { id: "mkt_3", name: "Aprovação", order: 3, type: "NORMAL", color: "warning", active: true },
+      { id: "mkt_4", name: "Iniciar Campanha", order: 4, type: "NORMAL", color: "primary", active: true },
+      { id: "mkt_5", name: "Stand By", order: 5, type: "STAND_BY", color: "amber", active: true },
+      { id: "mkt_6", name: "Finalizar Campanha", order: 6, type: "CONCLUIDO", color: "success", active: true }
     ]
   },
   {
-    id: "sales",
-    name: "COMERCIAL (SDR/Closer)",
-    color: "primary",
+    id: "prospection", // Mantido id "prospection" com alias LDR para retrocompatibilidade
+    name: "LDR — QUALIFICAÇÃO INICIAL",
+    code: "LDR",
+    functionRole: "LDR",
+    description: "Higienização, validação de contato e qualificação preliminar",
+    color: "info",
+    active: true,
+    order: 2,
     stages: [
-      { name: "Qualificação", color: "info" },
-      { name: "Reunião Agendada", color: "warning" },
-      { name: "Reunião Realizada", color: "primary" },
-      { name: "Negociação", color: "purple" },
-      { name: "Fechamento", color: "success" },
-      { name: "Perdido", color: "destructive" }
+      { id: "ldr_1", name: "Novo Lead", order: 1, type: "NORMAL", color: "default", slaHours: 2, active: true },
+      { id: "ldr_2", name: "Primeiro Contato", order: 2, type: "NORMAL", color: "info", slaHours: 4, active: true },
+      { id: "ldr_3", name: "Contato Realizado", order: 3, type: "NORMAL", color: "warning", slaHours: 8, active: true },
+      { id: "ldr_4", name: "Qualificação Inicial", order: 4, type: "NORMAL", color: "primary", slaHours: 12, active: true },
+      { id: "ldr_5", name: "Qualificado", order: 5, type: "NORMAL", color: "purple", slaHours: 12, active: true },
+      { id: "ldr_6", name: "Transferido", order: 6, type: "TRANSFERENCIA", color: "success", autoAction: "TRANSFER_TO_SDR", targetPipelineId: "sdr", targetStageName: "Lead/Oportunidade Recebida", active: true },
+      { id: "ldr_7", name: "Stand By", order: 7, type: "STAND_BY", color: "amber", active: true },
+      { id: "ldr_8", name: "Perdido", order: 8, type: "PERDIDO", color: "destructive", active: true }
     ]
   },
   {
-    id: "execution",
-    name: "OPERAÇÃO (Execução)",
+    id: "bdr",
+    name: "BDR — PROSPECÇÃO ATIVA",
+    code: "BDR",
+    functionRole: "BDR",
+    description: "Prospecção ativa outbound, listas estratégicas e cold outreach",
+    color: "purple",
+    active: true,
+    order: 3,
+    stages: [
+      { id: "bdr_1", name: "Prospect Alvo", order: 1, type: "NORMAL", color: "default", active: true },
+      { id: "bdr_2", name: "Prospecção", order: 2, type: "NORMAL", color: "info", slaHours: 24, active: true },
+      { id: "bdr_3", name: "Contato Realizado", order: 3, type: "NORMAL", color: "warning", slaHours: 24, active: true },
+      { id: "bdr_4", name: "Conectado", order: 4, type: "NORMAL", color: "primary", slaHours: 24, active: true },
+      { id: "bdr_5", name: "Qualificado", order: 5, type: "NORMAL", color: "purple", slaHours: 12, active: true },
+      { id: "bdr_6", name: "Transferido", order: 6, type: "TRANSFERENCIA", color: "success", autoAction: "TRANSFER_TO_SDR", targetPipelineId: "sdr", targetStageName: "Lead/Oportunidade Recebida", active: true },
+      { id: "bdr_7", name: "Stand By", order: 7, type: "STAND_BY", color: "amber", active: true },
+      { id: "bdr_8", name: "Perdido", order: 8, type: "PERDIDO", color: "destructive", active: true }
+    ]
+  },
+  {
+    id: "sdr",
+    name: "SDR — QUALIFICAÇÃO & AGENDAMENTO",
+    code: "SDR",
+    functionRole: "SDR",
+    description: "Qualificação aprofundada via metodologia MIN e agendamento de reuniões",
     color: "blue",
+    active: true,
+    order: 4,
     stages: [
-      { name: "Onboarding", color: "info" },
-      { name: "Em Execução", color: "warning" },
-      { name: "Entrega Final", color: "primary" },
-      { name: "Projeto Finalizado", color: "success" }
+      { id: "sdr_1", name: "Lead/Oportunidade Recebida", order: 1, type: "NORMAL", color: "default", slaHours: 2, active: true },
+      { id: "sdr_2", name: "Contato", order: 2, type: "NORMAL", color: "info", slaHours: 4, active: true },
+      { id: "sdr_3", name: "Qualificação MIN", order: 3, type: "NORMAL", color: "warning", slaHours: 8, active: true },
+      { id: "sdr_4", name: "Qualificado", order: 4, type: "NORMAL", color: "primary", slaHours: 12, active: true },
+      { id: "sdr_5", name: "Reunião Agendada", order: 5, type: "NORMAL", color: "purple", autoAction: "SCHEDULE_MEETING", active: true },
+      { id: "sdr_6", name: "Transferido", order: 6, type: "TRANSFERENCIA", color: "success", autoAction: "TRANSFER_TO_CLOSER", targetPipelineId: "sales", targetStageName: "Reunião Agendada", active: true },
+      { id: "sdr_7", name: "Stand By", order: 7, type: "STAND_BY", color: "amber", active: true },
+      { id: "sdr_8", name: "Perdido", order: 8, type: "PERDIDO", color: "destructive", active: true }
+    ]
+  },
+  {
+    id: "sales", // Mantido id "sales" com alias Closer para retrocompatibilidade
+    name: "CLOSER — NEGOCIAÇÃO & FECHAMENTO",
+    code: "CLOSER",
+    functionRole: "Closer",
+    description: "Reuniões consultivas, diagnóstico, apresentação de propostas e fechamento",
+    color: "primary",
+    active: true,
+    order: 5,
+    stages: [
+      { id: "cls_1", name: "Reunião Agendada", order: 1, type: "NORMAL", color: "info", slaHours: 24, active: true },
+      { id: "cls_2", name: "Reunião Realizada", order: 2, type: "NORMAL", color: "primary", slaHours: 24, active: true },
+      { id: "cls_3", name: "Diagnóstico", order: 3, type: "NORMAL", color: "warning", slaHours: 48, active: true },
+      { id: "cls_4", name: "Proposta", order: 4, type: "NORMAL", color: "purple", slaHours: 48, active: true },
+      { id: "cls_5", name: "Negociação", order: 5, type: "NORMAL", color: "amber", slaHours: 72, active: true },
+      { id: "cls_6", name: "Decisão", order: 6, type: "NORMAL", color: "blue", slaHours: 48, active: true },
+      { id: "cls_7", name: "Ganho", order: 7, type: "GANHO", color: "success", autoAction: "TRANSFER_TO_ONBOARDING", targetPipelineId: "execution", targetStageName: "Cliente Ganho", active: true },
+      { id: "cls_8", name: "Perdido", order: 8, type: "PERDIDO", color: "destructive", active: true },
+      { id: "cls_9", name: "Stand By", order: 9, type: "STAND_BY", color: "amber", active: true }
+    ]
+  },
+  {
+    id: "hunter",
+    name: "HUNTER — CONTAS ESTRATÉGICAS",
+    code: "HUNTER",
+    functionRole: "Hunter",
+    description: "Prospecção cirúrgica de grandes contas (Enterprise & High Ticket)",
+    color: "rose",
+    active: true,
+    order: 6,
+    stages: [
+      { id: "hnt_1", name: "Prospect Alvo", order: 1, type: "NORMAL", color: "default", active: true },
+      { id: "hnt_2", name: "Prospecção", order: 2, type: "NORMAL", color: "info", slaHours: 48, active: true },
+      { id: "hnt_3", name: "Contato", order: 3, type: "NORMAL", color: "warning", slaHours: 48, active: true },
+      { id: "hnt_4", name: "Oportunidade Identificada", order: 4, type: "NORMAL", color: "purple", slaHours: 24, active: true },
+      { id: "hnt_5", name: "Transferido", order: 5, type: "TRANSFERENCIA", color: "success", autoAction: "TRANSFER_TO_CLOSER", targetPipelineId: "sales", targetStageName: "Reunião Agendada", active: true },
+      { id: "hnt_6", name: "Stand By", order: 6, type: "STAND_BY", color: "amber", active: true },
+      { id: "hnt_7", name: "Perdido", order: 7, type: "PERDIDO", color: "destructive", active: true }
+    ]
+  },
+  {
+    id: "seller",
+    name: "SELLER — CICLO COMPLETO",
+    code: "SELLER",
+    functionRole: "Seller",
+    description: "Vendedor ponta a ponta: do primeiro contato até o fechamento contratual",
+    color: "emerald",
+    active: true,
+    order: 7,
+    stages: [
+      { id: "slr_1", name: "Novo Lead", order: 1, type: "NORMAL", color: "default", slaHours: 2, active: true },
+      { id: "slr_2", name: "Contato", order: 2, type: "NORMAL", color: "info", slaHours: 6, active: true },
+      { id: "slr_3", name: "Qualificação MIN", order: 3, type: "NORMAL", color: "warning", slaHours: 12, active: true },
+      { id: "slr_4", name: "Reunião", order: 4, type: "NORMAL", color: "primary", slaHours: 24, active: true },
+      { id: "slr_5", name: "Diagnóstico", order: 5, type: "NORMAL", color: "purple", slaHours: 24, active: true },
+      { id: "slr_6", name: "Proposta", order: 6, type: "NORMAL", color: "amber", slaHours: 48, active: true },
+      { id: "slr_7", name: "Negociação", order: 7, type: "NORMAL", color: "blue", slaHours: 48, active: true },
+      { id: "slr_8", name: "Decisão", order: 8, type: "NORMAL", color: "purple", slaHours: 24, active: true },
+      { id: "slr_9", name: "Ganho", order: 9, type: "GANHO", color: "success", autoAction: "TRANSFER_TO_ONBOARDING", targetPipelineId: "execution", targetStageName: "Cliente Ganho", active: true },
+      { id: "slr_10", name: "Perdido", order: 10, type: "PERDIDO", color: "destructive", active: true },
+      { id: "slr_11", name: "Stand By", order: 11, type: "STAND_BY", color: "amber", active: true }
+    ]
+  },
+  {
+    id: "execution", // Mantido id "execution" com alias Onboarding para retrocompatibilidade
+    name: "ONBOARDING — IMPLANTAÇÃO",
+    code: "ONBOARDING",
+    functionRole: "Onboarding",
+    description: "Recepção do cliente, coleta de documentos, setup e implantação técnica",
+    color: "blue",
+    active: true,
+    order: 8,
+    stages: [
+      { id: "onb_1", name: "Cliente Ganho", order: 1, type: "NORMAL", color: "info", slaHours: 24, active: true },
+      { id: "onb_2", name: "Onboarding Iniciado", order: 2, type: "NORMAL", color: "warning", slaHours: 48, active: true },
+      { id: "onb_3", name: "Dados / Documentos", order: 3, type: "NORMAL", color: "primary", slaHours: 72, active: true },
+      { id: "onb_4", name: "Configuração", order: 4, type: "NORMAL", color: "purple", slaHours: 72, active: true },
+      { id: "onb_5", name: "Implantação", order: 5, type: "NORMAL", color: "blue", slaHours: 96, active: true },
+      { id: "onb_6", name: "Onboarding Concluído", order: 6, type: "CONCLUIDO", color: "success", autoAction: "TRANSFER_TO_CS", targetPipelineId: "cs", targetStageName: "Cliente Ativo", active: true },
+      { id: "onb_7", name: "Stand By", order: 7, type: "STAND_BY", color: "amber", active: true },
+      { id: "onb_8", name: "Cancelado", order: 8, type: "CANCELADO", color: "destructive", active: true }
     ]
   },
   {
     id: "cs",
-    name: "PÓS-VENDA (CS/Farmer)",
+    name: "CUSTOMER SUCCESS (CS)",
+    code: "CS",
+    functionRole: "CS (Customer Success)",
+    description: "Garantia de valor, adoção contínua, acompanhamento de saúde do cliente e retenção",
     color: "green",
+    active: true,
+    order: 9,
     stages: [
-      { name: "Acompanhamento", color: "info" },
-      { name: "Renovação", color: "warning" },
-      { name: "Upsell / Cross-sell", color: "primary" },
-      { name: "Churn / Cancelamento", color: "destructive" }
+      { id: "cs_1", name: "Cliente Ativo", order: 1, type: "NORMAL", color: "info", active: true },
+      { id: "cs_2", name: "Acompanhamento", order: 2, type: "NORMAL", color: "warning", active: true },
+      { id: "cs_3", name: "Adoção", order: 3, type: "NORMAL", color: "primary", active: true },
+      { id: "cs_4", name: "Resultado", order: 4, type: "NORMAL", color: "purple", active: true },
+      { id: "cs_5", name: "Sucesso / Renovação", order: 5, type: "GANHO", color: "success", active: true },
+      { id: "cs_6", name: "Oportunidade Comercial", order: 6, type: "TRANSFERENCIA", color: "emerald", autoAction: "TRANSFER_TO_FARMER", targetPipelineId: "farmer", targetStageName: "Identificação de Oportunidade", active: true },
+      { id: "cs_7", name: "Churn / Cancelamento", order: 7, type: "PERDIDO", color: "destructive", active: true }
+    ]
+  },
+  {
+    id: "farmer",
+    name: "FARMER — EXPANSÃO & CARTEIRA",
+    code: "FARMER",
+    functionRole: "Farmer",
+    description: "Gestão de carteira ativa, upsell, cross-sell e renovações de alto valor",
+    color: "emerald",
+    active: true,
+    order: 10,
+    stages: [
+      { id: "frm_1", name: "Cliente Ativo", order: 1, type: "NORMAL", color: "info", active: true },
+      { id: "frm_2", name: "Relacionamento", order: 2, type: "NORMAL", color: "warning", active: true },
+      { id: "frm_3", name: "Identificação de Oportunidade", order: 3, type: "NORMAL", color: "primary", active: true },
+      { id: "frm_4", name: "Nova Necessidade", order: 4, type: "NORMAL", color: "purple", active: true },
+      { id: "frm_5", name: "Oportunidade Comercial", order: 5, type: "TRANSFERENCIA", color: "emerald", autoAction: "TRANSFER_TO_CLOSER", targetPipelineId: "sales", targetStageName: "Proposta", active: true },
+      { id: "frm_6", name: "Ganho", order: 6, type: "GANHO", color: "success", active: true },
+      { id: "frm_7", name: "Perdido", order: 7, type: "PERDIDO", color: "destructive", active: true },
+      { id: "frm_8", name: "Stand By", order: 8, type: "STAND_BY", color: "amber", active: true }
+    ]
+  },
+  {
+    id: "cx",
+    name: "CUSTOMER EXPERIENCE (CX)",
+    code: "CX",
+    functionRole: "CX (Customer Experience)",
+    description: "Suporte consultivo, feedback, tratamento de gargalos e satisfação contínua",
+    color: "amber",
+    active: true,
+    order: 11,
+    stages: [
+      { id: "cx_1", name: "Interação", order: 1, type: "NORMAL", color: "info", active: true },
+      { id: "cx_2", name: "Feedback", order: 2, type: "NORMAL", color: "warning", active: true },
+      { id: "cx_3", name: "Tratativa", order: 3, type: "NORMAL", color: "primary", active: true },
+      { id: "cx_4", name: "Resolvido", order: 4, type: "CONCLUIDO", color: "success", active: true }
     ]
   }
 ];
@@ -313,34 +528,53 @@ export const DEFAULT_VISIBILITY = {
 
 // PERMISSÕES PADRÃO POR CARGO (ETAPAS DO KANBAN)
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  "Admin Geral": [
-    "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Descartado",
-    "Qualificação", "Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido",
-    "Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado",
-    "Acompanhamento", "Renovação", "Upsell / Cross-sell", "Churn / Cancelamento"
+  "Admin Geral": ["*"],
+  "Gestor": ["*"],
+  "Head of Sales": ["*"],
+  "Team Leader": ["*"],
+  "Marketing": [
+    "Campanha / Conteúdo", "Criação de Landing Page", "Aprovação", "Iniciar Campanha", "Stand By", "Finalizar Campanha"
   ],
-  "Gestor": [
-    "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Descartado",
-    "Qualificação", "Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido",
-    "Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado",
-    "Acompanhamento", "Renovação", "Upsell / Cross-sell", "Churn / Cancelamento"
+  "LDR": [
+    "Novo Lead", "Primeiro Contato", "Contato Realizado", "Qualificação Inicial", "Qualificado", "Transferido", "Stand By", "Perdido",
+    "Leads", "Tentativa de Contato", "Agendamento Realizado", "Descartado"
   ],
-  "Head of Sales": [
-    "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Descartado",
-    "Qualificação", "Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido",
-    "Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado",
-    "Acompanhamento", "Renovação", "Upsell / Cross-sell", "Churn / Cancelamento"
+  "BDR": [
+    "Prospect Alvo", "Prospecção", "Contato Realizado", "Conectado", "Qualificado", "Transferido", "Stand By", "Perdido"
   ],
-  "LDR": ["Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Descartado"],
-  "SDR": ["Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Qualificação"],
-  "Closer": ["Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido"],
+  "SDR": [
+    "Lead/Oportunidade Recebida", "Contato", "Qualificação MIN", "Qualificado", "Reunião Agendada", "Transferido", "Stand By", "Perdido",
+    "Qualificação", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Leads"
+  ],
+  "Closer": [
+    "Reunião Agendada", "Reunião Realizada", "Diagnóstico", "Proposta", "Negociação", "Decisão", "Ganho", "Perdido", "Stand By",
+    "Fechamento"
+  ],
+  "Hunter": [
+    "Prospect Alvo", "Prospecção", "Contato", "Oportunidade Identificada", "Transferido", "Stand By", "Perdido"
+  ],
+  "Seller": [
+    "Novo Lead", "Contato", "Qualificação MIN", "Reunião", "Diagnóstico", "Proposta", "Negociação", "Decisão", "Ganho", "Perdido", "Stand By"
+  ],
   "Full Stack Seller": [
-    "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Qualificação", 
-    "Reunião Agendada", "Reunião Realizada", "Negociação", "Fechamento", "Perdido"
+    "Novo Lead", "Contato", "Qualificação MIN", "Reunião", "Diagnóstico", "Proposta", "Negociação", "Decisão", "Ganho", "Perdido", "Stand By",
+    "Leads", "Tentativa de Contato", "Contato Realizado", "Agendamento Realizado", "Qualificação", "Reunião Agendada", "Reunião Realizada", "Fechamento"
   ],
-  "CS (Customer Success)": ["Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado", "Acompanhamento", "Renovação", "Upsell / Cross-sell"],
-  "Farmer": ["Acompanhamento", "Renovação", "Upsell / Cross-sell"],
-  "Onboarding": ["Onboarding", "Em Execução", "Entrega Final"]
+  "Onboarding": [
+    "Cliente Ganho", "Onboarding Iniciado", "Dados / Documentos", "Configuração", "Implantação", "Onboarding Concluído", "Stand By", "Cancelado",
+    "Onboarding", "Em Execução", "Entrega Final", "Projeto Finalizado"
+  ],
+  "CS (Customer Success)": [
+    "Cliente Ativo", "Acompanhamento", "Adoção", "Resultado", "Sucesso / Renovação", "Oportunidade Comercial", "Churn / Cancelamento",
+    "Renovação", "Upsell / Cross-sell"
+  ],
+  "Farmer": [
+    "Cliente Ativo", "Relacionamento", "Identificação de Oportunidade", "Nova Necessidade", "Oportunidade Comercial", "Ganho", "Perdido", "Stand By",
+    "Acompanhamento", "Renovação", "Upsell / Cross-sell"
+  ],
+  "CX (Customer Experience)": [
+    "Interação", "Feedback", "Tratativa", "Resolvido"
+  ]
 };
 
 export interface SystemModule {
@@ -374,6 +608,7 @@ export const DEFAULT_ROLE_MODULES: Record<string, string[]> = {
   "Gestor": SYSTEM_MODULES.map(m => m.id),
   "Head of Sales": SYSTEM_MODULES.filter(m => m.id !== "settings").map(m => m.id),
   "Team Leader": ["dashboard", "daily_sales", "performance", "crm", "tasks", "leads", "products", "playbooks"],
+  "Seller": ["dashboard", "daily_sales", "performance", "crm", "tasks", "leads", "products", "playbooks", "landing_pages", "surveys"],
   "Full Stack Seller": ["dashboard", "daily_sales", "performance", "crm", "tasks", "leads", "products", "playbooks", "landing_pages", "surveys"],
   "Closer": ["dashboard", "daily_sales", "performance", "crm", "tasks", "leads", "products", "playbooks"],
   "Hunter": ["daily_sales", "crm", "tasks", "leads", "products", "playbooks"],
@@ -458,7 +693,7 @@ export const CLASSIFICATION_CONFIG: Record<Classification, { label: string; cls:
 
 export interface Activity {
   id: string;
-  type: 'note' | 'stage_change' | 'conversion' | 'system' | 'task' | 'score_change';
+  type: 'note' | 'stage_change' | 'pipeline_transfer' | 'owner_change' | 'auto_handoff' | 'conversion' | 'system' | 'task' | 'score_change';
   description: string;
   timestamp: string;
   user?: string;
@@ -466,6 +701,13 @@ export interface Activity {
     oldScore?: number;
     newScore?: number;
     diff?: number;
+    fromStage?: string;
+    toStage?: string;
+    fromPipeline?: string;
+    toPipeline?: string;
+    fromOwner?: string;
+    toOwner?: string;
+    reason?: string;
   };
 }
 
@@ -479,6 +721,7 @@ export interface Lead {
   whatsapp: string;
   value: number;
   stage: Stage;
+  stageId?: string;
   owner: string;
   source: string;
   captureType?: CaptureType;
@@ -501,6 +744,13 @@ export interface Lead {
   activities: Activity[];
   completedCheckpoints?: string[];
   wonAt?: string;
+
+  // Rastreamento de Movimentações de Pipeline
+  dataMovimentacao?: string;
+  dataTransferencia?: string;
+  previousOwner?: string;
+  previousPipelineId?: string;
+  previousStage?: string;
 
   // Novos campos estruturados Comercial/CRM
   personType?: 'PF' | 'PJ';

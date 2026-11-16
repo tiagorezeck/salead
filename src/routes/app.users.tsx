@@ -7,7 +7,7 @@ import { cn, formatPhone } from "@/lib/utils";
 import { UserGoalsModal } from "@/components/crm/user-goals-modal";
 import { toast } from "sonner";
 import { getRegisteredUsers, saveRegisteredUsers, approveUserAccess, registerNewUser } from "@/lib/auth-service";
-import { getDriveConfig, pushToGoogleDrive, getLocalDatabaseRoot, saveLocalDatabaseRoot } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 
 export const Route = createFileRoute("/app/users")({
   component: UsersPage,
@@ -164,16 +164,23 @@ function UsersPage() {
   const handleSyncCleanUsersToSheets = async () => {
     setIsSyncingUsers(true);
     try {
-      const driveCfg = getDriveConfig();
-      if (!driveCfg.webappUrl) {
+      const status = cloudStore.getStatus();
+      if (!status.webappUrl) {
         toast.error("URL do Google Apps Script não configurada em Integrações.");
         return;
       }
-      const rootDb = getLocalDatabaseRoot() || {};
-      rootDb.users = users;
-      saveLocalDatabaseRoot(rootDb);
-      await pushToGoogleDrive(driveCfg.webappUrl, rootDb);
-      toast.success("Aba 'Usuarios' sincronizada e atualizada com sucesso no Google Sheets!");
+      cloudStore.mutate(
+        (draft) => {
+          draft.users = users;
+        },
+        { immediate: true }
+      );
+      const ok = await cloudStore.pushNow();
+      if (ok) {
+        toast.success("Aba 'Usuarios' sincronizada e atualizada com sucesso no Google Sheets!");
+      } else {
+        toast.error("Erro ao sincronizar usuários com Google Sheets.");
+      }
     } catch (err: any) {
       toast.error("Erro ao sincronizar com Google Sheets: " + (err.message || "Falha na conexão"));
     } finally {

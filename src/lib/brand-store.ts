@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { getLocalDatabaseRoot, saveLocalDatabaseRoot, pushToGoogleDrive } from "@/services/googleDriveDatabaseService";
+import { cloudStore } from "@/services/cloudStorageService";
 
 export type BrandSizePreset = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
@@ -185,8 +185,6 @@ export interface BrandStore extends BrandLogoConfig {
   setFullMode: () => void;
 }
 
-const STORAGE_KEY = "salead_brand_logo_settings_v7";
-
 const DEFAULT_CONFIG: BrandLogoConfig = {
   mode: "split",
   sizePreset: "md",
@@ -233,87 +231,84 @@ const DEFAULT_CONFIG: BrandLogoConfig = {
   subtitleFontSizePx: 10,
 };
 
+function extractBrandConfig(raw: any): Partial<BrandLogoConfig> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = "state" in raw ? raw.state : raw;
+  return data && typeof data === "object" ? data : null;
+}
+
 function loadInitialState(): BrandLogoConfig {
   if (typeof window === "undefined") return DEFAULT_CONFIG;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const data = parsed && typeof parsed === "object" && "state" in parsed ? parsed.state : parsed;
-      return { ...DEFAULT_CONFIG, ...data };
+    const cloudDb = cloudStore.getState();
+    const fromCloud = extractBrandConfig(cloudDb.brandIdentity || cloudDb.company?.logo_config);
+    if (fromCloud) {
+      return { ...DEFAULT_CONFIG, ...fromCloud };
     }
   } catch (err) {
-    console.error("Failed to load brand settings from storage", err);
+    console.error("Failed to load brand settings from cloudStore", err);
   }
   return DEFAULT_CONFIG;
 }
 
 let state: BrandStore;
 const listeners = new Set<() => void>();
+let isSyncingFromCloud = false;
 
-let cloudSyncTimeout: any = null;
+function serializeBrandConfig(s: BrandStore): BrandLogoConfig {
+  return {
+    mode: s.mode,
+    sizePreset: s.sizePreset,
+    scalePercent: s.scalePercent,
+    iconSource: s.iconSource,
+    iconSvgRaw: s.iconSvgRaw,
+    iconDataUrl: s.iconDataUrl,
+    iconHeightPx: s.iconHeightPx,
+    textSource: s.textSource,
+    textSvgRaw: s.textSvgRaw,
+    textDataUrl: s.textDataUrl,
+    textHeightPx: s.textHeightPx,
+    fullLogoSvgRaw: s.fullLogoSvgRaw,
+    fullLogoDataUrl: s.fullLogoDataUrl,
+    fullLogoHeightPx: s.fullLogoHeightPx,
+    gapPx: s.gapPx,
+    darkIconSource: s.darkIconSource,
+    darkIconSvgRaw: s.darkIconSvgRaw,
+    darkIconDataUrl: s.darkIconDataUrl,
+    darkIconHeightPx: s.darkIconHeightPx,
+    darkTextSource: s.darkTextSource,
+    darkTextSvgRaw: s.darkTextSvgRaw,
+    darkTextDataUrl: s.darkTextDataUrl,
+    darkTextHeightPx: s.darkTextHeightPx,
+    darkFullLogoSvgRaw: s.darkFullLogoSvgRaw,
+    darkFullLogoDataUrl: s.darkFullLogoDataUrl,
+    darkFullLogoHeightPx: s.darkFullLogoHeightPx,
+    darkGapPx: s.darkGapPx,
+    darkScalePercent: s.darkScalePercent,
+    darkSubtitleFontSizePx: s.darkSubtitleFontSizePx,
+    autoAdaptDark: s.autoAdaptDark,
+    subtitle: s.subtitle,
+    showSubtitle: s.showSubtitle,
+    subtitleFontSizePx: s.subtitleFontSizePx,
+  };
+}
 
-function syncBrandSettingsToCloud(data: any) {
+function syncBrandSettingsToCloud(data: BrandLogoConfig) {
   if (typeof window === "undefined") return;
-  if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
-  cloudSyncTimeout = setTimeout(async () => {
-    try {
-      const root = getLocalDatabaseRoot();
-      const currentCompany = root?.company || {};
-      root.company = {
-        ...currentCompany,
-        logo_config: data,
-        updatedAt: new Date().toISOString()
-      };
-      saveLocalDatabaseRoot(root);
-      pushToGoogleDrive(root).catch(() => {});
-    } catch (err) {
-      console.warn("Could not sync brand logo to cloud:", err);
-    }
-  }, 1000);
+  cloudStore.mutate((draft) => {
+    draft.brandIdentity = data;
+    draft.company = {
+      ...(draft.company || {}),
+      logo_config: data,
+      updatedAt: new Date().toISOString(),
+    };
+  });
 }
 
 function notify() {
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && !isSyncingFromCloud) {
     try {
-      const persistedData = {
-        mode: state.mode,
-        sizePreset: state.sizePreset,
-        scalePercent: state.scalePercent,
-        iconSource: state.iconSource,
-        iconSvgRaw: state.iconSvgRaw,
-        iconDataUrl: state.iconDataUrl,
-        iconHeightPx: state.iconHeightPx,
-        textSource: state.textSource,
-        textSvgRaw: state.textSvgRaw,
-        textDataUrl: state.textDataUrl,
-        textHeightPx: state.textHeightPx,
-        fullLogoSvgRaw: state.fullLogoSvgRaw,
-        fullLogoDataUrl: state.fullLogoDataUrl,
-        fullLogoHeightPx: state.fullLogoHeightPx,
-        gapPx: state.gapPx,
-
-        darkIconSource: state.darkIconSource,
-        darkIconSvgRaw: state.darkIconSvgRaw,
-        darkIconDataUrl: state.darkIconDataUrl,
-        darkIconHeightPx: state.darkIconHeightPx,
-        darkTextSource: state.darkTextSource,
-        darkTextSvgRaw: state.darkTextSvgRaw,
-        darkTextDataUrl: state.darkTextDataUrl,
-        darkTextHeightPx: state.darkTextHeightPx,
-        darkFullLogoSvgRaw: state.darkFullLogoSvgRaw,
-        darkFullLogoDataUrl: state.darkFullLogoDataUrl,
-        darkFullLogoHeightPx: state.darkFullLogoHeightPx,
-        darkGapPx: state.darkGapPx,
-        darkScalePercent: state.darkScalePercent,
-        darkSubtitleFontSizePx: state.darkSubtitleFontSizePx,
-
-        autoAdaptDark: state.autoAdaptDark,
-        subtitle: state.subtitle,
-        showSubtitle: state.showSubtitle,
-        subtitleFontSizePx: state.subtitleFontSizePx,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedData));
+      const persistedData = serializeBrandConfig(state);
       syncBrandSettingsToCloud(persistedData);
     } catch {
       // ignore
@@ -328,6 +323,23 @@ function updateState(partial: Partial<BrandStore>) {
 }
 
 const initialConfig = loadInitialState();
+
+if (typeof window !== "undefined") {
+  cloudStore.subscribe(() => {
+    const cloudDb = cloudStore.getState();
+    const fromCloud = extractBrandConfig(cloudDb.brandIdentity || cloudDb.company?.logo_config);
+    if (!fromCloud) return;
+    const nextMerged = { ...DEFAULT_CONFIG, ...fromCloud };
+    const currentSerialized = JSON.stringify(serializeBrandConfig(state));
+    const nextSerialized = JSON.stringify(nextMerged);
+    if (currentSerialized !== nextSerialized) {
+      isSyncingFromCloud = true;
+      state = { ...state, ...nextMerged };
+      listeners.forEach((listener) => listener());
+      isSyncingFromCloud = false;
+    }
+  });
+}
 
 state = {
   ...initialConfig,

@@ -9,25 +9,19 @@ export interface DriveConfig {
   connected: boolean;
 }
 
-const DRIVE_CONFIG_KEY = "comet_gdrive_config";
+let inMemoryLegacyDriveConfig: DriveConfig = {
+  clientId: "",
+  apiKey: "",
+  folderId: "",
+  connected: false,
+};
 
 export async function getDriveConfig(): Promise<DriveConfig> {
-  if (typeof window === "undefined") {
-    return { clientId: "", apiKey: "", folderId: "", connected: false };
-  }
-  try {
-    const raw = localStorage.getItem(DRIVE_CONFIG_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return { clientId: "", apiKey: "", folderId: "", connected: false };
+  return { ...inMemoryLegacyDriveConfig };
 }
 
 export async function saveDriveConfig(config: DriveConfig) {
-  if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem(DRIVE_CONFIG_KEY, JSON.stringify(config));
-    } catch {}
-  }
+  inMemoryLegacyDriveConfig = { ...config };
 }
 
 // Simulação de conexão (OAuth real exigiria redirecionamento)

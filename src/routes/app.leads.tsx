@@ -3,13 +3,16 @@ import {
   Search, Download, Plus, Eye, Timer, Clock, Calendar, Filter, X, 
   ChevronDown, Check, Sparkles, Flame, UserCheck, Trash2, 
   RefreshCw, Ban, CheckSquare, Square, AlertTriangle, Globe, MessageCircle, Mail, DollarSign,
-  FileCheck
+  FileCheck, ArrowDownToLine, GitFork, Lock, Unlock, ShieldAlert, User as UserIcon
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useData } from "@/hooks/use-data";
 import { NewLeadModal } from "@/components/crm/new-lead-modal";
 import { LeadDrawer } from "@/components/crm/lead-drawer";
 import { SLACenterModal } from "@/components/crm/sla-center-modal";
+import { LeadRoutingModal } from "@/components/crm/lead-routing-modal";
+import { PullLeadModal } from "@/components/crm/pull-lead-modal";
+import { checkLeadClaimEligibility } from "@/lib/lead-rules";
 import { cn, formatCurrency } from "@/lib/utils";
 import { calculateLeadScore, getScoreColor, getScoreBg } from "@/lib/scoring";
 import { isWithinInterval, differenceInDays } from "date-fns";
@@ -133,13 +136,16 @@ export const Route = createFileRoute("/app/leads")({
 function LeadsPage() {
   const { 
     leads, addLead, updateLead, deleteLead, bulkDeleteLeads, 
-    bulkUpdateLeadStatus, stages, initialized, dateFilter, products,
-    surveysResponses = []
+    bulkUpdateLeadStatus, stages, pipelines = [], currentUser, team = [], initialized, dateFilter, products,
+    surveysResponses = [], leadRoutingConfig
   } = useData();
   
   const [q, setQ] = useState("");
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
   const [showSLAModal, setShowSLAModal] = useState(false);
+  const [showPullLeadModal, setShowPullLeadModal] = useState(false);
+  const [showRoutingModal, setShowRoutingModal] = useState(false);
+  const [pullTargetLeadId, setPullTargetLeadId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Estados de Filtro
@@ -154,12 +160,35 @@ function LeadsPage() {
   // Helper para obter a qualificação MIN de cada lead
   const resolveLeadMin = (lead: any): MinQualification | undefined => {
     if (lead.minQualification) return lead.minQualification;
-    if (lead.minScore && lead.minScore !== "Nenhum") {
-      const m = lead.minScore.includes("M") ? 1 : 0;
-      const i = lead.minScore.includes("I") ? 1 : 0;
-      const n = lead.minScore.includes("N") ? 1 : 0;
+    if (lead.metadata?.minQualification) return lead.metadata.minQualification;
+
+    const rawScore = lead.minScore || lead.metadata?.minScore;
+    if (rawScore && rawScore !== "Nenhum") {
+      const m = String(rawScore).includes("M") ? 1 : 0;
+      const i = String(rawScore).includes("I") ? 1 : 0;
+      const n = String(rawScore).includes("N") ? 1 : 0;
       return calculateMinQualification(m, i, n);
     }
+
+    // Procura nas respostas de pesquisa do sistema se esse lead respondeu
+    const matchResp = surveysResponses.find((r: any) => 
+      (r.leadId && r.leadId === lead.id) ||
+      (r.lead_id && r.lead_id === lead.id) ||
+      (lead.email && (r.leadEmail === lead.email || r.answers?.email === lead.email)) ||
+      (lead.whatsapp && (r.leadWhatsapp === lead.whatsapp || r.answers?.whatsapp === lead.whatsapp))
+    );
+    if (matchResp) {
+      if ((matchResp as any).minQualification) return (matchResp as any).minQualification;
+      if ((matchResp as any).minScore && (matchResp as any).minScore !== "Nenhum") {
+        const ms = String((matchResp as any).minScore);
+        const m = ms.includes("M") ? 1 : 0;
+        const i = ms.includes("I") ? 1 : 0;
+        const n = ms.includes("N") ? 1 : 0;
+        return calculateMinQualification(m, i, n);
+      }
+      return calculateMinQualification(1, 1, 1);
+    }
+
     return undefined;
   };
 
@@ -311,7 +340,32 @@ function LeadsPage() {
             Exibindo <strong className="text-foreground">{filteredRows.length}</strong> de {leads.length} registros cadastrados.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Botão para puxar leads da base para o próprio pipeline */}
+          <button 
+            onClick={() => {
+              setPullTargetLeadId(null);
+              setShowPullLeadModal(true);
+            }}
+            className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-wider shadow-sm inline-flex items-center gap-2 hover:opacity-95 active:scale-95 transition-all cursor-pointer"
+            title="Buscar leads na base liberados para puxar e colocar no seu funil"
+          >
+            <ArrowDownToLine className="h-4 w-4" /> Puxar para Meu Pipeline
+          </button>
+
+          {/* Botão para configurar regras de roteamento e distribuição LDR/SDR/Seller */}
+          <button 
+            onClick={() => setShowRoutingModal(true)}
+            className="text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-border bg-card hover:bg-muted/80 text-foreground font-black uppercase tracking-wider shadow-sm inline-flex items-center gap-2 hover:opacity-95 active:scale-95 transition-all cursor-pointer"
+            title="Configurar quem recebe os novos leads da base (LDR, SDR, Seller)"
+          >
+            <GitFork className="h-4 w-4 text-primary" />
+            <span>Distribuição (LDR/SDR)</span>
+            {leadRoutingConfig?.enabled && (
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" title="Distribuição ativa" />
+            )}
+          </button>
+
           <button 
             onClick={() => setShowNewLeadModal(true)}
             className="text-xs sm:text-sm px-5 py-2.5 rounded-xl bg-gradient-primary text-primary-foreground font-black uppercase tracking-wider shadow-elegant inline-flex items-center gap-2 hover:opacity-95 active:scale-95 transition-all cursor-pointer"
@@ -427,6 +481,7 @@ function LeadsPage() {
                 </th>
                 <th className="text-left px-4 py-3.5 min-w-[240px]">Lead / Empresa</th>
                 <th className="text-left px-4 py-3.5">Status</th>
+                <th className="text-left px-4 py-3.5 min-w-[180px]">Responsável / Funil</th>
                 <th className="text-left px-4 py-3.5">Momento (MIN)</th>
                 <th className="text-left px-4 py-3.5">Tempo Base</th>
                 <th className="text-left px-4 py-3.5">Valor</th>
@@ -455,6 +510,9 @@ function LeadsPage() {
                 const visitsCount = Number(l.lpVisits) || (l.landingPage || l.source?.includes("LP") ? 1 : 0);
                 const sourceBadge = getLeadSourceBadge(l);
                 const cleanCompany = getCleanCompanyName(l.company, l.name);
+                const claimEligibility = checkLeadClaimEligibility(l, currentUser, pipelines);
+                const isCurrentOwner = currentUser && l.owner && l.owner.toLowerCase() === currentUser.name.toLowerCase();
+                const leadPipeline = pipelines.find(p => p.id === (l.pipelineId || "prospection"));
 
                 return (
                   <tr key={l.id} className={cn(
@@ -572,6 +630,31 @@ function LeadsPage() {
                       </span>
                     </td>
 
+                    {/* Responsável / Funil */}
+                    <td className="px-4 py-3 min-w-[180px]">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                          <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className={cn(
+                            !l.owner || l.owner === "Sem dono" || l.owner === "Sem responsável" 
+                              ? "text-muted-foreground/70 italic" 
+                              : "text-foreground font-bold"
+                          )}>
+                            {l.owner || "Sem responsável"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <span className="font-bold text-primary truncate max-w-[130px]" title={leadPipeline?.name || "Prospecção"}>
+                            {leadPipeline?.name || "Funil Comercial"}
+                          </span>
+                          <span>•</span>
+                          <span className="truncate max-w-[90px]" title={l.stage}>
+                            {l.stage}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+
                     {/* Momento (MIN) */}
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
@@ -669,12 +752,41 @@ function LeadsPage() {
 
                     {/* Ações */}
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button 
-                        onClick={() => setSelectedId(l.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-[10px] font-black uppercase tracking-wider hover:opacity-95 active:scale-95 transition-all shadow-sm cursor-pointer"
-                      >
-                        <Eye className="h-3 w-3" /> Detalhes
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        {isCurrentOwner ? (
+                          <span 
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-[10px] font-bold shadow-2xs"
+                            title="Este lead já está com você no seu pipeline"
+                          >
+                            <UserIcon className="h-2.5 w-2.5" /> Seu Lead
+                          </span>
+                        ) : claimEligibility.canClaim ? (
+                          <button 
+                            onClick={() => {
+                              setPullTargetLeadId(l.id);
+                              setShowPullLeadModal(true);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600 text-emerald-700 dark:text-emerald-300 hover:text-white border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs active:scale-95"
+                            title="Puxar lead para o seu pipeline"
+                          >
+                            <ArrowDownToLine className="h-3 w-3" /> Puxar
+                          </button>
+                        ) : (
+                          <span 
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-muted/70 text-muted-foreground/80 border border-border text-[9px] font-bold cursor-help shadow-2xs"
+                            title={claimEligibility.reason}
+                          >
+                            <Lock className="h-2.5 w-2.5 text-amber-500 shrink-0" /> Bloqueado
+                          </span>
+                        )}
+
+                        <button 
+                          onClick={() => setSelectedId(l.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-[10px] font-black uppercase tracking-wider hover:opacity-95 active:scale-95 transition-all shadow-sm cursor-pointer"
+                        >
+                          <Eye className="h-3 w-3" /> Detalhes
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -682,7 +794,7 @@ function LeadsPage() {
               
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-20 text-center">
+                  <td colSpan={12} className="px-4 py-20 text-center">
                     <div className="flex flex-col items-center gap-2.5 text-muted-foreground">
                       <Filter className="h-8 w-8 opacity-20" />
                       <p className="text-sm font-medium">Nenhum lead encontrado com estes filtros.</p>
@@ -747,6 +859,22 @@ function LeadsPage() {
           onDelete={deleteLead} 
         />
       )}
+
+      {/* Modal para Puxar Leads da Base para o Pipeline do Usuário */}
+      <PullLeadModal
+        open={showPullLeadModal}
+        onClose={() => {
+          setShowPullLeadModal(false);
+          setPullTargetLeadId(null);
+        }}
+        preselectedLeadId={pullTargetLeadId}
+      />
+
+      {/* Modal de Configuração de Distribuição de Leads (LDR / SDR / Seller) */}
+      <LeadRoutingModal
+        open={showRoutingModal}
+        onClose={() => setShowRoutingModal(false)}
+      />
 
       {/* Alerta de Exclusão Permanente */}
       <AlertDialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>

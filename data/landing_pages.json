@@ -80,5 +80,527 @@
       "11999999999"
     ],
     "descriptionColor": "#c4c4ca"
+  },
+  {
+    "id": "2026-09-14_00-29",
+    "title": "Tiago Rezeck Rezeck",
+    "name": "Tiago Rezeck Rezeck",
+    "slug": "Campanha: venda...",
+    "status": "Novo Lead",
+    "visits": 0,
+    "viewsCount": 0,
+    "views_count": 0,
+    "leads": 0,
+    "leads_count": 0,
+    "conv": 0,
+    "type": "COMET CRO",
+    "updated_at": "2026-11-16T17:15:17.588Z"
+  },
+  {
+    "id": "2026-09-13_17-02",
+    "title": "dtynejt",
+    "name": "dtynejt",
+    "slug": "Campanha: venda... (Cópia)",
+    "status": "Novo Lead",
+    "visits": 0,
+    "viewsCount": 0,
+    "views_count": 0,
+    "leads": 524050570570,
+    "leads_count": 524050570570,
+    "conv": 0,
+    "type": "COMET CRO",
+    "updated_at": "2026-11-16T17:15:17.588Z"
+  },
+  {
+    "id": "2026-09-13_23-42",
+    "title": "Tiago Rezeck Rezeck",
+    "name": "Tiago Rezeck Rezeck",
+    "slug": "Landing Page",
+    "status": "Novo Lead",
+    "visits": 0,
+    "viewsCount": 0,
+    "views_count": 0,
+    "leads": 0,
+    "leads_count": 0,
+    "conv": 0,
+    "type": "COMET CRO",
+    "updated_at": "2026-11-16T17:15:17.588Z"
+  },
+  {
+    "id": "23-10-2026-20:31",
+    "title": "Tiago da Silva Sauro",
+    "name": "Tiago da Silva Sauro",
+    "slug": "Mentoria High-Ticket & CRO",
+    "status": "Novo Lead",
+    "visits": 0,
+    "viewsCount": 0,
+    "views_count": 0,
+    "leads": 0,
+    "leads_count": 0,
+    "conv": 0,
+    "type": "COMET CRO",
+    "updated_at": "2026-11-16T17:15:17.588Z"
+  },
+  {
+    "id": "8fe0281b-fc17-47e6-a25d-cec570000d17",
+    "title": "Aceleração CRO • Curso Online & Formação Profissional",
+    "name": "Aceleração CRO • Curso Online & Formação Profissional",
+    "slug": "acelera-o-cro-curso-online-forma-o-profissional",
+    "status": "published",
+    "visits": 4,
+    "viewsCount": 4,
+    "views_count": 4,
+    "leads": 0,
+    "leads_count": 0,
+    "conv": 0,
+    "type": "COMET CRO",
+    "updated_at": "2026-11-16T17:15:17.588Z",
+    "originalId": "8fe0281b-fc17-47e6-a25d-cec570000d17",
+    "template": "Modern",
+    "surveyId": "qualificacao-min-1min",
+    "sector": "Curso Online & Formação Profissional",
+    "created_at": "2026-10-24T02:29:49.637Z",
+    "niche": "Infoprodutos & Mentorias",
+    "cityOrRegion": "Nacional / São Paulo",
+    "targetAudience": "Infoprodutores, Mentores e Donos de Agência faturando acima de R$ 30k/mês",
+    "accentColor": "orange",
+    "theme": "light",
+    "createdAt": "2026-10-24T02:29:49.637Z",
+    "updatedAt": "2026-10-24T23:46:28.897Z",
+    "webhookUrl": "",
+    "leadsCount": 0,
+    "headerNav": {
+      "enabled": true,
+      "logoType": "text",
+      "logoText": "SCALE.MASTER",
+      "logoImageUrl": "",
+      "logoImageHeightPx": 36,
+      "links": [
+        {
+          "id": "nav_1",
+          "label": "Início",
+          "targetSectionId": "hero"
+        },
+        {
+          "id": "nav_2",
+          "label": "Recursos",
+          "targetSectionId": "bentoGrid"
+        },
+        {
+          "id": "nav_3",
+          "label": "Depoimentos",
+          "targetSectionId": "testimonials"
+        },
+        {
+          "id": "nav_4",
+          "label": "Diagnóstico",
+          "targetSectionId": "quiz"
+        },
+        {
+          "id": "nav_5",
+          "label": "FAQ",
+          "targetSectionId": "faq"
+        }
+      ],
+      "ctaText": "Garantir Vaga",
+      "ctaTargetSectionId": "formSection",
+      "sticky": true,
+      "fixed": true,
+      "height": "medium",
+      "bgOpacity": 90
+    },
+    "visibility": {
+      "hero": true,
+      "socialProof": true,
+      "quiz": true,
+      "bentoGrid": true,
+      "testimonials": true,
+      "formSection": true,
+      "faq": true,
+      "stickyMobileCta": true,
+      "photoGrid": true
+    },
+    "sectionOrder": [
+      "hero",
+      "socialProof",
+      "quiz",
+      "bentoGrid",
+      "testimonials",
+      "formSection",
+      "faq",
+      "photoGrid"
+    ],
+    "hero": {
+      "badgeText": "⚡ Vagas Abertas para São Paulo e Todo Brasil - Turma VIP",
+      "badgeIcon": "Zap",
+      "headline": "Escale suas Vendas High-Ticket para Múltiplos 6 Dígitos sem Depender de Lançamentos Estressantes",
+      "subheadline": "O método People-Proof de tráfego direto e funis perpétuos utilizado pelos maiores players do mercado digital para gerar vendas previsíveis todos os dias.",
+      "mediaType": "video",
+      "videoUrl": "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=0",
+      "videoThumbnail": "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
+      "imageUrl": "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
+      "ctaText": "QUERO FAZER O DIAGNÓSTICO GRATUITO",
+      "ctaSubtext": "",
+      "countdownMinutes": 14,
+      "ratingScore": "4.9/5",
+      "ratingText": "+14.850 empresários impactados e R$ 48M+ gerados",
+      "socialProofAvatars": [
+        {
+          "name": "Lucas M.",
+          "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
+        },
+        {
+          "name": "Beatriz R.",
+          "avatarUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80"
+        },
+        {
+          "name": "Carlos E.",
+          "avatarUrl": "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80"
+        },
+        {
+          "name": "Mariana S.",
+          "avatarUrl": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80"
+        }
+      ],
+      "model": "survey_hero_light"
+    },
+    "socialProof": {
+      "marqueeTitle": "MÉTODO RECONHECIDO E AVALIADO PELOS PRINCIPAIS VEÍCULOS DE NEGÓCIOS",
+      "metrics": [
+        {
+          "id": "m1",
+          "value": "+R$ 48.7M",
+          "label": "Faturamento Gerado",
+          "sublabel": "Pelos nossos mentorados em 12 meses",
+          "iconName": "TrendingUp"
+        },
+        {
+          "id": "m2",
+          "value": "3.8x",
+          "label": "ROAS Médio",
+          "sublabel": "Em campanhas de tráfego direto",
+          "iconName": "Zap"
+        },
+        {
+          "id": "m3",
+          "value": "99.4%",
+          "label": "Taxa de Aprovação",
+          "sublabel": "Base de +2.400 membros ativos",
+          "iconName": "ShieldCheck"
+        },
+        {
+          "id": "m4",
+          "value": "+14.850",
+          "label": "Negócios Acelerados",
+          "sublabel": "Em 14 países diferentes",
+          "iconName": "Users"
+        }
+      ],
+      "marqueeLogos": [
+        "Forbes Brasil",
+        "Exame",
+        "InfoMoney",
+        "Valor Econômico",
+        "G1 Negócios",
+        "TechCrunch",
+        "Hotmart Black",
+        "Kiwify High-Ticket"
+      ]
+    },
+    "quiz": {
+      "badge": "DIAGNÓSTICO PERSONALIZADO",
+      "title": "Descubra se o seu negócio está pronto para o Próximo Nível",
+      "subtitle": "Responda 3 perguntas rápidas (30 segundos) para liberar seu plano de ação personalizado e verificar disponibilidade.",
+      "questions": [
+        {
+          "id": "q1",
+          "question": "Qual é a sua faixa de faturamento mensal atual?",
+          "description": "Isso define em qual esteira de aceleração você será alocado.",
+          "options": [
+            {
+              "id": "opt_1",
+              "label": "Até R$ 10.000 / mês",
+              "iconName": "TrendingUp",
+              "badge": "Fase de Validação"
+            },
+            {
+              "id": "opt_2",
+              "label": "De R$ 10.000 a R$ 50.000 / mês",
+              "iconName": "Rocket",
+              "badge": "Fase de Tração"
+            },
+            {
+              "id": "opt_3",
+              "label": "De R$ 50.000 a R$ 200.000 / mês",
+              "iconName": "Zap",
+              "badge": "Fase de Escala"
+            },
+            {
+              "id": "opt_4",
+              "label": "Acima de R$ 200.000 / mês",
+              "iconName": "Award",
+              "badge": "Fase de Domínio"
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "question": "Qual é o maior gargalo do seu negócio hoje?",
+          "description": "Onde sua operação mais perde dinheiro e energia.",
+          "options": [
+            {
+              "id": "opt_g1",
+              "label": "Custo por lead alto e tráfego instável",
+              "iconName": "BarChart3"
+            },
+            {
+              "id": "opt_g2",
+              "label": "Poucas conversões na página de vendas",
+              "iconName": "Target"
+            },
+            {
+              "id": "opt_g3",
+              "label": "Dificuldade de vender ofertas acima de R$ 3.000",
+              "iconName": "Sparkles"
+            },
+            {
+              "id": "opt_g4",
+              "label": "Falta de processo de vendas previsível",
+              "iconName": "CheckCircle"
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "question": "Em quanto tempo você quer implementar esse novo ecossistema?",
+          "description": "Definimos o ritmo da mentoria de acordo com a sua urgência.",
+          "options": [
+            {
+              "id": "opt_t1",
+              "label": "Imediatamente (nos próximos 7 a 14 dias)",
+              "iconName": "Zap",
+              "badge": "Prioridade VIP"
+            },
+            {
+              "id": "opt_t2",
+              "label": "No próximo mês",
+              "iconName": "CheckCircle"
+            },
+            {
+              "id": "opt_t3",
+              "label": "Apenas pesquisando estratégias",
+              "iconName": "Users"
+            }
+          ]
+        }
+      ],
+      "resultTitle": "Diagnóstico Concluído: Seu Perfil é 100% Compatível!",
+      "resultDescription": "Identificamos que você pode multiplicar suas margens de lucro aplicando nossa esteira de conversão imediata."
+    },
+    "bentoGrid": {
+      "badge": "ARQUITETURA DO MÉTODO",
+      "title": "Como funciona a Engenharia de Escala People CRO",
+      "subtitle": "Um método validado em mais de 100 nichos, dividido em 4 pilares inegociáveis de crescimento acelerado.",
+      "items": [
+        {
+          "id": "b1",
+          "size": "large",
+          "title": "Funil de VSL Hipnótica & Vendas Diárias",
+          "description": "Criamos a estrutura narrativa de alta conversão para transformar tráfego frio em compradores de ofertas de ticket médio e alto sem fricção.",
+          "tag": "Pilar 01 • Conversão",
+          "iconName": "Zap",
+          "metric": "+340% Conversão",
+          "imageUrl": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=600&q=80"
+        },
+        {
+          "id": "b2",
+          "size": "standard",
+          "title": "Qualificação Automática de Leads",
+          "description": "Filtre curiosos antes que eles falem com seu time comercial através de quizzes inteligentes que geram desejo imediato.",
+          "tag": "Pilar 02 • Eficiência",
+          "iconName": "Target",
+          "metric": "Leads 4x mais qualificados"
+        },
+        {
+          "id": "b3",
+          "size": "standard",
+          "title": "Scripts de Fechamento High-Ticket",
+          "description": "Modelos prontos de condução no WhatsApp e reuniões de 20 minutos com taxa de fechamento superior a 42%.",
+          "tag": "Pilar 03 • Vendas",
+          "iconName": "CheckCircle",
+          "metric": "42% Taxa de Close"
+        },
+        {
+          "id": "b4",
+          "size": "wide",
+          "title": "Tráfego Direto Regionalizado & Escala Preditiva",
+          "description": "Anúncios desenhados sob medida para as dores locais do seu público, com CPA reduzido e máxima entrega dos algoritmos da Meta e Google.",
+          "tag": "Pilar 04 • Aquisição",
+          "iconName": "TrendingUp",
+          "metric": "CPA 58% Menor",
+          "imageUrl": "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=800&q=80"
+        }
+      ]
+    },
+    "testimonials": {
+      "badge": "PROVA SOCIAL INCONTESTÁVEL",
+      "title": "Resultados Reais de Quem Decidiu Escalar com Método",
+      "subtitle": "Confira os depoimentos em vídeo e números reais auditados de nossos mentorados.",
+      "items": [
+        {
+          "id": "t1",
+          "name": "Dr. Rodrigo Alcantara",
+          "role": "Fundador",
+          "companyOrCity": "Instituto Alcantara • São Paulo, SP",
+          "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80",
+          "rating": 5,
+          "content": "Saímos de R$ 45 mil por mês para mais de R$ 380 mil em apenas 4 meses de implementação. O funil de qualificação mudou completamente a qualidade dos pacientes que chegam na clínica.",
+          "resultHighlight": "De R$ 45k para R$ 380k/mês",
+          "verified": true,
+          "videoUrl": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+          "videoDuration": "2:14 min"
+        },
+        {
+          "id": "t2",
+          "name": "Camila Vianna",
+          "role": "CEO & Mentora",
+          "companyOrCity": "Vianna Consulting • Rio de Janeiro, RJ",
+          "avatarUrl": "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&q=80",
+          "rating": 5,
+          "content": "O Bento Grid e a esteira de WhatsApp nos permitiram vender mentorias individuais de R$ 12.000 sem precisar fazer webinars desgastantes toda semana. O retorno sobre investimento foi imediato.",
+          "resultHighlight": "+R$ 1.2M faturados em 2025",
+          "verified": true,
+          "videoUrl": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+          "videoDuration": "1:48 min"
+        },
+        {
+          "id": "t3",
+          "name": "Guilherme Sampaio",
+          "role": "Co-Founder",
+          "companyOrCity": "SaaS Scale • Curitiba, PR",
+          "avatarUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80",
+          "rating": 5,
+          "content": "A integração dos quizzes com nosso webhook do n8n automatizou 100% da triagem dos leads. Nosso time comercial hoje só fala com quem já tem cartão na mão pronto para comprar.",
+          "resultHighlight": "Taxa de conversão subiu de 1.8% para 6.4%",
+          "verified": true,
+          "videoUrl": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+          "videoDuration": "3:05 min"
+        }
+      ]
+    },
+    "formSection": {
+      "badge": "ETAPA FINAL: GARANTA SEU ACESSO",
+      "title": "Preencha seus dados para receber o diagnóstico e o acesso imediato",
+      "subtitle": "Nosso time de estrategistas entrará em contato via WhatsApp em menos de 10 minutos com o seu plano de ação.",
+      "ctaButtonText": "QUERO GARANTIR MINHA VAGA AGORA",
+      "guaranteeDays": 15,
+      "guaranteeText": "Garantia Incondicional de 15 Dias: se você aplicar o método e não ver resultados claros, devolvemos 100% do valor pago sem burocracia.",
+      "securityBadges": [
+        "Criptografia SSL 256-bit ponta a ponta",
+        "Atendimento Humano Imediato via WhatsApp",
+        "Acesso Imediato ao Portal VIP",
+        "Certificado Internacional de Conclusão"
+      ],
+      "offerPrice": "R$ 1.997",
+      "originalPrice": "R$ 4.997",
+      "installmentsText": "ou 12x de R$ 199,70 no cartão de crédito",
+      "whatsappHelpNumber": "+55 11 99999-9999"
+    },
+    "faq": [
+      {
+        "id": "f1",
+        "question": "Para quem é indicado este método de aceleração?",
+        "answer": "É desenhado exclusivamente para profissionais, donos de negócios e especialistas que já possuem uma oferta validada e querem escalar suas vendas com previsibilidade e lucro elevado."
+      },
+      {
+        "id": "f2",
+        "question": "Como funciona a integração com meus sistemas (n8n, CRM, Typebot)?",
+        "answer": "O formulário e os dados do quiz são disparados instantaneamente via Webhook HTTP POST para qualquer ferramenta que você utilize, com todas as tags de UTM e respostas organizadas."
+      },
+      {
+        "id": "f3",
+        "question": "E se eu não gostar ou não conseguir aplicar?",
+        "answer": "Você tem 15 dias de garantia total incondicional. Basta um simples e-mail ou mensagem no WhatsApp para receber 100% do seu dinheiro de volta."
+      },
+      {
+        "id": "f4",
+        "question": "Em quanto tempo começo a ver os primeiros resultados?",
+        "answer": "A maioria dos nossos membros implementa a nova estrutura nos primeiros 7 dias e começa a captar leads qualificados logo na primeira semana de veiculação."
+      }
+    ],
+    "accentShade": "600",
+    "photoGrid": {
+      "badge": "GALERIA VISUAL & PROJETOS",
+      "title": "PORTFOLIO EXPLORATION",
+      "subtitle": "Conheça alguns dos trabalhos, projetos e soluções desenvolvidas com excelência estética e foco em resultados.",
+      "photoCount": 6,
+      "columns": 3,
+      "layoutStyle": "cards",
+      "items": [
+        {
+          "id": "photo-1",
+          "imageUrl": "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=800&q=80",
+          "title": "Interface de Plataforma Web & Dashboard",
+          "caption": "Desenvolvimento de interface modular para software SaaS, otimizando usabilidade e tempo de execução das tarefas em 45%.",
+          "tag": "UI/UX & Web",
+          "linkText": "Ver Projeto"
+        },
+        {
+          "id": "photo-2",
+          "imageUrl": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80",
+          "title": "Identidade Visual & Direção Criativa",
+          "caption": "Rebranding completo com paleta cromática exclusiva, tipografia sob medida e manual de aplicação para expansão global.",
+          "tag": "Branding",
+          "linkText": "Ver Projeto"
+        },
+        {
+          "id": "photo-3",
+          "imageUrl": "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80",
+          "title": "Ensaio Fotográfico & Direção de Arte",
+          "caption": "Produção visual de alto impacto para catálogo de lançamento, com iluminação cinematográfica e pós-produção refinada.",
+          "tag": "Fotografia",
+          "linkText": "Ver Projeto"
+        },
+        {
+          "id": "photo-4",
+          "imageUrl": "https://images.unsplash.com/photo-1522542550221-31fd19575a2d?auto=format&fit=crop&w=800&q=80",
+          "title": "Aplicativo Mobile de Alta Conversão",
+          "caption": "Design de aplicativo nativo com fluxos intuitivos de onboarding, microinterações fluidas e taxa de retenção de 92%.",
+          "tag": "Mobile App",
+          "linkText": "Ver Projeto"
+        },
+        {
+          "id": "photo-5",
+          "imageUrl": "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=800&q=80",
+          "title": "Arquitetura Frontend & Landing Page CRO",
+          "caption": "Página de captura ultrarrápida desenvolvida com padrões de alta conversão, gerando +350 leads qualificados na primeira semana.",
+          "tag": "Engenharia",
+          "linkText": "Ver Projeto"
+        },
+        {
+          "id": "photo-6",
+          "imageUrl": "https://images.unsplash.com/photo-1581291518857-4e27b48ff24e?auto=format&fit=crop&w=800&q=80",
+          "title": "Consultoria de Design System & Escala",
+          "caption": "Padronização de componentes reutilizáveis, documentação completa em Figma e alinhamento de design tokens com o time de engenharia.",
+          "tag": "Design System",
+          "linkText": "Ver Projeto"
+        }
+      ]
+    }
+  },
+  {
+    "id": "lp_ai_mentoria_cro",
+    "title": "Mentoria High-Ticket & CRO",
+    "name": "Mentoria High-Ticket & CRO",
+    "slug": "mentoria-high-ticket-cro",
+    "status": "published",
+    "visits": 30,
+    "viewsCount": 30,
+    "views_count": 30,
+    "leads": 30,
+    "leads_count": 30,
+    "conv": 1,
+    "type": "COMET CRO",
+    "updated_at": "2026-11-16T17:15:17.588Z"
   }
 ]

@@ -9,10 +9,9 @@ import {
   pushToGoogleDrive,
   fetchFromGoogleDrive,
   forceReadSpreadsheetFromDrive,
-  getLocalDatabaseRoot,
-  saveLocalDatabaseRoot,
   DriveFileInfo 
 } from './googleDriveDatabaseService';
+import { cloudStore } from '@/services/cloudStorageService';
 import { 
   Cloud, 
   Save, 
@@ -52,6 +51,7 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
   onDataRestored
 }) => {
   const [webappUrl, setWebappUrl] = useState('');
+  const [apiToken, setApiToken] = useState('');
   const [autoSync, setAutoSync] = useState(true);
   const [checkpoints, setCheckpoints] = useState<DriveFileInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,6 +68,7 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
     if (isOpen) {
       const config = getDriveConfig();
       setWebappUrl(config.webappUrl || '');
+      setApiToken(config.apiToken || '');
       setAutoSync(config.autoSync ?? true);
       setSpreadsheetUrl(config.spreadsheetUrl);
       if (config.webappUrl) {
@@ -96,7 +97,7 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
     try {
       setTesting(true);
       setStatusMessage({ text: 'Testando conexão com o Google Apps Script...', type: 'info' });
-      const res = await testDriveConnection(webappUrl);
+      const res = await testDriveConnection(webappUrl, apiToken.trim() || undefined);
       if (res.success) {
         setStatusMessage({ text: res.message || 'Conexão ativa com sucesso no Google Drive!', type: 'success' });
         if (res.spreadsheetUrl) setSpreadsheetUrl(res.spreadsheetUrl);
@@ -116,7 +117,7 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
       setStatusMessage({ text: 'Informe a URL do Apps Script primeiro.', type: 'error' });
       return;
     }
-    saveDriveConfig({ webappUrl, autoSync });
+    saveDriveConfig({ webappUrl, apiToken: apiToken.trim() || undefined, autoSync });
     setStatusMessage({ text: 'Configuração salva com sucesso! Sincronização configurada.', type: 'success' });
     carregarCheckpoints(webappUrl);
   };
@@ -163,21 +164,11 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
     }
     try {
       setSyncingDown(true);
-      // Limpa chaves de exclusão locais legadas para importar tudo da planilha sem bloqueios
-      if (typeof window !== "undefined") {
-        try {
-          const keysToRemove: string[] = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith("deleted_") || key.includes("deleted_lps") || key.includes("deleted_leads"))) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach(k => localStorage.removeItem(k));
-        } catch {}
-      }
+      cloudStore.mutate((draft) => {
+        draft.deletedLpIds = [];
+      }, { skipPush: true });
 
-      const remoteData = await forceReadSpreadsheetFromDrive<any>(webappUrl.trim());
+      const remoteData = await cloudStore.pullNow(true);
 
       // Mescla com a API local de leads
       try {
@@ -186,28 +177,23 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
           const rawApi = await localLeadsRes.json();
           const leadsFromApi = Array.isArray(rawApi) ? rawApi : (Array.isArray(rawApi?.leads) ? rawApi.leads : []);
           if (leadsFromApi.length > 0) {
-            const currentRoot = getLocalDatabaseRoot() || {};
-            const existingLeads = Array.isArray(currentRoot.leads) ? currentRoot.leads : [];
-            const ids = new Set(existingLeads.map((l: any) => l.id));
-            leadsFromApi.forEach((l: any) => {
-              if (!ids.has(l.id)) {
-                existingLeads.push(l);
-              }
-            });
-            currentRoot.leads = existingLeads;
-            saveLocalDatabaseRoot(currentRoot);
+            cloudStore.mutate((draft) => {
+              const existingLeads = Array.isArray(draft.leads) ? [...draft.leads] : [];
+              const ids = new Set(existingLeads.map((l: any) => l.id));
+              leadsFromApi.forEach((l: any) => {
+                if (!ids.has(l.id)) {
+                  existingLeads.push(l);
+                }
+              });
+              draft.leads = existingLeads;
+            }, { skipPush: true });
           }
         }
       } catch {}
 
-      if (remoteData) {
-        onDataRestored(remoteData);
-      }
+      onDataRestored(remoteData || cloudStore.getState());
       setStatusMessage({ text: 'Leitura completa do Google Sheets e Apps Script concluída com sucesso!', type: 'success' });
-      toast.success('Leitura completa realizada! Atualizando tela...');
-      setTimeout(() => {
-        window.location.reload();
-      }, 800);
+      toast.success('Leitura completa realizada em tempo real!');
     } catch (err: any) {
       setStatusMessage({ text: 'Erro ao ler dados da planilha: ' + err.message, type: 'error' });
     } finally {
@@ -367,6 +353,23 @@ export const DriveSyncManagerModal: React.FC<DriveSyncManagerModalProps> = ({
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   Cole aqui a URL gerada na publicação do Web App com permissão "Qualquer pessoa" (Anyone).
+                </p>
+              </div>
+
+              {/* Chave de Segurança Opcional (API Token) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Chave de Segurança / Token de API (Opcional):
+                </label>
+                <input
+                  type="password"
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                  placeholder="Ex: seu_token_secreto_aqui (Opcional)"
+                  className="w-full bg-muted/40 border border-border rounded-xl px-3.5 py-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 font-mono"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Se você configurou API_SECRET no Apps Script, informe a chave aqui para autenticar as requisições.
                 </p>
               </div>
 
