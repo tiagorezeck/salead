@@ -192,7 +192,15 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
     }
 
     if (candidates.length > 0) {
-      candidates.sort((a, b) => getLpTs(b) - getLpTs(a));
+      candidates.sort((a, b) => {
+        const diff = getLpTs(b) - getLpTs(a);
+        if (diff !== 0) return diff;
+        const aModel = a.hero?.model || (a as any).heroModel || (a as any).hero_model || "split_image";
+        const bModel = b.hero?.model || (b as any).heroModel || (b as any).hero_model || "split_image";
+        if (bModel !== "split_image" && aModel === "split_image") return 1;
+        if (aModel !== "split_image" && bModel === "split_image") return -1;
+        return 0;
+      });
       return candidates[0];
     }
   } catch {}

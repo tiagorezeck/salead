@@ -286,8 +286,6 @@ function mergeLandingPageLists(
     const existingTime = getLpTimestampMs(existing);
     const remoteTime = Math.max(getLpTimestampMs(rawRemote), getLpTimestampMs(parsedConfig));
 
-    const preferExisting = Boolean(existing && existingTime > remoteTime);
-
     const remoteHeroModel =
       rawRemote.heroModel ||
       rawRemote.hero?.model ||
@@ -297,6 +295,15 @@ function mergeLandingPageLists(
 
     const existingHeroModel =
       existing?.heroModel || existing?.hero?.model || existing?.hero_model;
+
+    const preferExisting = Boolean(
+      existing &&
+        (existingTime > remoteTime ||
+          (existingTime === remoteTime &&
+            existingHeroModel &&
+            existingHeroModel !== "split_image" &&
+            (!remoteHeroModel || remoteHeroModel === "split_image")))
+    );
 
     const chosenHeroModel = preferExisting
       ? (existingHeroModel || remoteHeroModel || "split_image")
@@ -320,6 +327,7 @@ function mergeLandingPageLists(
       ...primary,
       id: remoteId,
       heroModel: chosenHeroModel,
+      hero_model: chosenHeroModel,
       hero: mergedHero,
       quiz: primary.quiz || secondary.quiz,
       bentoGrid: primary.bentoGrid || secondary.bentoGrid,
@@ -873,14 +881,24 @@ class CloudStorageService {
     const capturedDirty = this.status.dirtyRevision;
     this.emit(true);
 
-    // 2. Persiste instantaneamente no cache de preview do servidor (sub-10ms para /preview e /lp/:id)
-    if (typeof window !== "undefined") {
-      fetch("/api/pages/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(normalized),
-      }).catch(() => {});
-    }
+    // 2. Persiste instantaneamente no cache de preview do servidor e endpoint REST da LP
+    const serverPreviewSyncPromise =
+      typeof window !== "undefined"
+        ? Promise.allSettled([
+            fetch("/api/pages/preview", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(normalized),
+            }),
+            normalized.id
+              ? fetch(`/api/landing-pages/${encodeURIComponent(normalized.id)}`, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(normalized),
+                })
+              : Promise.resolve(),
+          ])
+        : Promise.resolve([]);
 
     const executeSingleSave = async (): Promise<boolean> => {
       try {
@@ -888,7 +906,10 @@ class CloudStorageService {
         this.status.syncing = true;
         this.emit(false);
 
-        const driveRes = await saveLandingPageToDrive(normalized);
+        const [driveRes] = await Promise.all([
+          saveLandingPageToDrive(normalized),
+          serverPreviewSyncPromise,
+        ]);
         if (driveRes.supported) {
           this.status.lastPushTimestamp = Date.now();
           this.status.lastSyncTimestamp = Date.now();
@@ -972,42 +993,83 @@ class CloudStorageService {
 
     const run = (async (): Promise<LandingPage | null> => {
       await initializeSharedDriveConfig().catch(() => {});
-      const cloudLp = await fetchPublicLpFromDrive(idOrSlug, {
-        directSheets: options.preferSheets === true,
-      });
 
-      if (cloudLp) {
+      const fetchServerApi = async (): Promise<LandingPage | null> => {
+        if (typeof window === "undefined") return null;
+        try {
+          const controller = new AbortController();
+          const t = setTimeout(() => controller.abort(), 4500);
+          const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          clearTimeout(t);
+          if (res.ok) {
+            const json = await res.json();
+            const found = json?.landingPage || json?.page || json;
+            if (found && (found.id || found.title || found.hero)) {
+              const m = found.hero?.model || found.heroModel || found.hero_model || "split_image";
+              return {
+                ...found,
+                heroModel: m,
+                hero_model: m,
+                hero: found.hero ? { ...found.hero, model: m } : { model: m },
+              };
+            }
+          }
+        } catch {}
+        return null;
+      };
+
+      // Executa consulta Drive/Sheets e /api/public/lp em paralelo (máximo 1 ciclo de rede)
+      const [driveSettled, apiSettled] = await Promise.allSettled([
+        fetchPublicLpFromDrive(idOrSlug, {
+          directSheets: options.preferSheets === true,
+        }),
+        fetchServerApi(),
+      ]);
+
+      const cloudLp = driveSettled.status === "fulfilled" ? driveSettled.value : null;
+      const apiLp = apiSettled.status === "fulfilled" ? apiSettled.value : null;
+
+      let chosen: LandingPage | null = null;
+      if (cloudLp && apiLp) {
+        const cTs = getLpTimestampMs(cloudLp);
+        const aTs = getLpTimestampMs(apiLp);
+        const cModel = cloudLp.hero?.model || cloudLp.heroModel || "split_image";
+        const aModel = apiLp.hero?.model || apiLp.heroModel || "split_image";
+        if (aTs > cTs || (aTs === cTs && aModel !== "split_image" && cModel === "split_image")) {
+          chosen = apiLp;
+        } else {
+          chosen = cloudLp;
+        }
+      } else {
+        chosen = cloudLp || apiLp;
+      }
+
+      if (chosen) {
         const ramTime = getLpTimestampMs(fromRam);
-        const cloudTime = getLpTimestampMs(cloudLp);
+        const chosenTime = getLpTimestampMs(chosen);
+        const ramModel = fromRam?.hero?.model || fromRam?.heroModel || "split_image";
+        const chosenModel = chosen.hero?.model || chosen.heroModel || "split_image";
 
-        if (!fromRam || !this.status.loadedFromCloud || cloudTime >= ramTime) {
+        if (
+          !fromRam ||
+          !this.status.loadedFromCloud ||
+          chosenTime > ramTime ||
+          (chosenTime === ramTime && (chosenModel !== "split_image" || ramModel === chosenModel))
+        ) {
           this.db.landingPages = [
-            cloudLp,
-            ...this.db.landingPages.filter((p) => p.id !== cloudLp.id),
+            chosen,
+            ...this.db.landingPages.filter((p) => p.id !== chosen!.id),
           ];
           this.emit(false);
-          return cloudLp;
+          return chosen;
         }
         return fromRam;
       }
 
-      if (fromRam) return fromRam;
-
-      // Fallback API local /api/public/lp/:id
-      try {
-        const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
-          cache: "no-store",
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const found = json?.landingPage || json?.page || json;
-          if (found && (found.id || found.title || found.hero)) {
-            return found;
-          }
-        }
-      } catch {}
-
-      return null;
+      return fromRam || null;
     })().finally(() => {
       this.publicLpInflight.delete(inflightKey);
     });

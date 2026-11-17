@@ -102,6 +102,8 @@ type DeviceView = "desktop" | "tablet" | "mobile";
 export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBackToDashboard }) => {
   const { surveys = [], products = [] } = useData();
   const [page, setPage] = useState<LandingPage>(initialPage);
+  const pageRef = useRef<LandingPage>(initialPage);
+  pageRef.current = page;
   const [activeTab, setActiveTab] = useState<EditorTab>("content");
   const [activeSectionEdit, setActiveSectionEdit] = useState<string>("hero");
   const [deviceView, setDeviceView] = useState<DeviceView>("desktop");
@@ -115,6 +117,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
   // Sync page state when a different LP is opened
   useEffect(() => {
     if (initialPage && initialPage.id) {
+      pageRef.current = initialPage;
       setPage(initialPage);
       historyRef.current = [JSON.parse(JSON.stringify(initialPage))];
       historyIndexRef.current = 0;
@@ -209,6 +212,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
         historyIndexRef.current = prevIdx;
         isUndoRedoActionRef.current = true;
         const cloned = JSON.parse(JSON.stringify(target));
+        pageRef.current = cloned;
         setPage(cloned);
         setCanUndo(prevIdx > 0);
         setCanRedo(prevIdx < historyRef.current.length - 1);
@@ -225,6 +229,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
         historyIndexRef.current = nextIdx;
         isUndoRedoActionRef.current = true;
         const cloned = JSON.parse(JSON.stringify(target));
+        pageRef.current = cloned;
         setPage(cloned);
         setCanUndo(nextIdx > 0);
         setCanRedo(nextIdx < historyRef.current.length - 1);
@@ -294,18 +299,21 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
   const handleSave = async () => {
     setSaveStatus("saving");
-    const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
+    const current = pageRef.current;
+    const activeHeroModel = current.hero?.model || current.heroModel || current.hero_model || "split_image";
     const nowIso = new Date().toISOString();
-    const updatedPageWithTimestamp: any = {
-      ...page,
+    const updatedPageWithTimestamp: LandingPage = {
+      ...current,
       heroModel: activeHeroModel,
+      hero_model: activeHeroModel,
       hero: {
-        ...page.hero,
+        ...current.hero,
         model: activeHeroModel,
       },
       updatedAt: nowIso,
       updated_at: nowIso,
     };
+    pageRef.current = updatedPageWithTimestamp;
     setPage(updatedPageWithTimestamp);
     try {
       await Promise.resolve(onSave(updatedPageWithTimestamp));
@@ -317,14 +325,14 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
   };
 
   const handleExportHtml = () => {
-    // Explicitly persist current editor page state to parent/local storage
-    onSave(page);
-    const htmlContent = generateStandaloneHtml(page);
+    const current = pageRef.current;
+    onSave(current);
+    const htmlContent = generateStandaloneHtml(current);
     const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${page.slug || "landing-page"}.html`;
+    a.download = `${current.slug || "landing-page"}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -342,57 +350,57 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
     updater: (prev: LandingPage) => LandingPage,
     options: { immediateSave?: boolean } = {}
   ) => {
-    setPage((prev) => {
-      const updated = updater(prev);
-      const nowIso = new Date().toISOString();
-      const heroModelChanged =
-        (updated as any).heroModel && (updated as any).heroModel !== (prev as any).heroModel;
-      const heroObjModelChanged =
-        updated.hero?.model && updated.hero.model !== prev.hero?.model;
-      const syncedHeroModel = heroObjModelChanged
-        ? updated.hero!.model
-        : heroModelChanged
-          ? (updated as any).heroModel
-          : (updated.hero?.model || (updated as any).heroModel || "split_image");
+    const prev = pageRef.current;
+    const updated = updater(prev);
+    const nowIso = new Date().toISOString();
+    const heroModelChanged =
+      updated.heroModel && updated.heroModel !== prev.heroModel;
+    const heroObjModelChanged =
+      updated.hero?.model && updated.hero.model !== prev.hero?.model;
+    const syncedHeroModel = heroObjModelChanged
+      ? updated.hero!.model
+      : heroModelChanged
+        ? updated.heroModel
+        : (updated.hero?.model || updated.heroModel || updated.hero_model || "split_image");
 
-      const withTime: LandingPage & { updated_at?: string } = {
-        ...updated,
-        heroModel: syncedHeroModel,
-        hero: updated.hero ? { ...updated.hero, model: syncedHeroModel } : updated.hero,
-        updatedAt: nowIso,
-        updated_at: nowIso,
-      };
+    const withTime: LandingPage = {
+      ...updated,
+      heroModel: syncedHeroModel,
+      hero_model: syncedHeroModel,
+      hero: updated.hero ? { ...updated.hero, model: syncedHeroModel } : updated.hero,
+      updatedAt: nowIso,
+      updated_at: nowIso,
+    };
 
-      // Persiste imediatamente em RAM + /api/pages/preview + fila atômica de 1 LP no Google Sheets
-      if (typeof window !== "undefined") {
-        cloudStore
-          .saveLandingPageOnly(withTime as any, { immediate: options.immediateSave === true })
-          .catch(() => {});
-      }
+    pageRef.current = withTime;
+    setPage(withTime);
 
-      // Update history safely without closure traps
-      if (isUndoRedoActionRef.current) {
-        isUndoRedoActionRef.current = false;
-      } else {
-        try {
-          const cloned = JSON.parse(JSON.stringify(withTime));
-          const currentIdx = historyIndexRef.current;
-          const nextHistory = historyRef.current.slice(0, currentIdx + 1);
-          nextHistory.push(cloned);
-          if (nextHistory.length > 50) {
-            nextHistory.shift();
-          }
-          historyRef.current = nextHistory;
-          historyIndexRef.current = nextHistory.length - 1;
-          setCanUndo(historyIndexRef.current > 0);
-          setCanRedo(false);
-        } catch (err) {
-          console.error("Error saving undo/redo history snapshot:", err);
+    // Persiste fora do state updater (sem efeitos colaterais dentro de setPage)
+    if (typeof window !== "undefined") {
+      cloudStore
+        .saveLandingPageOnly(withTime as any, { immediate: options.immediateSave === true })
+        .catch(() => {});
+    }
+
+    if (isUndoRedoActionRef.current) {
+      isUndoRedoActionRef.current = false;
+    } else {
+      try {
+        const cloned = JSON.parse(JSON.stringify(withTime));
+        const currentIdx = historyIndexRef.current;
+        const nextHistory = historyRef.current.slice(0, currentIdx + 1);
+        nextHistory.push(cloned);
+        if (nextHistory.length > 50) {
+          nextHistory.shift();
         }
+        historyRef.current = nextHistory;
+        historyIndexRef.current = nextHistory.length - 1;
+        setCanUndo(historyIndexRef.current > 0);
+        setCanRedo(false);
+      } catch (err) {
+        console.error("Error saving undo/redo history snapshot:", err);
       }
-
-      return withTime;
-    });
+    }
   };
 
   const handleOpenVisualModalForElement = (elementId: string) => {
@@ -778,18 +786,21 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
           {/* Link Teste (Network Preview / Share Modal) */}
           <button
             onClick={async () => {
-              const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
+              const current = pageRef.current;
+              const activeHeroModel = current.hero?.model || current.heroModel || current.hero_model || "split_image";
               const nowIso = new Date().toISOString();
-              const updatedPageWithTimestamp: any = {
-                ...page,
+              const updatedPageWithTimestamp: LandingPage = {
+                ...current,
                 heroModel: activeHeroModel,
+                hero_model: activeHeroModel,
                 hero: {
-                  ...page.hero,
+                  ...current.hero,
                   model: activeHeroModel,
                 },
                 updatedAt: nowIso,
                 updated_at: nowIso,
               };
+              pageRef.current = updatedPageWithTimestamp;
               setPage(updatedPageWithTimestamp);
               setIsNetworkPreviewOpen(true);
               await Promise.resolve(onSave(updatedPageWithTimestamp)).catch(() => {});
@@ -807,14 +818,16 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
               const nextPreview = !isPreviewMode;
               setIsPreviewMode(nextPreview);
               if (nextPreview) {
-                const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
+                const current = pageRef.current;
+                const activeHeroModel = current.hero?.model || current.heroModel || current.hero_model || "split_image";
                 const nowIso = new Date().toISOString();
                 cloudStore
                   .saveLandingPageOnly(
                     {
-                      ...page,
+                      ...current,
                       heroModel: activeHeroModel,
-                      hero: { ...page.hero, model: activeHeroModel },
+                      hero_model: activeHeroModel,
+                      hero: { ...current.hero, model: activeHeroModel },
                       updatedAt: nowIso,
                       updated_at: nowIso,
                     } as any,
@@ -2180,7 +2193,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                           className="px-2.5 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
                           <Sliders className="w-3 h-3 text-purple-400" />
-                          <span>Mudar Modelo (6)</span>
+                          <span>Mudar Modelo (14)</span>
                         </button>
                       </div>
 
@@ -2197,12 +2210,16 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                           value={page.hero.model || page.heroModel || "split_image"}
                           onChange={(e) => {
                             const selectedModel = e.target.value as HeroModel;
-                            updatePage((p) => ({
-                              ...p,
-                              heroModel: selectedModel,
-                              hero: { ...p.hero, model: selectedModel },
-                            }));
-                            showNotification(`Modelo "${HERO_MODELS.find((m) => m.id === selectedModel)?.title || selectedModel}" aplicado!`);
+                            updatePage(
+                              (p) => ({
+                                ...p,
+                                heroModel: selectedModel,
+                                hero_model: selectedModel,
+                                hero: { ...p.hero, model: selectedModel },
+                              }),
+                              { immediateSave: true }
+                            );
+                            showNotification(`Modelo "${HERO_MODELS.find((m) => m.id === selectedModel)?.title || selectedModel}" aplicado e salvo!`);
                           }}
                           className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white focus:border-purple-500 focus:outline-none"
                         >
@@ -4321,7 +4338,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
         isOpen={isNetworkPreviewOpen}
         onClose={() => setIsNetworkPreviewOpen(false)}
         page={page}
-        onUpdatePage={(updatedPage) => updatePage(() => updatedPage)}
+        onUpdatePage={(updatedPage) => updatePage(() => updatedPage, { immediateSave: true })}
       />
 
       {/* LANAI Assistant Modal */}
@@ -4329,7 +4346,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
         isOpen={isLanBotOpen}
         onClose={() => setIsLanBotOpen(false)}
         page={page}
-        onUpdatePage={(updatedPage) => updatePage(() => updatedPage)}
+        onUpdatePage={(updatedPage) => updatePage(() => updatedPage, { immediateSave: true })}
       />
     </div>
   );

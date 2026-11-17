@@ -79,7 +79,12 @@
     "whatsappNumbers": [
       "11999999999"
     ],
-    "descriptionColor": "#c4c4ca"
+    "descriptionColor": "#c4c4ca",
+    "heroModel": "split_image",
+    "hero": {
+      "model": "split_image"
+    },
+    "updatedAt": "2026-09-13T17:45:00.000Z"
   },
   {
     "id": "8fe0281b-fc17-47e6-a25d-cec570000d17",
@@ -543,6 +548,10 @@
     "conv": 1,
     "type": "COMET CRO",
     "updatedAt": "2026-10-24T23:46:28.897Z",
-    "updated_at": "2026-10-24T23:46:28.897Z"
+    "updated_at": "2026-10-24T23:46:28.897Z",
+    "heroModel": "split_image",
+    "hero": {
+      "model": "split_image"
+    }
   }
 ]

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
+import { GLOBAL_GAS_CONFIG, normalizeGasUrl } from "../src/config/gasConfig";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://zhyihwtgsctlpzspgsop.supabase.co";
 const SUPABASE_KEY =
@@ -22,7 +23,7 @@ function getSystemDriveUrl(): string {
     if (fs.existsSync(configPath)) {
       const raw = fs.readFileSync(configPath, "utf-8");
       const cfg = JSON.parse(raw);
-      if (cfg && cfg.webappUrl) return cfg.webappUrl;
+      if (cfg && cfg.webappUrl) return normalizeGasUrl(cfg.webappUrl);
     }
   } catch {}
   try {
@@ -30,10 +31,16 @@ function getSystemDriveUrl(): string {
     if (fs.existsSync(rootConfigPath)) {
       const raw = fs.readFileSync(rootConfigPath, "utf-8");
       const cfg = JSON.parse(raw);
-      if (cfg && cfg.webappUrl) return cfg.webappUrl;
+      if (cfg && cfg.webappUrl) return normalizeGasUrl(cfg.webappUrl);
     }
   } catch {}
-  return process.env.GOOGLE_DRIVE_WEBAPP_URL || "";
+  return normalizeGasUrl(
+    process.env.GAS_WEBAPP_URL ||
+      process.env.VITE_GAS_WEBAPP_URL ||
+      process.env.GOOGLE_DRIVE_WEBAPP_URL ||
+      GLOBAL_GAS_CONFIG.WEBAPP_URL ||
+      ""
+  );
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -66,11 +73,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       webhookUrl,
       source,
       metadata,
+      isTest,
     } = req.body || {};
 
     const cleanName = (name || "Lead Capturado").trim();
     const cleanWhatsapp = (whatsapp || "").trim();
     const cleanEmail = (email || "").trim();
+    const isTestFlag = Boolean(isTest || metadata?.isTest);
     const leadId = `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     const effectiveSource = source || utms?.utm_source || utms?.src || "direct";
@@ -84,12 +93,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       stage: "Leads",
       classification: "Lead",
       temperature: "Quente",
+      isTest: isTestFlag,
       tags: [effectiveSource, utms?.utm_campaign || "inbound", "comet-lp"].filter(Boolean),
       metadata: {
         capturedVia: "COMET Public Landing Page Engine",
         pageId,
         pageTitle,
         source: effectiveSource,
+        isTest: isTestFlag,
         utms: utms || {},
         answers: quizAnswers || {},
         extra: metadata || {},
@@ -97,38 +108,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     };
 
-    // 1. Tenta salvar diretamente no Supabase
+    // 1. Tenta salvar diretamente no Supabase (com timeout curto para não travar a resposta)
     let dbSuccess = false;
     try {
-      const { error: dbError } = await supabase.from("leads").insert([leadRecord]);
-      if (!dbError) {
-        dbSuccess = true;
-        
-        // Incrementa o leads_count na tabela landing_pages
-        if (pageId && isUUID(pageId)) {
-          try {
-            const { data: lpData } = await supabase.from("landing_pages").select("leads_count").eq("id", pageId).maybeSingle();
-            const currentCount = lpData?.leads_count || 0;
-            await supabase.from("landing_pages").update({ leads_count: currentCount + 1 }).eq("id", pageId);
-          } catch (lpErr) {
-            console.warn("Failed to increment landing page leads_count in serverless handler:", lpErr);
+      const supabaseOp = (async () => {
+        const { error: dbError } = await supabase.from("leads").insert([leadRecord]);
+        if (!dbError) {
+          dbSuccess = true;
+          if (pageId && isUUID(pageId)) {
+            try {
+              const { data: lpData } = await supabase.from("landing_pages").select("leads_count").eq("id", pageId).maybeSingle();
+              const currentCount = lpData?.leads_count || 0;
+              await supabase.from("landing_pages").update({ leads_count: currentCount + 1 }).eq("id", pageId);
+            } catch {}
           }
         }
-      }
+      })();
+      await Promise.race([
+        supabaseOp,
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
     } catch (e) {
       console.warn("Supabase direct insert notice:", e);
     }
 
-    // 2. Tenta sincronizar automaticamente com a planilha do Google Drive do sistema
+    // 2. Sincroniza automaticamente com a planilha do Google Drive / Apps Script do sistema
     const driveUrl = getSystemDriveUrl();
     let driveSynced = false;
     if (driveUrl && driveUrl.startsWith("http")) {
       try {
-        await fetch(driveUrl, {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const gasRes = await fetch(driveUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "SUBMIT_LP_LEAD",
+            isTest: isTestFlag,
             lead: {
               id: leadId,
               name: cleanName,
@@ -142,12 +158,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               quizAnswers: quizAnswers || {},
               utms: utms || {},
               source: effectiveSource,
+              isTest: isTestFlag,
               submittedAt: new Date().toISOString()
             }
           }),
-          redirect: "follow"
+          redirect: "follow",
+          signal: controller.signal,
         });
-        driveSynced = true;
+        clearTimeout(timeout);
+        if (gasRes.ok) {
+          driveSynced = true;
+        }
       } catch (dErr) {
         console.warn("Auto Drive sync notice:", dErr);
       }

@@ -23,6 +23,7 @@ function normalizeLp(raw: any) {
   return {
     ...raw,
     heroModel,
+    hero_model: heroModel,
     hero: raw.hero ? { ...raw.hero, model: heroModel } : { model: heroModel },
     updatedAt: ts,
     updated_at: ts,
@@ -36,9 +37,36 @@ function getTsMs(p: any): number {
   return Math.max(Number.isNaN(a) ? 0 : a, Number.isNaN(b) ? 0 : b);
 }
 
+function pickBestCandidate(memHit: any, norm: any) {
+  if (!memHit) return norm;
+  if (!norm) return memHit;
+  const memTs = getTsMs(memHit);
+  const normTs = getTsMs(norm);
+  if (memTs > normTs) return memHit;
+  if (normTs > memTs) return norm;
+  const memModel = memHit.hero?.model || memHit.heroModel || "split_image";
+  const normModel = norm.hero?.model || norm.heroModel || "split_image";
+  if (memModel !== "split_image" && normModel === "split_image") return memHit;
+  return norm;
+}
+
+function findLpInList(list: any[], queryId: string): any | null {
+  if (!Array.isArray(list) || !queryId) return null;
+  const qLow = queryId.toLowerCase();
+  return (
+    list.find(
+      (p: any) =>
+        p &&
+        (String(p.id || "").toLowerCase() === qLow ||
+          String(p.slug || "").toLowerCase() === qLow ||
+          String(p.previewToken || "").toLowerCase() === qLow)
+    ) || null
+  );
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT,DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Cache-Control", "no-store, max-age=0");
 
@@ -47,8 +75,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const queryId = String(
-    req.query.token || req.query.pageId || req.query.id || req.query.slug || ""
+    req.query.token ||
+      req.query.pageId ||
+      req.query.tokenOrId ||
+      req.query.id ||
+      req.query.slug ||
+      ""
   ).trim();
+
+  if (req.method === "DELETE") {
+    if (queryId) previewMemoryCache.delete(queryId);
+    return res.status(200).json({ success: true });
+  }
 
   if (req.method === "GET") {
     if (!queryId) {
@@ -83,19 +121,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const parsed = JSON.parse(rawText);
           let candidate = parsed?.landingPage || parsed?.lp || parsed?.page;
           if (!candidate && Array.isArray(parsed?.landingPages)) {
-            const qLow = queryId.toLowerCase();
-            candidate = parsed.landingPages.find(
-              (p: any) =>
-                p &&
-                (String(p.id || "").toLowerCase() === qLow ||
-                  String(p.slug || "").toLowerCase() === qLow ||
-                  String(p.previewToken || "").toLowerCase() === qLow)
-            );
+            candidate = findLpInList(parsed.landingPages, queryId);
+          }
+          if (!candidate && parsed?.database && Array.isArray(parsed.database.landingPages)) {
+            candidate = findLpInList(parsed.database.landingPages, queryId);
           }
           if (candidate && candidate.id) {
             const norm = normalizeLp(candidate);
-            const best =
-              memHit && getTsMs(memHit) > getTsMs(norm) ? memHit : norm;
+            const best = pickBestCandidate(memHit, norm);
             previewMemoryCache.set(best.id, best);
             if (best.slug) previewMemoryCache.set(best.slug, best);
             if (best.previewToken) previewMemoryCache.set(best.previewToken, best);
@@ -154,6 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         token,
         pageId: normalized.id,
         id: normalized.id,
+        page: normalized,
       });
     } catch (e: any) {
       return res

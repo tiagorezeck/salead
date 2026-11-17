@@ -1532,13 +1532,19 @@ export function useData() {
             new Date((lp as any).updated_at || 0).getTime() || 0,
             new Date((lp as any).createdAt || 0).getTime() || 0
           );
-          const base = lpTime >= prevTime ? { ...prev, ...lp } : { ...lp, ...prev };
-          const newer = lpTime >= prevTime ? lp : prev;
-          const heroModel = (newer as any).heroModel || newer.hero?.model || (base as any).heroModel || base.hero?.model || "split_image";
+          const lpModel = (lp as any).heroModel || lp.hero?.model || (lp as any).hero_model || "split_image";
+          const prevModel = (prev as any).heroModel || prev.hero?.model || (prev as any).hero_model || "split_image";
+          const lpWins =
+            lpTime > prevTime ||
+            (lpTime === prevTime && (lpModel !== "split_image" || prevModel === "split_image"));
+          const base = lpWins ? { ...prev, ...lp } : { ...lp, ...prev };
+          const newer = lpWins ? lp : prev;
+          const heroModel = (newer as any).heroModel || newer.hero?.model || (newer as any).hero_model || (base as any).heroModel || base.hero?.model || "split_image";
           mergedMap.set(key, {
             ...base,
             id: isUUID(prev.id) ? prev.id : (isUUID(lp.id) ? lp.id : (prev.id || lp.id)),
             heroModel,
+            hero_model: heroModel,
             hero: (newer.hero && newer.hero.model) ? { ...newer.hero, model: heroModel } : (base.hero ? { ...base.hero, model: heroModel } : base.hero),
             quiz: base.quiz || prev.quiz || lp.quiz,
             bentoGrid: base.bentoGrid || prev.bentoGrid || lp.bentoGrid,

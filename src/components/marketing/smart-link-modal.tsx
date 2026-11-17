@@ -51,30 +51,29 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
   const isExt = Boolean(isExternal || lp?.isExternal || resolvedLP?.isExternal || externalUrl || lp?.externalUrl || resolvedLP?.externalUrl);
   const targetExternalUrl = externalUrl || lp?.externalUrl || resolvedLP?.externalUrl || "";
 
-  // Garante que a LP editada atual esteja salva e sincronizada na nuvem ao abrir o modal
+  // Garante que a versão mais recente da LP (com seu Modelo Hero) esteja salva na nuvem ao abrir o modal
   useEffect(() => {
-    const target = resolvedLP || lp;
+    const pickTs = (item: any) =>
+      Math.max(
+        new Date(item?.updatedAt || 0).getTime() || 0,
+        new Date(item?.updated_at || 0).getTime() || 0
+      );
+    const target =
+      resolvedLP && lp
+        ? pickTs(resolvedLP) >= pickTs(lp)
+          ? resolvedLP
+          : lp
+        : resolvedLP || lp;
     if (target) {
       try {
-        saveLandingPageToStorage(target);
-        syncPageWithServerPreview(target).catch(() => {});
-        fetch(`/api/landing-pages/${encodeURIComponent(target.id)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(target),
-        }).catch(() => {});
-
-        cloudStore.mutate(
-          (draft) => {
-            const list = Array.isArray(draft.landingPages) ? [...draft.landingPages] : [];
-            const exists = list.some((p: any) => p.id === target.id || (target.slug && p.slug === target.slug));
-            draft.landingPages = exists
-              ? list.map((p: any) => (p.id === target.id || (target.slug && p.slug === target.slug) ? { ...p, ...target } : p))
-              : [target, ...list];
-            draft.activePreviewPage = target;
-          },
-          { immediate: true }
-        );
+        const model = target.hero?.model || target.heroModel || target.hero_model || "split_image";
+        const normalizedTarget = {
+          ...target,
+          heroModel: model,
+          hero_model: model,
+          hero: target.hero ? { ...target.hero, model } : { model },
+        };
+        cloudStore.saveLandingPageOnly(normalizedTarget, { immediate: true }).catch(() => {});
       } catch {}
     }
   }, [resolvedLP, lp]);
@@ -294,11 +293,21 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
                 </button>
 
                 <button 
-                  onClick={() => {
-                    if (lp) {
+                  onClick={async () => {
+                    const target = resolvedLP || lp;
+                    if (target) {
                       try {
-                        saveLandingPageToStorage(lp);
-                        syncPageWithServerPreview(lp).catch(() => {});
+                        const model = target.hero?.model || target.heroModel || target.hero_model || "split_image";
+                        const normalizedTarget = {
+                          ...target,
+                          heroModel: model,
+                          hero_model: model,
+                          hero: target.hero ? { ...target.hero, model } : { model },
+                        };
+                        await Promise.allSettled([
+                          cloudStore.saveLandingPageOnly(normalizedTarget, { immediate: true }),
+                          syncPageWithServerPreview(normalizedTarget),
+                        ]);
                       } catch {}
                     }
                     window.open(generatedUrl, "_blank");

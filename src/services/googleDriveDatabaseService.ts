@@ -271,6 +271,8 @@ export const executeDriveRequest = async (
   let data: any = null;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     proxyRes = await fetch("/api/drive-proxy", {
       method: "POST",
       headers: {
@@ -287,7 +289,9 @@ export const executeDriveRequest = async (
         ...(cleanUrl ? { targetUrl: cleanUrl } : {}),
         ...(effectiveToken ? { apiToken: effectiveToken } : {}),
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     data = await proxyRes.json().catch(() => null);
   } catch {}
 
@@ -313,10 +317,17 @@ export const executeDriveRequest = async (
     throw busyErr;
   }
 
-  // Fallback direto apenas se /api/drive-proxy não existir (404) e houver URL válida
-  if ((!proxyRes || proxyRes.status === 404) && cleanUrl && typeof window !== "undefined") {
+  // Fallback direto no navegador sempre que /api/drive-proxy falhar (404, 500, offline ou resposta vazia)
+  const shouldFallbackDirect =
+    (!proxyRes || !proxyRes.ok || data === null) &&
+    Boolean(cleanUrl) &&
+    typeof window !== "undefined";
+
+  if (shouldFallbackDirect) {
     try {
       const action = String(payload.action || "").trim();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
       if (GET_ACTIONS.has(action)) {
         const directUrl = new URL(cleanUrl);
         directUrl.searchParams.set("action", action);
@@ -337,7 +348,9 @@ export const executeDriveRequest = async (
           headers: {
             Accept: "application/json, text/plain, */*",
           },
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         return await directRes.json();
       } else {
         const directRes = await fetch(cleanUrl, {
@@ -346,7 +359,9 @@ export const executeDriveRequest = async (
             "Content-Type": "text/plain;charset=utf-8",
           },
           body: JSON.stringify({ ...payload, token: effectiveToken }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         return await directRes.json();
       }
     } catch (directErr: any) {
@@ -674,6 +689,9 @@ export const fetchPublicLpFromDrive = async (
     return found ? normalizeFetchedLp(found) : null;
   };
 
+  let gotLegacyDump = false;
+  let gasConfirmedNotFound = false;
+
   try {
     const res = await executeDriveRequest({
       targetUrl: cleanUrl,
@@ -690,26 +708,48 @@ export const fetchPublicLpFromDrive = async (
       return normalizeFetchedLp(lpData);
     }
 
+    if (res && (res.statusCode === 404 || res.notFound === true)) {
+      gasConfirmedNotFound = true;
+    }
+
     // Se o Code.gs ainda não foi atualizado para v3.2, ele devolve o banco completo (landingPages/data) em resposta ao GET_PUBLIC_LP:
-    if (res && (Array.isArray(res.landingPages) || Array.isArray(res.data?.landingPages))) {
+    const dumpObj = res?.data && typeof res.data === "object" ? res.data : res;
+    if (dumpObj && (Array.isArray(dumpObj.landingPages) || Array.isArray(dumpObj.landing_pages))) {
       detectedGasVersion = detectedGasVersion || "legacy";
-      const fromLegacyDump = findInDb(res);
+      gotLegacyDump = true;
+      saveLocalDatabaseRoot(dumpObj);
+      const fromLegacyDump = findInDb(dumpObj);
       if (fromLegacyDump) return fromLegacyDump;
     }
-  } catch {}
+  } catch (err: any) {
+    // Se GAS respondeu explicitamente 404 via erro, não perde 8s repetindo dumps
+    if (String(err?.message || "").includes("não encontrada")) {
+      gasConfirmedNotFound = true;
+    }
+  }
 
-  // Fallback final apenas se o GET_PUBLIC_LP falhou completamente: lê o JSON rápido (sem forceRead de 10s a menos que necessário)
-  try {
-    const db: any = await fetchFromGoogleDrive(cleanUrl, false);
-    const fromCachedDb = findInDb(db);
-    if (fromCachedDb) return fromCachedDb;
-  } catch {}
+  // Se v3.2 confirmou 404 (já procurou no Sheets, Drive root e LP_{id}.json) e não é forced directSheets, encerra rápido!
+  if (gasConfirmedNotFound && !options.directSheets) {
+    return null;
+  }
 
-  try {
-    const forcedDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
-    const fromSheet = findInDb(forcedDb);
-    if (fromSheet) return fromSheet;
-  } catch {}
+  // Fallback para leitura do JSON apenas se GET_PUBLIC_LP falhou por rede (sem dump)
+  if (!gotLegacyDump && !gasConfirmedNotFound) {
+    try {
+      const db: any = await fetchFromGoogleDrive(cleanUrl, false);
+      const fromCachedDb = findInDb(db);
+      if (fromCachedDb) return fromCachedDb;
+    } catch {}
+  }
+
+  // Leitura direta pesada de planilhas só roda quando explicitamente pedida (preferSheets)
+  if (options.directSheets && !gasConfirmedNotFound) {
+    try {
+      const forcedDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
+      const fromSheet = findInDb(forcedDb);
+      if (fromSheet) return fromSheet;
+    } catch {}
+  }
 
   return null;
 };

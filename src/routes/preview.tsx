@@ -160,7 +160,11 @@ export function PreviewPage() {
       const acceptIfNewer = (candidate: any) => {
         if (!candidate || !isMounted) return false;
         const candTime = getLpTs(candidate);
-        if (!bestFound || (!cloudStore.getStatus().pendingWrite && candTime > bestTime)) {
+        const candModel = candidate.hero?.model || candidate.heroModel || candidate.hero_model || "split_image";
+        const bestModel = bestFound?.hero?.model || bestFound?.heroModel || bestFound?.hero_model || "split_image";
+        const isTieBreakUpgrade =
+          candTime === bestTime && candModel !== "split_image" && bestModel === "split_image";
+        if (!bestFound || (!cloudStore.getStatus().pendingWrite && (candTime > bestTime || isTieBreakUpgrade))) {
           bestFound = candidate;
           bestTime = candTime;
           setPage(candidate);
@@ -171,18 +175,21 @@ export function PreviewPage() {
       };
 
       try {
-        await Promise.allSettled([
-          fetchPageFromServerPreview(targetId)
-            .then((srv) => {
-              acceptIfNewer(srv);
-            })
-            .catch(() => {}),
-          cloudStore
-            .fetchPublicLP(targetId, { preferSheets: false })
-            .then((cld) => {
-              acceptIfNewer(cld);
-            })
-            .catch(() => {}),
+        await Promise.race([
+          Promise.allSettled([
+            fetchPageFromServerPreview(targetId)
+              .then((srv) => {
+                acceptIfNewer(srv);
+              })
+              .catch(() => {}),
+            cloudStore
+              .fetchPublicLP(targetId, { preferSheets: false })
+              .then((cld) => {
+                acceptIfNewer(cld);
+              })
+              .catch(() => {}),
+          ]),
+          new Promise((resolve) => setTimeout(resolve, 4500)),
         ]);
       } catch {}
 
@@ -194,10 +201,14 @@ export function PreviewPage() {
       // PASSO 3: Bootstrap completo da nuvem se outro navegador acabou de abrir a aba e ainda não achou
       if (!cloudStore.getStatus().loadedFromCloud) {
         try {
-          const booted = await cloudStore.bootstrap();
-          const bootedMatch =
-            (booted.activePreviewPage && findMatchingPage([booted.activePreviewPage], targetId)) ||
-            findMatchingPage(booted.landingPages || [], targetId);
+          const booted: any = await Promise.race([
+            cloudStore.bootstrap(),
+            new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+          ]);
+          const bootedMatch = booted
+            ? (booted.activePreviewPage && findMatchingPage([booted.activePreviewPage], targetId)) ||
+              findMatchingPage(booted.landingPages || [], targetId)
+            : null;
           if (bootedMatch && isMounted) {
             setPage(bootedMatch);
             setLoading(false);

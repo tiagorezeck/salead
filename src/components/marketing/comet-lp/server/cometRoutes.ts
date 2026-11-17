@@ -6,6 +6,7 @@ import { applyThematicImagesToPage } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
 import { SURVEY_PRESETS } from "../../../../lib/survey-templates";
 import { GLOBAL_GAS_CONFIG, normalizeGasUrl } from "../../../../config/gasConfig";
+import { PRESET_TEMPLATES } from "../data/templates";
 function isUUID(str?: string): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
@@ -1823,6 +1824,10 @@ Você NUNCA deve gerar todas as landing pages iguais. Você deve agir como um Di
 - 'urgency_counter': Perfeito para imersões com poucas vagas, contagem regressiva ativa e compras por impulso.
 - 'white_pro': Específico para alto padrão médico e estético com cards de prova social flutuantes.
 - 'fullscreen_slideshow': Para eventos, turismo e experiências visuais imersivas.
+- 'kids_school_doodle': Estilo lúdico escolar/infantil, criativo e colorido.
+- 'portfolio_dark_neon': Estilo Portfólio Dark & Neon com estatísticas e badges futuristas.
+- 'survey_hero_light': Hero integrado com cartão de diagnóstico/pesquisa em tema claro.
+- 'survey_hero_dark': Hero integrado com cartão de diagnóstico/pesquisa em tema escuro.
 
 3. DEFINIÇÃO DA PALETA CROMÁTICA ('accentColor'):
 - 'rose' / 'teal': Perfeito para Estética, Beleza, Cosméticos e Dermatologia.
@@ -1853,7 +1858,7 @@ Regras de Copy e Estrutura:
 - Público-Alvo: ${targetAudience || "Empresários, profissionais liberais e tomadores de decisão"}
 - Oferta / Diferenciais: ${offerDetails || "Acesso imediato com garantia incondicional e suporte individualizado"}
 - Preferência de Tema (ou auto): ${theme || "auto (LANAI decide se será claro, escuro, midnight ou hybrid)"}
-- Preferência de Modelo de Hero (ou auto): ${heroModel || "auto (LANAI decide o melhor dos 10 modelos)"}
+- Preferência de Modelo de Hero (ou auto): ${heroModel || "auto (LANAI decide o melhor dos 14 modelos)"}
 - Preferência de Cor (ou auto): ${accentColor || "auto (LANAI decide a melhor cor psicológica)"}`;
 
     const responseSchema = {
@@ -1891,6 +1896,10 @@ Regras de Copy e Estrutura:
                 "urgency_counter",
                 "white_pro",
                 "fullscreen_slideshow",
+                "kids_school_doodle",
+                "portfolio_dark_neon",
+                "survey_hero_light",
+                "survey_hero_dark",
               ],
             },
             badgeText: { type: Type.STRING },

@@ -53,6 +53,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
       const normalizedPage: any = {
         ...page,
         heroModel: activeHeroModel,
+        hero_model: activeHeroModel,
         hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
       };
       syncPageWithServerPreview(normalizedPage).catch(() => {});
@@ -94,6 +95,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
     const pageToSync: any = {
       ...page,
       heroModel: activeHeroModel,
+      hero_model: activeHeroModel,
       hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
       updatedAt: (page as any).updatedAt || nowIso,
       updated_at: (page as any).updated_at || (page as any).updatedAt || nowIso,
@@ -110,6 +112,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
     const updatedPage: any = {
       ...page,
       heroModel: activeHeroModel,
+      hero_model: activeHeroModel,
       hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
       previewToken: newToken,
       updatedAt: nowIso,

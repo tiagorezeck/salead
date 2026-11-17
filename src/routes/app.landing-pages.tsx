@@ -216,6 +216,8 @@ function LPPage() {
     return {
       isExternal: false,
       model: activeModel,
+      theme: cometPage.theme || selectedLP.theme || "dark",
+      accentColor: cometPage.accentColor || "purple",
       modelTitle: foundModel?.title || "Modelo 1: Split com Imagem",
       badge: hero?.badgeText || (
         selectedLP.status === "Ativa" 
@@ -267,7 +269,7 @@ function LPPage() {
       setEditingLP(savedLP);
     }
     toast.success("Nova Landing Page criada!", {
-      description: "Carregando o construtor visual COMET-LPs com 10 modelos de hero e blocos de conversão."
+      description: "Carregando o construtor visual COMET-LPs com 14 modelos de hero e blocos de conversão."
     });
   };
 
@@ -364,7 +366,7 @@ function LPPage() {
         page={cometPage}
         onSave={async (updatedPage) => {
           try {
-            const activeModel = updatedPage.hero?.model || updatedPage.heroModel || "split_image";
+            const activeModel = updatedPage.hero?.model || updatedPage.heroModel || updatedPage.hero_model || "split_image";
             const currentStatus = editingLP.status || "Ativa";
             const newStatus = updatedPage.status === "draft"
               ? "Pausada"
@@ -373,6 +375,7 @@ function LPPage() {
             const payload = {
               ...updatedPage,
               heroModel: activeModel,
+              hero_model: activeModel,
               hero: {
                 ...updatedPage.hero,
                 model: activeModel,
@@ -608,8 +611,31 @@ function LPPage() {
               )}
             </div>
 
-            {/* CONTAINER 16:9 COM A HERO DA LP PRONTA */}
-            {selectedLP && heroDisplay ? (
+            {/* CONTAINER 16:9 COM A HERO DA LP PRONTA (SUPORTA TODOS OS 14 MODELOS) */}
+            {selectedLP && heroDisplay ? (() => {
+              const m = (heroDisplay as any).model || "split_image";
+              const isLightPreview =
+                m === "white_pro" ||
+                m === "kids_school_doodle" ||
+                m === "survey_hero_light" ||
+                ((heroDisplay as any).theme === "light" &&
+                  m !== "portfolio_dark_neon" &&
+                  m !== "survey_hero_dark" &&
+                  m !== "editorial_ebook" &&
+                  m !== "fullscreen_slideshow");
+
+              const containerBg =
+                m === "kids_school_doodle"
+                  ? "bg-[#FFFBF2] text-zinc-900 border-amber-200"
+                  : m === "white_pro" || m === "survey_hero_light"
+                  ? "bg-white text-zinc-900 border-zinc-200"
+                  : m === "portfolio_dark_neon"
+                  ? "bg-[#060913] text-white border-emerald-500/40"
+                  : isLightPreview
+                  ? "bg-zinc-50 text-zinc-900 border-zinc-200"
+                  : "bg-[#0B0D17] text-white border-zinc-800/90";
+
+              return (
               <div 
                 onClick={() => {
                   if (!heroDisplay.isExternal) {
@@ -618,143 +644,309 @@ function LPPage() {
                     window.open(selectedLP.externalUrl, "_blank");
                   }
                 }}
-                className="relative w-full aspect-video rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border border-zinc-800/90 bg-[#0B0D17] text-white flex flex-col justify-between p-3 sm:p-5 group select-none cursor-pointer"
+                className={`relative w-full aspect-video rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border flex flex-col justify-between p-3 sm:p-4 group select-none cursor-pointer transition-colors ${containerBg}`}
               >
-                {/* Glow decorativo de fundo */}
-                <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-64 h-36 bg-primary/20 blur-3xl rounded-full pointer-events-none" />
-                <div className="absolute inset-0 bg-[radial-gradient(#ffffff0a_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
+                {/* Fundo temático conforme modelo */}
+                {m === "fullscreen_slideshow" ? (
+                  <>
+                    <img
+                      src={heroDisplay.image}
+                      alt={heroDisplay.headline}
+                      className="absolute inset-0 w-full h-full object-cover opacity-45 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/65 to-black/50 pointer-events-none" />
+                  </>
+                ) : m === "portfolio_dark_neon" ? (
+                  <>
+                    <div className="absolute -top-12 -right-12 w-56 h-56 bg-emerald-500/20 blur-3xl rounded-full pointer-events-none" />
+                    <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-purple-600/20 blur-3xl rounded-full pointer-events-none" />
+                  </>
+                ) : m === "kids_school_doodle" ? (
+                  <>
+                    <div className="absolute -top-10 -right-10 w-44 h-44 bg-amber-300/35 blur-2xl rounded-full pointer-events-none" />
+                    <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-sky-300/35 blur-2xl rounded-full pointer-events-none" />
+                  </>
+                ) : (
+                  <>
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-64 h-36 bg-primary/20 blur-3xl rounded-full pointer-events-none" />
+                    <div className="absolute inset-0 bg-[radial-gradient(#ffffff0a_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
+                  </>
+                )}
 
                 {/* Top Pill / Badge da Hero & Modelo Visual */}
-                <div className="relative z-10 flex items-center justify-center gap-2 flex-wrap">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-900/80 border border-zinc-700/60 text-[8px] sm:text-[10px] text-zinc-300 font-semibold shadow">
+                <div className="relative z-10 flex items-center justify-between gap-2 flex-wrap">
+                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[8px] sm:text-[10px] font-semibold shadow ${isLightPreview ? "bg-white/90 border-zinc-200 text-zinc-700" : "bg-zinc-900/80 border-zinc-700/60 text-zinc-300"}`}>
                     <div className="flex items-center gap-0.5">
                       <span className="h-1 w-1 rounded-full bg-primary" />
                       <span className="h-1 w-1 rounded-full bg-primary" />
                       <span className="h-1 w-1 rounded-full bg-primary" />
                     </div>
-                    <span className="tracking-wider uppercase">{heroDisplay.badge}</span>
+                    <span className="tracking-wider uppercase truncate max-w-[180px]">{heroDisplay.badge}</span>
                   </div>
 
                   {!heroDisplay.isExternal && (heroDisplay as any).modelTitle && (
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-500/50 text-[8px] sm:text-[10px] text-purple-200 font-bold shadow">
+                    <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[8px] sm:text-[10px] font-bold shadow ${
+                      m === "portfolio_dark_neon"
+                        ? "bg-emerald-950/90 border-emerald-400/50 text-emerald-300"
+                        : isLightPreview
+                        ? "bg-purple-50 border-purple-200 text-purple-700"
+                        : "bg-purple-950/80 border-purple-500/50 text-purple-200"
+                    }`}>
                       <Sparkles className="h-2.5 w-2.5 text-purple-400" />
-                      <span className="tracking-wider uppercase">{(heroDisplay as any).modelTitle}</span>
+                      <span className="tracking-wider uppercase truncate max-w-[200px]">{(heroDisplay as any).modelTitle}</span>
                     </div>
                   )}
                 </div>
 
-                {/* Central Headlines & CTA da Hero Real */}
-                <div className="relative z-10 text-center space-y-1 sm:space-y-1.5 max-w-lg mx-auto my-auto px-2">
-                  <h3 className="font-display text-xs sm:text-base md:text-lg lg:text-xl font-extrabold text-white tracking-tight leading-tight line-clamp-2">
-                    {heroDisplay.headline}
-                  </h3>
-                  <p className="text-[9px] sm:text-xs text-zinc-400 line-clamp-1 sm:line-clamp-2 max-w-md mx-auto">
-                    {heroDisplay.subheadline}
-                  </p>
-
-                  <div className="pt-1 flex flex-col items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!heroDisplay.isExternal) {
-                          setEditingLP(selectedLP);
-                        } else if (selectedLP.externalUrl) {
-                          window.open(selectedLP.externalUrl, "_blank");
-                        }
-                      }}
-                      className="px-3 sm:px-4 py-1 sm:py-1.5 rounded-lg bg-gradient-primary text-white font-bold text-[9px] sm:text-xs shadow-md shadow-primary/20 hover:scale-105 transition-all cursor-pointer"
-                    >
-                      {heroDisplay.ctaText}
-                    </button>
-                    <span className="text-[7px] sm:text-[9px] text-zinc-400 flex items-center gap-1">
-                      <ShieldCheck className="h-2.5 w-2.5 text-emerald-400" />
-                      {heroDisplay.ctaSubtext}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Inset Mockup Card com Imagem e Métricas Reais da LP adaptadas ao Modelo */}
-                <div className="relative z-10 w-full max-w-sm sm:max-w-md mx-auto rounded-xl border border-zinc-700/60 bg-zinc-900/90 shadow-2xl overflow-hidden backdrop-blur-sm">
-                  {(heroDisplay as any).model === "split_video" ? (
-                    <div className="relative h-14 sm:h-20 md:h-24 w-full overflow-hidden bg-black flex items-center justify-center">
-                      <img
-                        src={heroDisplay.image}
-                        alt={heroDisplay.headline}
-                        className="w-full h-full object-cover object-center opacity-60 group-hover:scale-105 transition-transform duration-500"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30" />
-                      <div className="absolute inset-0 flex items-center justify-center gap-2">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-purple-600/90 text-white flex items-center justify-center shadow-lg border border-purple-400">
-                          <Play className="w-4 h-4 ml-0.5 fill-current" />
+                {/* Corpo Visual Adaptado ao Modelo da Hero */}
+                <div className="relative z-10 my-auto w-full">
+                  {m === "portfolio_dark_neon" ? (
+                    <div className="grid grid-cols-12 gap-3 items-center px-1">
+                      <div className="col-span-7 space-y-1.5 text-left">
+                        <span className="inline-block px-2 py-0.5 rounded bg-lime-400/15 border border-lime-400/40 text-lime-300 text-[8px] font-extrabold uppercase">
+                          Portfólio & Neon Authority
+                        </span>
+                        <h3 className="font-display text-xs sm:text-sm md:text-base font-black text-white leading-tight line-clamp-2">
+                          {heroDisplay.headline}
+                        </h3>
+                        <p className="text-[8px] sm:text-[10px] text-zinc-400 line-clamp-2">
+                          {heroDisplay.subheadline}
+                        </p>
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <span className="px-2.5 py-1 rounded-full bg-lime-400 text-zinc-950 font-black text-[8px] sm:text-[10px]">
+                            {heroDisplay.ctaText}
+                          </span>
                         </div>
-                        <span className="text-[9px] sm:text-xs font-bold text-white drop-shadow">Vídeo VSL 4:5</span>
                       </div>
-                      <div className="absolute bottom-1 sm:bottom-1.5 inset-x-2 flex justify-between items-center text-[8px] text-zinc-300">
-                        <span className="bg-black/60 px-1.5 py-0.5 rounded">Nota 4.9/5 ★</span>
-                        <span className="bg-black/60 px-1.5 py-0.5 rounded">Alta Conversão</span>
-                      </div>
-                    </div>
-                  ) : (heroDisplay as any).model === "split_lead_form" ? (
-                    <div className="h-14 sm:h-20 md:h-24 w-full bg-zinc-950/90 p-2 sm:p-2.5 flex flex-col justify-center gap-1 sm:gap-1.5">
-                      <div className="text-[8px] sm:text-[10px] font-bold text-white text-center">
-                        Receba Acesso Imediato no WhatsApp
-                      </div>
-                      <div className="grid grid-cols-2 gap-1 text-[7px] sm:text-[9px]">
-                        <div className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1 text-zinc-400">Seu Nome</div>
-                        <div className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1 text-zinc-400">Seu WhatsApp</div>
-                      </div>
-                      <div className="bg-emerald-600 rounded text-center text-white font-extrabold text-[8px] sm:text-[9px] py-1">
-                        QUERO BAIXAR AGORA
-                      </div>
-                    </div>
-                  ) : (heroDisplay as any).model === "b2b_metrics" ? (
-                    <div className="h-14 sm:h-20 md:h-24 w-full bg-zinc-950/90 p-2 sm:p-2.5 flex items-center justify-around gap-1 text-center">
-                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 flex-1">
-                        <div className="text-[10px] sm:text-xs font-black text-purple-400">+340%</div>
-                        <div className="text-[6px] sm:text-[8px] text-zinc-400 font-bold uppercase">Crescimento</div>
-                      </div>
-                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 flex-1">
-                        <div className="text-[10px] sm:text-xs font-black text-emerald-400">99.4%</div>
-                        <div className="text-[6px] sm:text-[8px] text-zinc-400 font-bold uppercase">Satisfação</div>
-                      </div>
-                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 flex-1">
-                        <div className="text-[10px] sm:text-xs font-black text-amber-400">10 Min</div>
-                        <div className="text-[6px] sm:text-[8px] text-zinc-400 font-bold uppercase">Resposta VIP</div>
+                      <div className="col-span-5 flex flex-col items-center justify-center gap-1.5">
+                        <div className="w-16 h-16 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border-2 border-lime-400/70 shadow-[0_0_25px_rgba(163,230,53,0.35)]">
+                          <img
+                            src={heroDisplay.image}
+                            alt={heroDisplay.headline}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-1 w-full text-center">
+                          {heroDisplay.stats.map((st, i) => (
+                            <div key={i} className="bg-zinc-900/90 border border-lime-400/20 rounded-md py-0.5 px-1">
+                              <div className="text-[7px] sm:text-[9px] font-black text-lime-300">{st.value}</div>
+                              <div className="text-[5px] sm:text-[6px] text-zinc-400 uppercase">{st.label}</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  ) : (heroDisplay as any).model === "urgency_counter" ? (
-                    <div className="h-14 sm:h-20 md:h-24 w-full bg-gradient-to-r from-red-950/60 to-purple-950/60 p-2 sm:p-2.5 flex flex-col items-center justify-center gap-1 text-center">
-                      <div className="text-[7px] sm:text-[9px] font-bold text-red-300 uppercase tracking-wider flex items-center gap-1">
+                  ) : m === "kids_school_doodle" ? (
+                    <div className="grid grid-cols-12 gap-3 items-center px-1">
+                      <div className="col-span-7 space-y-1.5 text-left">
+                        <span className="inline-block px-2 py-0.5 rounded-full bg-amber-400 text-zinc-950 text-[8px] font-black uppercase">
+                          ★ Método Divertido & Criativo
+                        </span>
+                        <h3 className="font-display text-xs sm:text-sm md:text-base font-black text-zinc-900 leading-tight line-clamp-2">
+                          {heroDisplay.headline}
+                        </h3>
+                        <p className="text-[8px] sm:text-[10px] text-zinc-600 line-clamp-2">
+                          {heroDisplay.subheadline}
+                        </p>
+                        <span className="inline-block px-3 py-1 rounded-full bg-sky-500 text-white font-black text-[8px] sm:text-[10px] shadow">
+                          {heroDisplay.ctaText}
+                        </span>
+                      </div>
+                      <div className="col-span-5 flex flex-col items-center gap-1.5">
+                        <div className="w-16 h-16 sm:w-24 sm:h-24 rounded-full overflow-hidden border-4 border-amber-400 shadow-lg rotate-2">
+                          <img src={heroDisplay.image} alt={heroDisplay.headline} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "survey_hero_light" || m === "survey_hero_dark" ? (
+                    <div className="grid grid-cols-12 gap-2.5 items-center px-1">
+                      <div className="col-span-6 space-y-1 text-left">
+                        <h3 className={`font-display text-xs sm:text-sm font-extrabold leading-tight line-clamp-2 ${m === "survey_hero_light" ? "text-zinc-900" : "text-white"}`}>
+                          {heroDisplay.headline}
+                        </h3>
+                        <p className={`text-[8px] sm:text-[10px] line-clamp-2 ${m === "survey_hero_light" ? "text-zinc-600" : "text-zinc-400"}`}>
+                          {heroDisplay.subheadline}
+                        </p>
+                      </div>
+                      <div className={`col-span-6 rounded-xl border p-2 sm:p-2.5 space-y-1.5 shadow-lg ${m === "survey_hero_light" ? "bg-zinc-50 border-zinc-200 text-zinc-900" : "bg-zinc-900/95 border-purple-500/40 text-white"}`}>
+                        <div className="flex items-center justify-between text-[7px] sm:text-[8px] font-bold uppercase text-primary">
+                          <span>Diagnóstico Rápido</span>
+                          <span>Etapa 1/3</span>
+                        </div>
+                        <div className="w-full h-1 rounded-full bg-zinc-700/30 overflow-hidden">
+                          <div className="w-1/3 h-full bg-primary rounded-full" />
+                        </div>
+                        <div className={`text-[8px] sm:text-[9px] font-semibold px-2 py-1 rounded-lg border ${m === "survey_hero_light" ? "bg-white border-zinc-200" : "bg-zinc-950 border-zinc-800"}`}>
+                          A) Quero escalar vendas agora
+                        </div>
+                        <div className="bg-primary text-white text-center font-bold text-[8px] py-1 rounded-lg">
+                          Avançar →
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "white_pro" ? (
+                    <div className="grid grid-cols-12 gap-3 items-center px-1">
+                      <div className="col-span-7 space-y-1.5 text-left">
+                        <h3 className="font-display text-xs sm:text-sm md:text-base font-extrabold text-zinc-900 leading-tight line-clamp-2">
+                          {heroDisplay.headline}
+                        </h3>
+                        <p className="text-[8px] sm:text-[10px] text-zinc-600 line-clamp-2">{heroDisplay.subheadline}</p>
+                        <span className="inline-block px-3 py-1 rounded-xl bg-zinc-900 text-white font-bold text-[8px] sm:text-[10px]">
+                          {heroDisplay.ctaText}
+                        </span>
+                      </div>
+                      <div className="col-span-5 relative">
+                        <div className="h-20 sm:h-28 rounded-2xl overflow-hidden border border-zinc-200 shadow-lg">
+                          <img src={heroDisplay.image} alt={heroDisplay.headline} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                        <div className="mt-1 flex items-center justify-center gap-1 text-[7px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md py-0.5">
+                          <ShieldCheck className="w-2.5 h-2.5" /> Padrão Executivo 4.9★
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "split_image" ? (
+                    <div className="grid grid-cols-12 gap-3 items-center px-1">
+                      <div className="col-span-7 space-y-1.5 text-left">
+                        <h3 className={`font-display text-xs sm:text-sm md:text-base font-extrabold leading-tight line-clamp-2 ${isLightPreview ? "text-zinc-900" : "text-white"}`}>
+                          {heroDisplay.headline}
+                        </h3>
+                        <p className={`text-[8px] sm:text-[10px] line-clamp-2 ${isLightPreview ? "text-zinc-600" : "text-zinc-400"}`}>
+                          {heroDisplay.subheadline}
+                        </p>
+                        <span className="inline-block px-3 py-1 rounded-lg bg-gradient-primary text-white font-bold text-[8px] sm:text-[10px]">
+                          {heroDisplay.ctaText}
+                        </span>
+                      </div>
+                      <div className="col-span-5">
+                        <div className="h-20 sm:h-28 rounded-xl overflow-hidden border border-zinc-700/60 shadow-lg">
+                          <img src={heroDisplay.image} alt={heroDisplay.headline} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "split_video" ? (
+                    <div className="grid grid-cols-12 gap-3 items-center px-1">
+                      <div className="col-span-6 space-y-1 text-left">
+                        <h3 className={`font-display text-xs sm:text-sm font-extrabold leading-tight line-clamp-2 ${isLightPreview ? "text-zinc-900" : "text-white"}`}>
+                          {heroDisplay.headline}
+                        </h3>
+                        <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-primary text-white font-bold text-[8px] sm:text-[10px]">
+                          {heroDisplay.ctaText}
+                        </span>
+                      </div>
+                      <div className="col-span-6 relative h-20 sm:h-28 rounded-xl overflow-hidden bg-black border border-zinc-700 flex items-center justify-center">
+                        <img src={heroDisplay.image} alt={heroDisplay.headline} className="w-full h-full object-cover opacity-55" referrerPolicy="no-referrer" />
+                        <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-lg border border-purple-300 absolute">
+                          <Play className="w-3.5 h-3.5 ml-0.5 fill-current" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "split_lead_form" ? (
+                    <div className="grid grid-cols-12 gap-2.5 items-center px-1">
+                      <div className="col-span-6 space-y-1 text-left">
+                        <h3 className={`font-display text-xs sm:text-sm font-extrabold leading-tight line-clamp-2 ${isLightPreview ? "text-zinc-900" : "text-white"}`}>
+                          {heroDisplay.headline}
+                        </h3>
+                        <p className={`text-[8px] line-clamp-2 ${isLightPreview ? "text-zinc-600" : "text-zinc-400"}`}>{heroDisplay.subheadline}</p>
+                      </div>
+                      <div className="col-span-6 rounded-xl bg-zinc-950/95 border border-zinc-800 p-2 space-y-1 text-white">
+                        <div className="text-[8px] font-bold text-center text-emerald-400">Cadastro Rápido</div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 text-[7px] text-zinc-400">Seu Nome</div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 text-[7px] text-zinc-400">WhatsApp</div>
+                        <div className="bg-emerald-600 rounded text-center text-[8px] font-extrabold py-0.5">QUERO RECEBER</div>
+                      </div>
+                    </div>
+                  ) : m === "b2b_metrics" ? (
+                    <div className="space-y-2 text-center px-2">
+                      <h3 className={`font-display text-xs sm:text-sm font-extrabold line-clamp-1 ${isLightPreview ? "text-zinc-900" : "text-white"}`}>
+                        {heroDisplay.headline}
+                      </h3>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5">
+                          <div className="text-[10px] sm:text-xs font-black text-purple-400">+340%</div>
+                          <div className="text-[6px] sm:text-[7px] text-zinc-400 uppercase">Crescimento</div>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5">
+                          <div className="text-[10px] sm:text-xs font-black text-emerald-400">99.4%</div>
+                          <div className="text-[6px] sm:text-[7px] text-zinc-400 uppercase">Satisfação</div>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1.5">
+                          <div className="text-[10px] sm:text-xs font-black text-amber-400">10 Min</div>
+                          <div className="text-[6px] sm:text-[7px] text-zinc-400 uppercase">Resposta</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "editorial_ebook" ? (
+                    <div className="grid grid-cols-12 gap-3 items-center px-1">
+                      <div className="col-span-7 space-y-1 text-left">
+                        <span className="text-[7px] font-bold uppercase tracking-widest text-amber-400">Edição Especial & Guia</span>
+                        <h3 className="font-display text-xs sm:text-sm font-extrabold text-white line-clamp-2">{heroDisplay.headline}</h3>
+                        <span className="inline-block px-2.5 py-0.5 rounded bg-amber-500 text-zinc-950 font-black text-[8px]">{heroDisplay.ctaText}</span>
+                      </div>
+                      <div className="col-span-5 flex justify-center">
+                        <div className="w-16 h-22 sm:w-20 sm:h-28 rounded-r-xl rounded-l-sm border-l-4 border-amber-400 bg-zinc-900 overflow-hidden shadow-2xl">
+                          <img src={heroDisplay.image} alt={heroDisplay.headline} className="w-full h-full object-cover opacity-80" referrerPolicy="no-referrer" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : m === "minimal_glow" ? (
+                    <div className="text-center space-y-2 px-3">
+                      <h3 className={`font-display text-sm sm:text-base font-black tracking-tight line-clamp-2 ${isLightPreview ? "text-zinc-900" : "text-white"}`}>
+                        {heroDisplay.headline}
+                      </h3>
+                      <p className={`text-[9px] sm:text-xs line-clamp-1 max-w-md mx-auto ${isLightPreview ? "text-zinc-600" : "text-zinc-400"}`}>
+                        {heroDisplay.subheadline}
+                      </p>
+                      <span className="inline-block px-4 py-1 rounded-full bg-gradient-primary text-white font-bold text-[9px] shadow-[0_0_20px_rgba(168,85,247,0.5)]">
+                        {heroDisplay.ctaText}
+                      </span>
+                    </div>
+                  ) : m === "urgency_counter" ? (
+                    <div className="space-y-1.5 text-center px-2">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-950/80 border border-red-500/40 text-[8px] font-bold text-red-300">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                        Vagas Limitadas • Condição Especial Expira em:
+                        EXPIRA EM 14 : 59 : 00
                       </div>
-                      <div className="text-xs sm:text-sm font-black text-white font-mono bg-black/60 px-3 py-0.5 rounded-md border border-red-500/40">
-                        14 : 59 : 00
+                      <h3 className="font-display text-xs sm:text-sm font-extrabold text-white line-clamp-2">{heroDisplay.headline}</h3>
+                      <span className="inline-block px-3 py-1 rounded-lg bg-red-600 text-white font-black text-[9px]">{heroDisplay.ctaText}</span>
+                    </div>
+                  ) : m === "fullscreen_slideshow" ? (
+                    <div className="text-center space-y-1.5 px-3">
+                      <h3 className="font-display text-xs sm:text-base font-extrabold text-white drop-shadow line-clamp-2">{heroDisplay.headline}</h3>
+                      <span className="inline-block px-3 py-1 rounded-lg bg-gradient-primary text-white font-bold text-[9px]">{heroDisplay.ctaText}</span>
+                      <div className="flex items-center justify-center gap-1.5 pt-1">
+                        <span className="w-4 h-1 rounded-full bg-white" />
+                        <span className="w-1.5 h-1 rounded-full bg-white/40" />
+                        <span className="w-1.5 h-1 rounded-full bg-white/40" />
                       </div>
                     </div>
                   ) : (
-                    <div className="relative h-14 sm:h-20 md:h-24 w-full overflow-hidden">
-                      <img
-                        src={heroDisplay.image}
-                        alt={heroDisplay.headline}
-                        className="w-full h-full object-cover object-center brightness-90 group-hover:scale-105 transition-transform duration-500"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
-                      
-                      {/* Bottom stats inside the mockup */}
-                      <div className="absolute bottom-1 sm:bottom-1.5 inset-x-1 sm:inset-x-2 bg-zinc-950/80 backdrop-blur-md rounded-lg border border-zinc-800/80 py-1 px-2 grid grid-cols-3 gap-1 text-center">
-                        {heroDisplay.stats.map((st, i) => (
-                          <div key={i} className="border-r last:border-none border-zinc-800/80">
-                            <div className="text-[6px] sm:text-[8px] uppercase tracking-wider text-zinc-400 font-bold">{st.label}</div>
-                            <div className="text-[8px] sm:text-[11px] font-extrabold text-white">{st.value}</div>
-                          </div>
-                        ))}
+                    /* centered_showcase e fallback */
+                    <div className="text-center space-y-1.5 px-2">
+                      <h3 className={`font-display text-xs sm:text-base font-extrabold line-clamp-2 ${isLightPreview ? "text-zinc-900" : "text-white"}`}>
+                        {heroDisplay.headline}
+                      </h3>
+                      <span className="inline-block px-3 py-1 rounded-lg bg-gradient-primary text-white font-bold text-[9px]">{heroDisplay.ctaText}</span>
+                      <div className="h-12 sm:h-16 max-w-xs mx-auto rounded-lg overflow-hidden border border-zinc-700/60 mt-1">
+                        <img src={heroDisplay.image} alt={heroDisplay.headline} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Barra Inferior com Métricas Reais */}
+                <div className={`relative z-10 w-full rounded-xl border py-1 px-2 grid grid-cols-3 gap-1 text-center backdrop-blur-sm ${
+                  isLightPreview
+                    ? "bg-white/85 border-zinc-200 text-zinc-900"
+                    : "bg-zinc-950/80 border-zinc-800/80 text-white"
+                }`}>
+                  {heroDisplay.stats.map((st, i) => (
+                    <div key={i} className={`border-r last:border-none ${isLightPreview ? "border-zinc-200" : "border-zinc-800/80"}`}>
+                      <div className={`text-[6px] sm:text-[8px] uppercase tracking-wider font-bold ${isLightPreview ? "text-zinc-500" : "text-zinc-400"}`}>{st.label}</div>
+                      <div className="text-[8px] sm:text-[11px] font-extrabold">{st.value}</div>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Hover Action Overlay */}
@@ -831,7 +1023,8 @@ function LPPage() {
                   )}
                 </div>
               </div>
-            ) : (
+              );
+            })() : (
               /* ESTADO VAZIO CASO NÃO EXISTA NENHUMA LP CRIADA */
               <div className="w-full aspect-video rounded-2xl md:rounded-3xl border border-dashed border-border/80 bg-muted/20 flex flex-col items-center justify-center p-6 text-center space-y-3">
                 <div className="h-10 w-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
@@ -1262,46 +1455,7 @@ function LPPage() {
         )}
       </div>
 
-      {/* MODAL EDITOR VISUAL COMET-LPs (NOVO CONSTRUTOR COMPLETO) */}
-      {editingLP && (
-        <div className="fixed inset-0 z-50 bg-background text-foreground flex flex-col overflow-hidden">
-          <Editor 
-            page={ensureCometLP(editingLP)} 
-            onBackToDashboard={() => {
-              setEditingLP(null);
-              navigate({ to: "/app/landing-pages" });
-            }} 
-            onSave={async (updatedPage) => {
-              const activeModel = updatedPage.hero?.model || updatedPage.heroModel || "split_image";
-              const currentStatus = editingLP.status || "Ativa";
-              const newStatus = updatedPage.status === "draft" 
-                ? "Pausada" 
-                : (currentStatus === "Teste" || currentStatus === "Pausada" ? currentStatus : "Ativa");
-              const nowIso = new Date().toISOString();
-
-              const payload: any = {
-                ...updatedPage,
-                heroModel: activeModel,
-                hero: {
-                  ...updatedPage.hero,
-                  model: activeModel,
-                },
-                name: updatedPage.title,
-                template: "COMET",
-                status: newStatus,
-                visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
-                leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
-                surveyId: updatedPage.surveyId || editingLP.surveyId || null,
-                updatedAt: nowIso,
-                updated_at: nowIso,
-              };
-              const saved = await updateLandingPage(editingLP.id, payload);
-              setEditingLP(saved || payload);
-              toast.success("Landing Page salva e sincronizada no Google Sheets!");
-            }} 
-          />
-        </div>
-      )}
+      {/* (Editor ativo é renderizado no early-return acima quando editingLP !== null) */}
 
       {/* MODAL GERADOR IA COMET ENGINE */}
       {showAIGenerator && (

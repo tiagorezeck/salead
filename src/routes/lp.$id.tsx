@@ -298,7 +298,11 @@ function PublicLPPage() {
         const applyRemoteIfNewer = (candidate: any) => {
           if (!candidate || deletedIds.has(candidate.id) || !isMounted) return;
           const candTime = getLpTs(candidate);
-          if (!bestPage || (!cloudStore.getStatus().pendingWrite && candTime > bestTime)) {
+          const candModel = candidate.hero?.model || candidate.heroModel || candidate.hero_model || "split_image";
+          const bestModel = bestPage?.hero?.model || bestPage?.heroModel || bestPage?.hero_model || "split_image";
+          const isTieBreakUpgrade =
+            candTime === bestTime && candModel !== "split_image" && bestModel === "split_image";
+          if (!bestPage || (!cloudStore.getStatus().pendingWrite && (candTime > bestTime || isTieBreakUpgrade))) {
             bestPage = candidate;
             bestTime = candTime;
             setLp(candidate);
@@ -311,14 +315,17 @@ function PublicLPPage() {
         };
 
         try {
-          await Promise.allSettled([
-            fetchPageFromServerPreview(id)
-              .then((srvPage) => applyRemoteIfNewer(srvPage))
-              .catch(() => {}),
-            cloudStore
-              .fetchPublicLP(id, { preferSheets: false })
-              .then((cloudPage) => applyRemoteIfNewer(cloudPage))
-              .catch(() => {}),
+          await Promise.race([
+            Promise.allSettled([
+              fetchPageFromServerPreview(id)
+                .then((srvPage) => applyRemoteIfNewer(srvPage))
+                .catch(() => {}),
+              cloudStore
+                .fetchPublicLP(id, { preferSheets: false })
+                .then((cloudPage) => applyRemoteIfNewer(cloudPage))
+                .catch(() => {}),
+            ]),
+            new Promise((resolve) => setTimeout(resolve, 4500)),
           ]);
         } catch (srvErr) {
           console.error("Step 2 (Cloud/Sheets Fetch) error:", srvErr);
@@ -327,14 +334,18 @@ function PublicLPPage() {
         if (bestPage) return;
 
         // =====================================================================
-        // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE CASO NECESSÁRIO
+        // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE APENAS SE PASSO 2 NÃO ACHOU NADA E CLOUD AINDA NÃO FOI LIDO
         // =====================================================================
         if (!cloudStore.getStatus().loadedFromCloud) {
           try {
-            const booted = await cloudStore.bootstrap();
-            const liveMatch =
-              (booted.activePreviewPage && matchesTarget(booted.activePreviewPage) ? booted.activePreviewPage : null) ||
-              (Array.isArray(booted.landingPages) ? booted.landingPages.find(matchesTarget) : null);
+            const booted: any = await Promise.race([
+              cloudStore.bootstrap(),
+              new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+            ]);
+            const liveMatch = booted
+              ? (booted.activePreviewPage && matchesTarget(booted.activePreviewPage) ? booted.activePreviewPage : null) ||
+                (Array.isArray(booted.landingPages) ? booted.landingPages.find(matchesTarget) : null)
+              : null;
 
             if (liveMatch && isMounted) {
               setLp(liveMatch);

@@ -802,12 +802,13 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
   const slideIntervalSec = page.hero?.slideshowIntervalSeconds || 3;
 
   useEffect(() => {
-    if (!isSlideshowPlaying || page.hero?.model !== "fullscreen_slideshow") return;
+    const activeHero = page.hero?.model || page.heroModel || page.hero_model;
+    if (!isSlideshowPlaying || activeHero !== "fullscreen_slideshow") return;
     const interval = setInterval(() => {
       setCurrentSlideIndex((prev) => (prev + 1) % slideshowImages.length);
     }, Math.max(1, slideIntervalSec) * 1000);
     return () => clearInterval(interval);
-  }, [isSlideshowPlaying, slideshowImages.length, slideIntervalSec, page.hero?.model]);
+  }, [isSlideshowPlaying, slideshowImages.length, slideIntervalSec, page.hero?.model, page.heroModel, page.hero_model]);
 
   // Countdown timer state
   const [timeLeft, setTimeLeft] = useState({
@@ -1179,7 +1180,8 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
       case "hero":
         if (!visibility.hero || !page.hero) return null;
         const heroIndex = sectionOrder.indexOf("hero");
-        const currentHeroModel: HeroModel = page.hero.model || "split_image";
+        const currentHeroModel: HeroModel =
+          page.hero?.model || page.heroModel || page.hero_model || "split_image";
 
         return (
           <section
@@ -1257,7 +1259,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                         <span>Escolher Modelo da Seção Hero</span>
                       </h3>
                       <p className="text-xs text-zinc-400">
-                        Alterne entre os 6 formatos de alta conversão para transformar o topo da sua página.
+                        Alterne entre os 14 formatos de alta conversão para transformar o topo da sua página.
                       </p>
                     </div>
                     <button
@@ -1275,6 +1277,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                       updateP((p) => ({
                         ...p,
                         heroModel: newModel,
+                        hero_model: newModel,
                         hero: {
                           ...p.hero,
                           model: newModel,

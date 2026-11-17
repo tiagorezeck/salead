@@ -499,7 +499,7 @@ export const HeroModelSelector: React.FC<HeroModelSelectorProps> = ({
                 <span>Escolher Modelo da Seção Hero</span>
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Selecione entre os 10 formatos de alta conversão para transformar o topo da sua página.
+                Selecione entre os 14 formatos de alta conversão para transformar o topo da sua página.
               </p>
             </div>
 

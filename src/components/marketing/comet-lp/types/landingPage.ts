@@ -698,6 +698,23 @@ export interface LandingPage {
   elementFontSizes?: Record<string, number>;
   customElementStyles?: Record<string, CustomElementStyleRecord>;
   floatingImages?: FloatingImageElement[];
+
+  // Normalized / Persistence Compatibility Fields
+  heroModel?: HeroModel;
+  hero_model?: HeroModel;
+  name?: string;
+  updated_at?: string;
+  created_at?: string;
+  visits?: number;
+  leads?: number;
+  leads_count?: number;
+  externalUrl?: string;
+  isExternal?: boolean;
+  template?: string;
+  type?: string;
+  originalId?: string;
+  config?: Record<string, any>;
+  footer?: Record<string, any>;
 }
 
 export interface LeadSubmission {
