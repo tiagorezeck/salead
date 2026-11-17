@@ -734,7 +734,7 @@ export interface LeadSubmission {
   stage?: string;
   classification?: string;
   temperature?: string;
-  minScore?: number;
+  minScore?: string;
   minQualification?: boolean;
   type?: string;
   tags?: string[];
