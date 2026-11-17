@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { cloudStore } from "@/services/cloudStorageService";
 
+export const LOGO_EDITOR_ENABLED = false;
+
 export type BrandSizePreset = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 export interface BrandSizePresetConfig {
@@ -345,7 +347,10 @@ state = {
   ...initialConfig,
   isModalOpen: false,
 
-  openModal: () => updateState({ isModalOpen: true }),
+  openModal: () => {
+    if (!LOGO_EDITOR_ENABLED) return;
+    updateState({ isModalOpen: true });
+  },
   closeModal: () => updateState({ isModalOpen: false }),
 
   setMode: (mode) => updateState({ mode }),

@@ -16,7 +16,7 @@ import { CommandPalette } from "./command-palette";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./brand-logo";
 import { BrandLogoCustomizerModal } from "./brand-logo-customizer-modal";
-import { useBrandStore } from "@/lib/brand-store";
+import { useBrandStore, LOGO_EDITOR_ENABLED } from "@/lib/brand-store";
 import { NewLeadModal } from "./crm/new-lead-modal";
 import { NewTaskModal } from "./crm/new-task-modal";
 import { LiveTransmitModal } from "./crm/live-transmit-modal";
@@ -138,7 +138,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Atalho de teclado para abrir o editor do logo: Alt+L (ou clique duplo na logo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey && (e.key === "l" || e.key === "L")) {
+      if (LOGO_EDITOR_ENABLED && e.altKey && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
         useBrandStore.getState().openModal();
       }
@@ -224,11 +224,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className={cn(
-          "px-4 py-3 flex items-center border-b border-sidebar-border min-h-[4rem] transition-all flex-shrink-0",
-          isExpanded ? "justify-start" : "justify-center"
+          "h-16 py-2 flex items-center border-b border-sidebar-border transition-all flex-shrink-0",
+          isExpanded ? "px-4 justify-start" : "px-2 justify-center"
         )}>
-          <div className="flex items-center min-w-max">
-            <BrandLogo size="md" showText={isExpanded} allowCustomize={true} />
+          <div className="flex items-center justify-center max-w-full">
+            <BrandLogo size="md" showText={isExpanded} allowCustomize={LOGO_EDITOR_ENABLED} />
           </div>
         </div>
 
@@ -259,9 +259,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={() => setIsMobileMenuOpen(false)} 
           />
           <aside className="relative flex flex-col w-72 max-w-[85vw] bg-sidebar border-r border-sidebar-border h-full shadow-2xl z-10 animate-in slide-in-from-left duration-200">
-            <div className="px-4 py-3 flex items-center justify-between border-b border-sidebar-border min-h-[4rem] transition-all flex-shrink-0">
+            <div className="px-4 py-2 h-16 flex items-center justify-between border-b border-sidebar-border transition-all flex-shrink-0">
               <div className="flex items-center">
-                <BrandLogo size="md" showText={true} allowCustomize={true} />
+                <BrandLogo size="md" showText={true} allowCustomize={LOGO_EDITOR_ENABLED} />
               </div>
               <button 
                 onClick={() => setIsMobileMenuOpen(false)} 
@@ -671,7 +671,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {showNewTaskModal && <NewTaskModal onClose={() => setShowNewTaskModal(false)} onAdd={addTask} />}
       {showLiveModal && <LiveTransmitModal onClose={() => setShowLiveModal(false)} />}
       {isAdmin && <GoogleDriveSyncModal isOpen={showDriveModal} onClose={() => setShowDriveModal(false)} />}
-      <BrandLogoCustomizerModal />
+      {LOGO_EDITOR_ENABLED && <BrandLogoCustomizerModal />}
 
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
         <AlertDialogContent className="rounded-[2rem]">

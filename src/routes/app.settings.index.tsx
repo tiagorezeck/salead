@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { GDriveSettingsModal } from "@/components/crm/gdrive-settings-modal";
 import { AISettingsModal } from "@/components/automation/ai-settings-modal";
 import { useAIConfig } from "@/hooks/useAIConfig";
-import { useBrandStore } from "@/lib/brand-store";
+import { useBrandStore, LOGO_EDITOR_ENABLED } from "@/lib/brand-store";
 import { getDriveConfig, initializeSharedDriveConfig, type DriveConfig } from "@/services/googleDriveDatabaseService";
 import { 
   getCalendarConnectionState, 
@@ -300,21 +300,23 @@ function SettingsIndexPage() {
                 </div>
               </button>
 
-              <button
-                onClick={() => useBrandStore.getState().openModal()}
-                className="w-full flex items-center justify-between p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 group hover:border-orange-500/60 hover:bg-orange-500/15 transition-all text-sm font-bold text-orange-500"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-7 w-7 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-sm">
-                    <Sliders className="h-4 w-4" />
+              {LOGO_EDITOR_ENABLED && (
+                <button
+                  onClick={() => useBrandStore.getState().openModal()}
+                  className="w-full flex items-center justify-between p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 group hover:border-orange-500/60 hover:bg-orange-500/15 transition-all text-sm font-bold text-orange-500"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="h-7 w-7 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-sm">
+                      <Sliders className="h-4 w-4" />
+                    </div>
+                    <div className="text-left">
+                      <div>Personalizar Logotipo & Dimensões</div>
+                      <div className="text-[10px] font-normal text-muted-foreground">Editar logotipo e tamanhos para Modo Escuro e Claro</div>
+                    </div>
                   </div>
-                  <div className="text-left">
-                    <div>Personalizar Logotipo & Dimensões</div>
-                    <div className="text-[10px] font-normal text-muted-foreground">Editar logotipo e tamanhos para Modo Escuro e Claro</div>
-                  </div>
-                </div>
-                <ArrowUpRight className="h-4 w-4 text-orange-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-              </button>
+                  <ArrowUpRight className="h-4 w-4 text-orange-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                </button>
+              )}
             </div>
           </div>
         </div>

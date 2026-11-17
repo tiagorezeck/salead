@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { useBrandStore } from "@/lib/brand-store";
+import { useBrandStore, LOGO_EDITOR_ENABLED } from "@/lib/brand-store";
+
+export const OFFICIAL_BRAND_IMAGES = {
+  logoLight: "/assets/aistudio/salead.claro_fe87b055.png",
+  logoDark: "/assets/aistudio/salead.escuro_9e009b96.png",
+  iconLight: "/assets/aistudio/image_6da71357.png",
+  iconDark: "/assets/aistudio/image_195f4bb1.png",
+} as const;
 
 interface BrandIconProps extends React.SVGProps<SVGSVGElement> {
   className?: string;
@@ -172,6 +179,40 @@ export function BrandLogo({
   const store = useBrandStore();
   const isSystemDark = useIsDarkMode();
   const isDark = theme === "dark" ? true : theme === "light" ? false : isSystemDark;
+  const canCustomize = LOGO_EDITOR_ENABLED && allowCustomize;
+
+  if (!LOGO_EDITOR_ENABLED) {
+    const scaleFactor =
+      size === "sm" ? 0.78 : size === "lg" ? 1.35 : size === "xl" ? 1.65 : 1;
+
+    const imgSrc = showText
+      ? isDark
+        ? OFFICIAL_BRAND_IMAGES.logoDark
+        : OFFICIAL_BRAND_IMAGES.logoLight
+      : isDark
+      ? OFFICIAL_BRAND_IMAGES.iconDark
+      : OFFICIAL_BRAND_IMAGES.iconLight;
+
+    const baseHeight = showText ? (isDark ? 42 : 54) : isDark ? 32 : 30;
+    const heightPx = Math.round(baseHeight * scaleFactor);
+
+    return (
+      <div
+        className={cn(
+          "flex items-center justify-center select-none shrink-0 max-w-full",
+          className
+        )}
+      >
+        <img
+          src={imgSrc}
+          alt="SALEAD"
+          style={{ height: `${heightPx}px`, width: "auto" }}
+          className="max-w-full object-contain select-none"
+          draggable={false}
+        />
+      </div>
+    );
+  }
 
   const baseIcon = isDark ? (store.darkIconHeightPx || store.iconHeightPx || 50) : (store.iconHeightPx || 50);
   const baseText = isDark ? (store.darkTextHeightPx || store.textHeightPx || 35) : (store.textHeightPx || 35);
@@ -197,12 +238,16 @@ export function BrandLogo({
     if (svgRaw || dataUrl) {
       return (
         <div 
-          className={cn("flex items-center select-none shrink-0 group relative cursor-pointer", className)}
-          onDoubleClick={allowCustomize ? (e) => {
+          className={cn(
+            "flex items-center select-none shrink-0 group relative",
+            canCustomize && "cursor-pointer",
+            className
+          )}
+          onDoubleClick={canCustomize ? (e) => {
             e.stopPropagation();
             store.openModal();
           } : undefined}
-          title={allowCustomize ? "Dê um clique duplo (2x) para personalizar a logo" : undefined}
+          title={canCustomize ? "Dê um clique duplo (2x) para personalizar a logo" : undefined}
         >
           <div style={{ height: `${baseFull}px` }} className="flex items-center">
             {svgRaw ? (
@@ -340,13 +385,17 @@ export function BrandLogo({
 
   return (
     <div 
-      className={cn("flex items-center select-none shrink-0 group relative cursor-pointer", className)}
+      className={cn(
+        "flex items-center select-none shrink-0 group relative",
+        canCustomize && "cursor-pointer",
+        className
+      )}
       style={{ gap: `${currentGap || 12}px` }}
-      onDoubleClick={allowCustomize ? (e) => {
+      onDoubleClick={canCustomize ? (e) => {
         e.stopPropagation();
         store.openModal();
       } : undefined}
-      title={allowCustomize ? "Dê um clique duplo (2x) para personalizar a logo" : undefined}
+      title={canCustomize ? "Dê um clique duplo (2x) para personalizar a logo" : undefined}
     >
       {/* Icon Symbol */}
       {shouldShowIcon && (
@@ -401,6 +450,19 @@ export function BrandIconOnly({
   const store = useBrandStore();
   const isSystemDark = useIsDarkMode();
   const isDark = theme === "dark" ? true : theme === "light" ? false : isSystemDark;
+
+  if (!LOGO_EDITOR_ENABLED) {
+    const iconHeightMap = { sm: 24, md: isDark ? 32 : 30, lg: 40 };
+    return (
+      <img
+        src={isDark ? OFFICIAL_BRAND_IMAGES.iconDark : OFFICIAL_BRAND_IMAGES.iconLight}
+        alt="SALEAD"
+        style={{ height: `${iconHeightMap[size]}px`, width: "auto" }}
+        className={cn("shrink-0 max-w-full object-contain select-none", className)}
+        draggable={false}
+      />
+    );
+  }
 
   const heightMap = { sm: 28, md: store.iconHeightPx || 36, lg: 44 };
   const h = heightMap[size];
