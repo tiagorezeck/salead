@@ -725,9 +725,20 @@ export interface LeadSubmission {
   name: string;
   whatsapp: string;
   email: string;
+  company?: string;
   quizAnswers: Record<string, string>;
   utms: Record<string, string>;
   submittedAt: string;
   webhookStatus: "success" | "skipped" | "failed" | "pending";
   webhookResponse?: string;
+  stage?: string;
+  classification?: string;
+  temperature?: string;
+  minScore?: number;
+  minQualification?: boolean;
+  type?: string;
+  tags?: string[];
+  score?: number;
+  isTest?: boolean;
+  metadata?: Record<string, any>;
 }
