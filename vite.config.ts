@@ -21,6 +21,6 @@ export default defineConfig({
     hmr: false,
   },
   build: {
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 2000,
   }
 })
