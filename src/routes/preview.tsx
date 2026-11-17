@@ -315,7 +315,7 @@ export function PreviewPage() {
       (draft) => {
         draft.leads = [newLeadObj, ...(draft.leads || []).filter((l: any) => l.id !== newLeadObj.id)];
       },
-      { immediate: true }
+      { skipPush: true }
     );
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("lead-submitted", { detail: newLeadObj }));

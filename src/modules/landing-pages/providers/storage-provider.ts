@@ -24,6 +24,13 @@ function notifyKey(key: string) {
 
 export const localStorageProvider: StorageProvider = {
   getItem(k) {
+    if (k.includes("analytics")) {
+      const events = cloudStore.getState().lpAnalytics?.events;
+      if (Array.isArray(events)) {
+        return JSON.stringify(events);
+      }
+      return memoryStore.get(k) ?? null;
+    }
     if (k.includes("lps") || k.includes("landing")) {
       const lps = cloudStore.getState().landingPages || [];
       if (lps.length > 0 || cloudStore.getStatus().loadedFromCloud) {
@@ -33,10 +40,33 @@ export const localStorageProvider: StorageProvider = {
     return memoryStore.get(k) ?? null;
   },
   setItem(k, v) {
+    if (k.includes("analytics")) {
+      try {
+        const parsed = JSON.parse(v);
+        if (Array.isArray(parsed)) {
+          cloudStore.mutate((draft) => {
+            draft.lpAnalytics = {
+              ...(draft.lpAnalytics || {}),
+              events: parsed.slice(-5000),
+              updatedAt: new Date().toISOString(),
+            };
+          });
+        }
+      } catch {}
+    }
     memoryStore.set(k, v);
     notifyKey(k);
   },
   removeItem(k) {
+    if (k.includes("analytics")) {
+      cloudStore.mutate((draft) => {
+        draft.lpAnalytics = {
+          ...(draft.lpAnalytics || {}),
+          events: [],
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    }
     memoryStore.delete(k);
     notifyKey(k);
   },
@@ -46,7 +76,7 @@ export const localStorageProvider: StorageProvider = {
     }
     keyListeners.get(k)!.add(listener);
     const unsubCloud = cloudStore.subscribe(() => {
-      if (k.includes("lps") || k.includes("landing")) {
+      if (k.includes("lps") || k.includes("landing") || k.includes("analytics")) {
         listener();
       }
     });

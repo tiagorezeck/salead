@@ -27,6 +27,7 @@ const DATA_FOLDER_NAME = "AppDatabase_Data";
 const BACKUP_FOLDER_NAME = "Backups";
 const MEDIA_FOLDER_NAME = "Midia";
 const SPREADSHEET_BASE_NAME = "APP_DATABASE_SHEETS";
+const DEFAULT_SPREADSHEET_ID = "1BsOiK5dC7acweEnFEauh8aDXgKI9vIt4C9OVSw7jMu4";
 const ROOT_FILE_NAME = "database_root.json";
 
 // Cache em Chunks (seguro contra limite de 100KB do CacheService) & Concorrência
@@ -177,6 +178,23 @@ function doGet(e) {
         status: "success",
         survey: foundSurvey,
         company: dbSurvey.company || null
+      });
+    }
+
+    // 6b. LEITURA COMPLETA DAS ABAS DA PLANILHA VIA GET
+    if (action === "FORCE_READ_SHEETS" || action === "RECOVER_FROM_SHEETS" || action === "force_read") {
+      var ssGet = getOrCreateSpreadsheet(folder);
+      var forcedGet = readDatabaseRootRaw(folder) || {};
+      forcedGet = mergeSpreadsheetRecoveryIntoDb(ssGet, forcedGet);
+      forcedGet.ultimoBackup = new Date().toISOString();
+      var serializedForcedGet = writeDatabaseRootObject(folder, forcedGet);
+      putToChunkedCache(serializedForcedGet, CACHE_TTL_SECONDS);
+      return jsonResponse({
+        status: "success",
+        message: "Abas da planilha lidas com sucesso!",
+        spreadsheetName: ssGet.getName(),
+        spreadsheetUrl: ssGet.getUrl(),
+        data: forcedGet
       });
     }
 
@@ -1175,6 +1193,126 @@ function mergeSpreadsheetRecoveryIntoDb(ss, forcedData) {
           });
         }
       }
+      continue;
+    }
+
+    // Usuarios
+    if (sNameNorm === "usuarios") {
+      if (!Array.isArray(forcedData.users)) forcedData.users = [];
+      var uKeys = {};
+      forcedData.users.forEach(function(u) { if (u && u.email) uKeys[String(u.email).toLowerCase()] = true; });
+      for (var ui = 1; ui < sValues.length; ui++) {
+        var ur = sValues[ui];
+        var uEmail = String(ur[2] || "").trim();
+        if (!uEmail || uKeys[uEmail.toLowerCase()]) continue;
+        uKeys[uEmail.toLowerCase()] = true;
+        forcedData.users.push({
+          id: String(ur[0] || ("user_" + ui)),
+          name: String(ur[1] || "Usuário"),
+          email: uEmail,
+          role: String(ur[3] || "Seller"),
+          status: String(ur[4] || "Ativo"),
+          contact: String(ur[5] || ""),
+          createdAt: String(ur[6] || new Date().toISOString())
+        });
+      }
+      continue;
+    }
+
+    // Produtos
+    if (sNameNorm === "produtos") {
+      var pKeys = {};
+      forcedData.products.forEach(function(p) { if (p && p.id) pKeys[String(p.id)] = true; });
+      for (var pi = 1; pi < sValues.length; pi++) {
+        var pr = sValues[pi];
+        var prId = String(pr[0] || ("prod_" + pi));
+        if (!pr[1] || pKeys[prId]) continue;
+        pKeys[prId] = true;
+        forcedData.products.push({
+          id: prId,
+          name: String(pr[1] || ""),
+          category: String(pr[2] || "Geral"),
+          costPrice: Number(pr[3]) || 0,
+          salePrice: Number(pr[4]) || 0,
+          recurring: String(pr[5] || "").toLowerCase() === "sim",
+          recurrenceMonths: Number(pr[6]) || 12,
+          strategy: String(pr[7] || "Nenhuma")
+        });
+      }
+      continue;
+    }
+
+    // Diagnosticos_Surveys (preserva perguntas do JSON quando já existentes)
+    if (sNameNorm.indexOf("diagnosticos") !== -1 || sNameNorm.indexOf("surveys") !== -1) {
+      if (!Array.isArray(forcedData.surveys)) forcedData.surveys = [];
+      var svKeys = {};
+      forcedData.surveys.forEach(function(sv) { if (sv && sv.id) svKeys[String(sv.id)] = true; });
+      for (var svi = 1; svi < sValues.length; svi++) {
+        var svr = sValues[svi];
+        var svId = String(svr[0] || "");
+        if (!svId || svKeys[svId]) continue;
+        svKeys[svId] = true;
+        forcedData.surveys.push({
+          id: svId,
+          name: String(svr[1] || "Pesquisa"),
+          type: String(svr[2] || "individual"),
+          purpose: String(svr[3] || "min"),
+          visits: Number(svr[4]) || 0,
+          completions: Number(svr[5]) || 0,
+          status: String(svr[6] || "active"),
+          questions: [],
+          createdAt: String(svr[8] || new Date().toISOString())
+        });
+      }
+      continue;
+    }
+
+    // Tarefas
+    if (sNameNorm.indexOf("tarefas") === 0) {
+      if (!Array.isArray(forcedData.tasks)) forcedData.tasks = [];
+      var tKeys = {};
+      forcedData.tasks.forEach(function(t) { if (t && t.id) tKeys[String(t.id)] = true; });
+      for (var tki = 1; tki < sValues.length; tki++) {
+        var tkr = sValues[tki];
+        var tkId = String(tkr[0] || ("task_" + tki));
+        if (!tkr[1] || tKeys[tkId]) continue;
+        tKeys[tkId] = true;
+        forcedData.tasks.push({
+          id: tkId,
+          title: String(tkr[1] || ""),
+          lead: String(tkr[2] || ""),
+          owners: tkr[3] ? String(tkr[3]).split(",").map(function(x){ return x.trim(); }).filter(Boolean) : [],
+          due: String(tkr[4] || ""),
+          priority: String(tkr[5] || "media"),
+          done: String(tkr[6] || "").toLowerCase() === "sim",
+          createdAt: String(tkr[7] || new Date().toISOString())
+        });
+      }
+      continue;
+    }
+
+    // Investimentos Marketing
+    if (sNameNorm.indexOf("investimentos") !== -1) {
+      if (!Array.isArray(forcedData.marketingInvestments)) forcedData.marketingInvestments = [];
+      var iKeys = {};
+      forcedData.marketingInvestments.forEach(function(inv) { if (inv && inv.id) iKeys[String(inv.id)] = true; });
+      for (var ii = 1; ii < sValues.length; ii++) {
+        var ir = sValues[ii];
+        var iId = String(ir[0] || ("inv_" + ii));
+        if (!ir[1] || iKeys[iId]) continue;
+        iKeys[iId] = true;
+        forcedData.marketingInvestments.push({
+          id: iId,
+          channel: String(ir[1] || "Meta Ads"),
+          amount: Number(ir[2]) || 0,
+          start_date: String(ir[3] || ""),
+          end_date: String(ir[4] || ""),
+          landing_page_id: String(ir[5] || ""),
+          description: String(ir[6] || ""),
+          createdAt: String(ir[7] || new Date().toISOString())
+        });
+      }
+      continue;
     }
   }
   return forcedData;
@@ -1447,19 +1585,20 @@ function updateLandingPageLeadCount(ss, lpId, lpTitle) {
 }
 
 function getOrCreateSpreadsheet(folder, customSpreadsheetId) {
+  var targetId = customSpreadsheetId || DEFAULT_SPREADSHEET_ID;
+  if (targetId) {
+    try {
+      if (String(targetId).indexOf("docs.google.com") !== -1) {
+        return SpreadsheetApp.openByUrl(String(targetId));
+      }
+      return SpreadsheetApp.openById(String(targetId));
+    } catch (eCustom) {}
+  }
+
   try {
     var activeSs = SpreadsheetApp.getActiveSpreadsheet();
     if (activeSs) return activeSs;
   } catch (eActive) {}
-
-  if (customSpreadsheetId) {
-    try {
-      if (String(customSpreadsheetId).indexOf("docs.google.com") !== -1) {
-        return SpreadsheetApp.openByUrl(String(customSpreadsheetId));
-      }
-      return SpreadsheetApp.openById(String(customSpreadsheetId));
-    } catch (eCustom) {}
-  }
 
   try {
     var files = folder.getFilesByName(SPREADSHEET_BASE_NAME);

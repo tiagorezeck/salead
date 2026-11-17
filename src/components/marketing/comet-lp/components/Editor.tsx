@@ -16,7 +16,6 @@ import {
 import { THEME_CONFIGS } from "../utils/theme";
 import { LandingPageRenderer } from "./LandingPageRenderer";
 import { generateStandaloneHtml } from "../utils/htmlExporter";
-import { saveLandingPageToStorage, syncPageWithServerPreview } from "../utils/storage";
 import { cloudStore } from "@/services/cloudStorageService";
 import { DynamicIcon } from "./DynamicIcon";
 import { ImagePickerModal } from "./ImagePickerModal";
@@ -305,8 +304,6 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
       },
       updatedAt: new Date().toISOString(),
     };
-    saveLandingPageToStorage(updatedPageWithTimestamp);
-    syncPageWithServerPreview(updatedPageWithTimestamp).catch(() => {});
     onSave(updatedPageWithTimestamp);
     setTimeout(() => {
       setSaveStatus("saved");
@@ -341,13 +338,17 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
       const updated = updater(prev);
       const withTime = { ...updated, updatedAt: new Date().toISOString() };
       
-      // Instantly persist to cloudStore RAM + Cloud sync for real-time preview across tabs
+      // Instantly persist to cloudStore RAM + debounced Cloud sync for real-time preview across tabs
       if (typeof window !== "undefined") {
         try {
           cloudStore.mutate((draft) => {
+            const list = Array.isArray(draft.landingPages) ? draft.landingPages : [];
+            const exists = list.some((p: any) => p.id === withTime.id || (withTime.slug && p.slug === withTime.slug));
+            draft.landingPages = exists
+              ? list.map((p: any) => (p.id === withTime.id || (withTime.slug && p.slug === withTime.slug)) ? withTime : p)
+              : [withTime, ...list];
             draft.activePreviewPage = withTime;
           });
-          saveLandingPageToStorage(withTime);
         } catch {}
       }
 
@@ -759,12 +760,16 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
           {/* Link Teste (Network Preview / Share Modal) */}
           <button
             onClick={() => {
+              const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
               const updatedPageWithTimestamp = {
                 ...page,
+                heroModel: activeHeroModel,
+                hero: {
+                  ...page.hero,
+                  model: activeHeroModel,
+                },
                 updatedAt: new Date().toISOString(),
               };
-              saveLandingPageToStorage(updatedPageWithTimestamp);
-              syncPageWithServerPreview(updatedPageWithTimestamp).catch(() => {});
               onSave(updatedPageWithTimestamp);
               setIsNetworkPreviewOpen(true);
             }}

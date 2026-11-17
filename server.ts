@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { generateHighConversionLP, detectArchetype, type LPGenerationParams } from "./src/modules/landing-pages/services/high-conversion-engine";
 import { cometLpRouter, syncDriveDataToDisk } from "./src/components/marketing/comet-lp/server/cometRoutes";
@@ -38,10 +37,15 @@ app.get("/api/health", (_req, res) => {
 // Centralized System Drive & Database Config (Persists across browsers & users)
 const DRIVE_CONFIG_FILE = path.join(process.cwd(), "drive_config.json");
 const SERVER_CONFIG_FILE = path.join(process.cwd(), "server-config.json");
+const TMP_DRIVE_CONFIG_FILE = path.join("/tmp", "drive_config.json");
+const TMP_SERVER_CONFIG_FILE = path.join("/tmp", "server-config.json");
 const GAS_CONFIG_TS_FILE = path.join(process.cwd(), "src", "config", "gasConfig.ts");
 
 function readServerDriveConfig(): Record<string, any> {
-  for (const filePath of [DRIVE_CONFIG_FILE, SERVER_CONFIG_FILE]) {
+  const candidates = process.env.VERCEL
+    ? [TMP_DRIVE_CONFIG_FILE, TMP_SERVER_CONFIG_FILE, DRIVE_CONFIG_FILE, SERVER_CONFIG_FILE]
+    : [DRIVE_CONFIG_FILE, SERVER_CONFIG_FILE];
+  for (const filePath of candidates) {
     try {
       if (fs.existsSync(filePath)) {
         const raw = fs.readFileSync(filePath, "utf-8");
@@ -100,14 +104,19 @@ function persistServerDriveConfig(config: Record<string, any>): Record<string, a
   });
 
   try {
-    fs.writeFileSync(DRIVE_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
-    fs.writeFileSync(SERVER_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    if (process.env.VERCEL) {
+      fs.writeFileSync(TMP_DRIVE_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+      fs.writeFileSync(TMP_SERVER_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    } else {
+      fs.writeFileSync(DRIVE_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+      fs.writeFileSync(SERVER_CONFIG_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    }
   } catch (err) {
     console.warn("Aviso ao salvar arquivos de config do servidor:", err);
   }
 
   // Atualiza também o fallback global em dev para deploy imediato sem localStorage
-  if (process.env.NODE_ENV !== "production" && fs.existsSync(GAS_CONFIG_TS_FILE)) {
+  if (!process.env.VERCEL && process.env.NODE_ENV !== "production" && fs.existsSync(GAS_CONFIG_TS_FILE)) {
     try {
       let srcContent = fs.readFileSync(GAS_CONFIG_TS_FILE, "utf-8");
       if (cleanUrl) {
@@ -411,6 +420,7 @@ app.all("/api/drive-proxy", async (req, res) => {
       const parsed = JSON.parse(rawText);
       const payloadContent = parsed?.data || parsed?.content || parsed;
       if (
+        !process.env.VERCEL &&
         payloadContent &&
         (Array.isArray(payloadContent.leads) || Array.isArray(payloadContent.landingPages))
       ) {
@@ -1132,6 +1142,7 @@ if (!process.env.VERCEL) {
 async function setupVite() {
   if (process.env.NODE_ENV !== "production") {
     try {
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",

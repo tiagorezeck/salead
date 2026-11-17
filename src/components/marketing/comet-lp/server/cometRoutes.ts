@@ -11,10 +11,11 @@ function isUUID(str?: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
 }
 
-const LP_DATA_FILE = path.join(process.cwd(), "data", "landing_pages.json");
-const SURVEYS_DATA_FILE = path.join(process.cwd(), "data", "surveys.json");
-const RESPONSES_DATA_FILE = path.join(process.cwd(), "data", "survey_responses.json");
-const LEADS_DATA_FILE = path.join(process.cwd(), "data", "leads_submissions.json");
+const DATA_DIR = process.env.VERCEL ? path.join("/tmp", "comet-data") : path.join(process.cwd(), "data");
+const LP_DATA_FILE = path.join(DATA_DIR, "landing_pages.json");
+const SURVEYS_DATA_FILE = path.join(DATA_DIR, "surveys.json");
+const RESPONSES_DATA_FILE = path.join(DATA_DIR, "survey_responses.json");
+const LEADS_DATA_FILE = path.join(DATA_DIR, "leads_submissions.json");
 
 // In-memory caches for sub-millisecond response times
 let memoryLps: any[] | null = null;
@@ -93,8 +94,8 @@ const DEFAULT_INITIAL_LANDING_PAGES: any[] = [
     accentColor: "purple",
     theme: "dark",
     slug: "mentoria-high-ticket-cro",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: "2025-01-01T00:00:00.000Z",
+    updated_at: "2025-01-01T00:00:00.000Z",
     visibility: {
       hero: true,
       socialProof: true,
@@ -208,8 +209,8 @@ const DEFAULT_INITIAL_LANDING_PAGES: any[] = [
     accentColor: "purple",
     theme: "dark",
     slug: "mentoria-high-ticket-cro",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: "2025-01-01T00:00:00.000Z",
+    updated_at: "2025-01-01T00:00:00.000Z",
     visibility: {
       hero: true,
       socialProof: true,
@@ -321,7 +322,6 @@ function readStoredLandingPages(): any[] {
         return memoryLps;
       }
     }
-    writeStoredLandingPages(DEFAULT_INITIAL_LANDING_PAGES);
     memoryLps = DEFAULT_INITIAL_LANDING_PAGES;
     return memoryLps;
   } catch (e) {
@@ -342,8 +342,8 @@ const DEFAULT_SERVER_SURVEYS: any[] = SURVEY_PRESETS.map((p) => ({
   type: (p.id.includes("min") || p.id.includes("qualificacao")) ? "individual" : "mass",
   purpose: (p.id.includes("min") || p.id.includes("qualificacao")) ? "min" : "common",
   status: "active",
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
+  createdAt: "2025-01-01T00:00:00.000Z",
+  updatedAt: "2025-01-01T00:00:00.000Z",
   questions: p.questions || [],
   settings: {
     headline: p.name,
@@ -360,7 +360,7 @@ const DEFAULT_SERVER_SURVEYS: any[] = SURVEY_PRESETS.map((p) => ({
   template: "Modern",
   completions: 0,
   visits: 0,
-  created_at: new Date().toISOString(),
+  created_at: "2025-01-01T00:00:00.000Z",
 }));
 
 function readStoredSurveys(): any[] {
@@ -438,6 +438,52 @@ export function getDriveWebAppUrlServer(): string {
     } catch {}
   }
   return normalizeGasUrl(GLOBAL_GAS_CONFIG.WEBAPP_URL);
+}
+
+let cloudDbCache: { data: any; fetchedAt: number } | null = null;
+let cloudDbInflight: Promise<any | null> | null = null;
+
+function invalidateCloudDbCache() {
+  cloudDbCache = null;
+}
+
+export async function fetchCloudDbFromGasServer(force = false): Promise<any | null> {
+  const now = Date.now();
+  if (!force && cloudDbCache && now - cloudDbCache.fetchedAt < 4000) {
+    return cloudDbCache.data;
+  }
+  if (cloudDbInflight) return cloudDbInflight;
+
+  const webappUrl = getDriveWebAppUrlServer();
+  if (!webappUrl) return null;
+
+  cloudDbInflight = (async () => {
+    try {
+      const urlObj = new URL(webappUrl);
+      urlObj.searchParams.set("action", "get");
+      urlObj.searchParams.set("t", String(Date.now()));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(urlObj.toString(), { method: "GET", redirect: "follow", signal: controller.signal });
+      clearTimeout(timeout);
+      const text = await res.text();
+      if (text && !text.trim().startsWith("<")) {
+        const parsed = JSON.parse(text);
+        if (parsed && parsed.status !== "empty" && parsed.status !== "error") {
+          const payload = parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.leads) ? parsed.data : parsed;
+          if (payload && typeof payload === "object") {
+            cloudDbCache = { data: payload, fetchedAt: Date.now() };
+            return payload;
+          }
+        }
+      }
+    } catch {}
+    return null;
+  })().finally(() => {
+    cloudDbInflight = null;
+  });
+
+  return cloudDbInflight;
 }
 
 export function syncDriveDataToDisk(driveData: any): { leadsCount: number; pagesCount: number } {
@@ -635,7 +681,25 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
     Array.from(previewPagesStore.values()).find(matches);
   if (page) return page;
 
-  // 2. Disco persistente do servidor (cache em memória)
+  // 2. Fonte mestre em nuvem Google Apps Script (funciona em Vercel cold start)
+  const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
+  if (cloudDb) {
+    const deletedSet = new Set(Array.isArray(cloudDb.deletedLpIds) ? cloudDb.deletedLpIds.map(String) : []);
+    const cloudCandidates: any[] = [];
+    if (cloudDb.activePreviewPage) cloudCandidates.push(cloudDb.activePreviewPage);
+    if (Array.isArray(cloudDb.landingPages)) cloudCandidates.push(...cloudDb.landingPages);
+    if (Array.isArray(cloudDb.landing_pages)) cloudCandidates.push(...cloudDb.landing_pages);
+    const fromCloud = cloudCandidates.find(
+      (p) => p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug))) && matches(p)
+    );
+    if (fromCloud) {
+      previewPagesStore.set(fromCloud.id, fromCloud);
+      if (fromCloud.slug) previewPagesStore.set(fromCloud.slug, fromCloud);
+      return fromCloud;
+    }
+  }
+
+  // 3. Disco persistente do servidor (cache em memória)
   const diskPages = readStoredLandingPages();
   const fromDisk = diskPages.find(matches);
   if (fromDisk) {
@@ -644,11 +708,9 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
     return fromDisk;
   }
 
-  // 3. Presets e templates locais (instantâneo, zero latência)
+  // 4. Presets e templates locais (apenas fallback final, sem poluir previewPagesStore)
   const fromPreset = PRESET_TEMPLATES.find(matches) || DEFAULT_INITIAL_LANDING_PAGES.find(matches);
   if (fromPreset) {
-    previewPagesStore.set(fromPreset.id, fromPreset);
-    if (fromPreset.slug) previewPagesStore.set(fromPreset.slug, fromPreset);
     return fromPreset;
   }
 
@@ -892,6 +954,7 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
       return res.status(400).json({ error: "Invalid page payload" });
     }
 
+    invalidateCloudDbCache();
     // 1. Store in memory preview store
     previewPagesStore.set(page.id, page);
     if (page.previewToken) {
@@ -1174,21 +1237,24 @@ cometLpRouter.delete("/api/pages/preview/:tokenOrId", (req, res) => {
   return res.json({ success: true });
 });
 
-// Get leads submissions (disco local persistente + cache em memória instantâneo)
+// Get leads submissions (Google Apps Script em nuvem como fonte principal + fallback local)
 cometLpRouter.get("/api/leads", async (req, res) => {
   try {
     const pageId = req.query.pageId as string;
-    let list = readStoredLeads();
-
-    // Se estiver vazio no arquivo, mas tiver em memória
-    if (list.length === 0 && leadSubmissions.length > 0) {
-      list = [...leadSubmissions];
-      writeStoredLeads(list);
+    const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
+    let list: any[] = [];
+    if (cloudDb && (Array.isArray(cloudDb.leads) || Array.isArray(cloudDb.leads_landing_pages))) {
+      list = [...(cloudDb.leads || []), ...(cloudDb.leads_landing_pages || [])];
+    } else {
+      list = readStoredLeads();
+      if (list.length === 0 && leadSubmissions.length > 0) {
+        list = [...leadSubmissions];
+        writeStoredLeads(list);
+      }
     }
 
-    // Responde instantaneamente com a lista local de leads
     if (pageId) {
-      return res.json({ leads: list.filter((l) => l.pageId === pageId) });
+      return res.json({ leads: list.filter((l) => l.pageId === pageId || l.landingPageId === pageId) });
     } else {
       return res.json({ leads: list });
     }
@@ -2178,18 +2244,30 @@ Retorne um JSON com:
 // GET all landing pages
 cometLpRouter.get("/api/landing-pages", async (_req, res) => {
   try {
-    let pages = readStoredLandingPages();
+    const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
+    const deletedSet = new Set(Array.isArray(cloudDb?.deletedLpIds) ? cloudDb.deletedLpIds.map(String) : []);
+    let pages: any[] = [];
+    let storedLeads: any[] = [];
+
+    if (cloudDb && Array.isArray(cloudDb.landingPages)) {
+      pages = cloudDb.landingPages.filter(
+        (p: any) => p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug)))
+      );
+      storedLeads = [...(cloudDb.leads || []), ...(cloudDb.leads_landing_pages || [])];
+    } else {
+      pages = readStoredLandingPages();
+      storedLeads = readStoredLeads();
+    }
 
     // Recalcula dinamicamente estatísticas garantindo consistência com os leads gravados
-    const storedLeads = readStoredLeads();
     pages = pages.map((p) => {
       const pId = p.id?.toLowerCase();
       const pSlug = p.slug?.toLowerCase();
       const pName = (p.name || p.title || "").toLowerCase();
 
       const matchedLeadsCount = storedLeads.filter((l) => {
-        const lPageId = (l.pageId || "").toLowerCase();
-        const lPageTitle = (l.pageTitle || "").toLowerCase();
+        const lPageId = (l.pageId || l.landingPageId || "").toLowerCase();
+        const lPageTitle = (l.pageTitle || l.landingPageTitle || l.landingPage || "").toLowerCase();
         const lCompany = (l.company || "").toLowerCase();
         const lSource = (l.source || "").toLowerCase();
 
@@ -2243,6 +2321,7 @@ cometLpRouter.get("/api/landing-pages/:id", async (req, res) => {
 // POST create landing page
 cometLpRouter.post("/api/landing-pages", async (req, res) => {
   try {
+    invalidateCloudDbCache();
     const body = req.body || {};
     const fallbackId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
@@ -2292,6 +2371,7 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
 // PUT update landing page
 cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
   try {
+    invalidateCloudDbCache();
     const { id } = req.params;
     const body = req.body || {};
     const current = readStoredLandingPages();
@@ -2397,6 +2477,7 @@ cometLpRouter.post("/api/landing-pages/:id/clear-test-leads", async (req, res) =
 // DELETE single landing page
 cometLpRouter.delete("/api/landing-pages/:id", async (req, res) => {
   try {
+    invalidateCloudDbCache();
     const { id } = req.params;
     const current = readStoredLandingPages();
     const filtered = current.filter((p) => p.id !== id && p.slug !== id);
@@ -2458,6 +2539,10 @@ cometLpRouter.post("/api/landing-pages/clean-keep-one", async (req, res) => {
 // GET all survey responses (MUST be declared BEFORE /api/surveys/:id)
 cometLpRouter.get("/api/surveys/responses", async (_req, res) => {
   try {
+    const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
+    if (cloudDb && Array.isArray(cloudDb.surveyResponses)) {
+      return res.json(cloudDb.surveyResponses);
+    }
     const list = readStoredSurveyResponses();
     res.json(list);
   } catch (err: any) {
@@ -2468,6 +2553,10 @@ cometLpRouter.get("/api/surveys/responses", async (_req, res) => {
 // GET all surveys
 cometLpRouter.get("/api/surveys", async (_req, res) => {
   try {
+    const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
+    if (cloudDb && Array.isArray(cloudDb.surveys) && cloudDb.surveys.length > 0) {
+      return res.json({ success: true, surveys: cloudDb.surveys });
+    }
     const diskSurveys = readStoredSurveys();
     res.json({ success: true, surveys: diskSurveys });
   } catch (err: any) {
@@ -2536,7 +2625,7 @@ cometLpRouter.get("/api/surveys/:id", async (req, res) => {
         template: "Modern",
         completions: 0,
         visits: 0,
-        created_at: new Date().toISOString(),
+        created_at: "2025-01-01T00:00:00.000Z",
       };
       return res.json({ success: true, survey: asSurvey });
     }
@@ -2550,6 +2639,7 @@ cometLpRouter.get("/api/surveys/:id", async (req, res) => {
 // POST create survey
 cometLpRouter.post("/api/surveys", async (req, res) => {
   try {
+    invalidateCloudDbCache();
     const survey = req.body;
     if (!survey || !survey.id) return res.status(400).json({ error: "Missing survey id" });
     const current = readStoredSurveys();
@@ -2564,6 +2654,7 @@ cometLpRouter.post("/api/surveys", async (req, res) => {
 // PUT update survey
 cometLpRouter.put("/api/surveys/:id", async (req, res) => {
   try {
+    invalidateCloudDbCache();
     const { id } = req.params;
     const body = req.body || {};
     const current = readStoredSurveys();
@@ -2585,6 +2676,7 @@ cometLpRouter.put("/api/surveys/:id", async (req, res) => {
 // DELETE survey
 cometLpRouter.delete("/api/surveys/:id", async (req, res) => {
   try {
+    invalidateCloudDbCache();
     const { id } = req.params;
     const current = readStoredSurveys();
     writeStoredSurveys(current.filter((s) => s.id !== id));

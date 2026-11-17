@@ -71,8 +71,6 @@ const GET_ACTIONS = new Set([
   "lp_visit",
   "list_files",
   "get_file",
-  "FORCE_READ_SHEETS",
-  "force_read",
 ]);
 
 export const cleanWebAppUrl = (rawUrl: string): string => {

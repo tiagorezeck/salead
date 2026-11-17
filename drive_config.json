@@ -2,11 +2,11 @@
   "webappUrl": "https://script.google.com/macros/s/AKfycbwTqa9pc_cLvtZfraT7jMFz6KZZtLQ5NxLfsjetvu8H6RzkndhkdoZuHkR_BAxopSX8/exec",
   "autoSync": true,
   "folderName": "SALEAD/AppDatabase_Data",
-  "syncStatus": "syncing",
+  "syncStatus": "synced",
   "connected": true,
   "lastSyncTimestamp": 1792984758939,
   "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1BsOiK5dC7acweEnFEauh8aDXgKI9vIt4C9OVSw7jMu4/edit",
   "spreadsheetName": "APP_DATABASE_SHEETS",
   "spreadsheetId": "1BsOiK5dC7acweEnFEauh8aDXgKI9vIt4C9OVSw7jMu4",
-  "lastSyncMessage": "O Google Apps Script retornou uma página HTML em vez de JSON. Certifique-se de que a implantação é do tipo 'App da Web' com acesso para 'Qualquer pessoa' e a URL termina em '/exec'."
+  "lastSyncMessage": "Motor v3.0 Cloud Engine configurado."
 }

@@ -103,15 +103,8 @@ export function saveSingleLandingPage(page: LandingPage): LandingPage[] {
     draft.activePreviewPage = pageWithUpdatedTimestamp;
   });
 
-  // Sincronização assíncrona imediata com o servidor (preview + persistência física)
+  // Sincronização assíncrona com cache de preview do servidor
   syncPageWithServerPreview(pageWithUpdatedTimestamp).catch(() => {});
-  try {
-    fetch(`/api/landing-pages/${encodeURIComponent(page.id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(pageWithUpdatedTimestamp),
-    }).catch(() => {});
-  } catch {}
 
   return updated;
 }
@@ -157,27 +150,28 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
       cloudStore.fetchPublicLP(tokenOrId).catch(() => null),
       Promise.allSettled([
         fetchEndpoint(`/api/public/lp/${cleanId}`),
-        fetchEndpoint(`/api/landing-pages/${cleanId}`),
-        fetchEndpoint(`/api/pages/preview?id=${cleanId}`),
         fetchEndpoint(`/api/pages/preview/${cleanId}`),
       ]),
     ]);
 
-    const candidates: LandingPage[] = [];
-    if (cloudResult) candidates.push(normalizePage(cloudResult as any));
+    const candidates: Array<{ page: LandingPage; fromCloud: boolean }> = [];
+    if (cloudResult) {
+      candidates.push({ page: normalizePage(cloudResult as any), fromCloud: true });
+    }
     for (const r of apiResults) {
       if (r.status === "fulfilled" && r.value) {
-        candidates.push(r.value);
+        candidates.push({ page: r.value, fromCloud: false });
       }
     }
 
     if (candidates.length > 0) {
       candidates.sort((a, b) => {
-        const tA = new Date(a.updatedAt || (a as any).updated_at || 0).getTime();
-        const tB = new Date(b.updatedAt || (b as any).updated_at || 0).getTime();
-        return tB - tA;
+        const tA = new Date(a.page.updatedAt || (a.page as any).updated_at || 0).getTime();
+        const tB = new Date(b.page.updatedAt || (b.page as any).updated_at || 0).getTime();
+        if (tB !== tA) return tB - tA;
+        return Number(b.fromCloud) - Number(a.fromCloud);
       });
-      return candidates[0];
+      return candidates[0].page;
     }
   } catch {}
 

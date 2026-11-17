@@ -197,7 +197,7 @@ function PublicLPPage() {
                   conv: updatedVisits > 0 ? Math.min(100, Math.round((lpLeads / updatedVisits) * 100)) : 0,
                 };
               }
-            });
+            }, { skipPush: true });
 
             window.dispatchEvent(new CustomEvent("lp_visit_incremented", { detail: { id: targetId, visits: newVisits } }));
           } catch (csErr) {
@@ -208,12 +208,6 @@ function PublicLPPage() {
         // 3. Notifica o Servidor Express e Vercel Serverless (API do Backend)
         try {
           fetch(`/api/landing-pages/${encodeURIComponent(targetId)}/visit`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ lpId: targetLp.id, id, slug: targetLp.slug, title: targetLp.title || targetLp.name })
-          }).catch(() => {});
-          
-          fetch(`/api/landing-pages/visit`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ lpId: targetLp.id, id, slug: targetLp.slug, title: targetLp.title || targetLp.name })
@@ -271,7 +265,9 @@ function PublicLPPage() {
           setLp(foundInRam);
           setLoading(false);
           recordVisitForLP(foundInRam).catch(() => {});
-          return;
+          if (cloudStore.getStatus().loadedFromCloud) {
+            return;
+          }
         }
 
         // =====================================================================
@@ -285,14 +281,20 @@ function PublicLPPage() {
           ]);
           const remotePage = cloudPage || serverPage;
           if (remotePage && !deletedIds.has(remotePage.id) && isMounted) {
-            setLp(remotePage);
-            setLoading(false);
-            recordVisitForLP(remotePage).catch(() => {});
+            const ramTime = new Date((foundInRam as any)?.updatedAt || (foundInRam as any)?.updated_at || 0).getTime();
+            const remoteTime = new Date((remotePage as any)?.updatedAt || (remotePage as any)?.updated_at || 0).getTime();
+            if (!foundInRam || remoteTime >= ramTime) {
+              setLp(remotePage);
+              setLoading(false);
+              recordVisitForLP(remotePage).catch(() => {});
+            }
             return;
           }
         } catch (srvErr) {
           console.error("Step 2 (Cloud/Express Fetch) error:", srvErr);
         }
+
+        if (foundInRam) return;
 
         // =====================================================================
         // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE CASO NECESSÁRIO
@@ -369,8 +371,36 @@ function PublicLPPage() {
 
     loadContent();
 
+    const unsubscribe = cloudStore.subscribe(() => {
+      if (!isMounted || !id) return;
+      const deletedSet = new Set(getDeletedLandingPageIds());
+      if (deletedSet.has(id)) return;
+      const normId = normalizeSlug(id);
+      const db = cloudStore.getState();
+      const matches = (p: any) => {
+        if (!p || deletedSet.has(p.id) || deletedSet.has(p.slug)) return false;
+        if (p.id === id || p.slug === id || p.previewToken === id || p.originalId === id) return true;
+        if (p.name && normalizeSlug(p.name) === normId) return true;
+        if (p.title && normalizeSlug(p.title) === normId) return true;
+        return false;
+      };
+      const liveMatch =
+        (db.activePreviewPage && matches(db.activePreviewPage) ? db.activePreviewPage : null) ||
+        (Array.isArray(db.landingPages) ? db.landingPages.find(matches) : null);
+      if (liveMatch) {
+        setLp((prev: any) => {
+          if (!prev) return liveMatch;
+          const prevTime = new Date(prev.updatedAt || prev.updated_at || 0).getTime();
+          const nextTime = new Date(liveMatch.updatedAt || liveMatch.updated_at || 0).getTime();
+          return nextTime > prevTime ? liveMatch : prev;
+        });
+        setLoading(false);
+      }
+    });
+
     return () => {
       isMounted = false;
+      unsubscribe();
     };
   }, [id]);
 
@@ -750,26 +780,20 @@ function PublicLPPage() {
                     },
                   };
 
-                  // 1. Grava diretamente no banco de dados e sincroniza com Google Sheets / Drive em background
+                  // 1. Grava diretamente no Google Sheets / Drive + RAM (sem duplicar chamadas LockService)
+                  cloudStore.mutate(
+                    (draft) => {
+                      const newLead = {
+                        id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                        ...leadRecord,
+                        createdAt: new Date().toISOString(),
+                      };
+                      draft.leads = [newLead, ...(draft.leads || [])];
+                    },
+                    { skipPush: true }
+                  );
+
                   Promise.allSettled([
-                    fetch("/api/submit-lead", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        pageId: lp.id,
-                        pageTitle: lp.name || lp.title,
-                        name: leadName,
-                        whatsapp: leadWhatsapp,
-                        email: leadEmail,
-                        quizAnswers: answers,
-                        utms: utm,
-                        source: effectiveSource,
-                        isTest: lp.status === "Teste",
-                      }),
-                    }),
-                    fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
-                      method: "POST",
-                    }),
                     submitLpLeadToDrive({
                       landingPageId: lp.id,
                       landingPageTitle: lp.name || lp.title || "Landing Page",
@@ -781,12 +805,7 @@ function PublicLPPage() {
                       utm,
                       answers: answers || {},
                       isTest: lp.status === "Teste",
-                    })
-                  ]).catch((dbErr) => {
-                    console.warn("Background lead submission notice:", dbErr);
-                  });
-
-                  try {
+                    }),
                     fetch("/api/surveys/responses", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
@@ -808,20 +827,13 @@ function PublicLPPage() {
                           utm,
                         },
                       }),
-                    })
-                      .then(res => res.json())
-                      .then(data => console.log("Survey response submitted:", data))
-                      .catch(err => console.error("Survey submission failed:", err));
-
+                    }),
                     fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
                       method: "POST",
-                    })
-                      .then(res => res.json())
-                      .then(data => console.log("Conversion incremented:", data))
-                      .catch(err => console.error("Conversion increment failed:", err));
-                  } catch (e) {
-                    console.error("Survey submission catch block:", e);
-                  }
+                    }),
+                  ]).catch((dbErr) => {
+                    console.warn("Background lead submission notice:", dbErr);
+                  });
 
                   toast.success("✅ Cadastro e respostas enviadas com sucesso!");
                 }}
@@ -971,7 +983,7 @@ function PublicLPPage() {
                       : p
                   );
                 },
-                { immediate: true }
+                { skipPush: true }
               );
 
               window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
@@ -980,7 +992,7 @@ function PublicLPPage() {
             }
           }
 
-          // 2. Encaminha conversão e Google Drive de forma assíncrona (não-bloqueante)
+          // 2. Gravação atômica única no Google Apps Script / Sheets (SUBMIT_LP_LEAD) + webhook Express
           fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
             method: "POST",
           }).catch(() => {});
@@ -996,7 +1008,9 @@ function PublicLPPage() {
             utm,
             answers: lead.quizAnswers || {},
             isTest: lp.status === "Teste",
-          }).catch((gErr) => console.warn("Google Drive background sync notice:", gErr));
+          })
+            .then(() => cloudStore.pullNow(false).catch(() => {}))
+            .catch((gErr) => console.warn("Google Drive background sync notice:", gErr));
 
           // 5. Notifica Analytics de Conversão da LP
           try {
@@ -1190,7 +1204,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
                   : p
               );
             },
-            { immediate: true }
+            { skipPush: true }
           );
 
           window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
@@ -1199,7 +1213,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         }
       }
 
-      // 2. Sincroniza em background com o Google Drive / Google Sheets e API
+      // 2. Gravação atômica única no Google Apps Script / Google Sheets
       submitLpLeadToDrive({
         landingPageId: lp.id,
         landingPageTitle: lp.name || lp.title || "Landing Page",
@@ -1211,13 +1225,11 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         utm,
         answers: { observacoes: notes.trim() },
         isTest: lp.status === "Teste",
-      }).catch((gErr) => {
-        console.warn("Google Drive direct sync notice:", gErr);
-      });
-
-      fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
-        method: "POST",
-      }).catch(() => {});
+      })
+        .then(() => cloudStore.pullNow(false).catch(() => {}))
+        .catch((gErr) => {
+          console.warn("Google Drive direct sync notice:", gErr);
+        });
 
       // 3. Analytics
       try {

@@ -1029,55 +1029,6 @@ export function useData() {
         };
       };
 
-      let apiLeads: Lead[] = [];
-      try {
-        const res = await fetch("/api/leads");
-        if (res.ok) {
-          const resJson = await res.json();
-          const rawList = Array.isArray(resJson) ? resJson : (Array.isArray(resJson?.leads) ? resJson.leads : []);
-          if (rawList.length > 0) {
-            apiLeads = rawList.map((item: any) => {
-              const { minQual, minScore, temperature, score } = parseLeadMinAndScore(item);
-              return {
-                id: item.id || `api_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                name: item.name || "Lead Capturado",
-                company: item.company || (item.name ? `${item.name} (LP: ${item.pageTitle || item.pageId || item.landingPage || "Landing Page"})` : "Empresa"),
-                email: item.email || "",
-                whatsapp: item.whatsapp || "",
-                value: Number(item.value) || 0,
-                stage: item.stage || "Leads",
-                owner: item.owner || "Inbound LP",
-                source: item.source || (item.pageTitle || item.pageId ? `LP: ${item.pageTitle || item.pageId}` : "Inbound"),
-                classification: item.classification || "Lead",
-                temperature,
-                type: item.type || "Inbound",
-                strategy: item.strategy || "CRO Auto",
-                decisionRole: item.decisionRole || "Decisor",
-                minScore,
-                minQualification: minQual,
-                landingPage: item.landingPage || item.pageTitle || item.pageId,
-                tags: Array.isArray(item.tags) ? item.tags : ["inbound", "landing-page"],
-                score,
-                sla: item.sla || "ok",
-                lastInteraction: item.lastInteraction || "Formulário enviado na LP",
-                createdAt: item.submittedAt || item.createdAt || new Date().toISOString(),
-                activities: Array.isArray(item.activities) ? item.activities : [],
-                completedCheckpoints: Array.isArray(item.completedCheckpoints) ? item.completedCheckpoints : [],
-                status: item.status || "Ativo",
-                personType: item.personType || "PJ",
-                role: item.role || "",
-                revenue: item.revenue || "",
-                capag: item.capag || "",
-                lpVisits: Number(item.lpVisits) || 1,
-                isCustomer: Boolean(item.isCustomer || item.classification === "Cliente" || item.stage === "Ganho"),
-                isRecurring: Boolean(item.isRecurring || item.type === "Recorrente"),
-                metadata: item.metadata || item
-              };
-            });
-          }
-        }
-      } catch {}
-
       // 1c. Nuvem Google Drive / Google Sheets via cloudStore (Zero-LocalStorage)
       let driveLeads: Lead[] = [];
       try {
@@ -1145,7 +1096,7 @@ export function useData() {
         return false;
       };
 
-      const allRawLeads: Lead[] = [...dbLeads, ...apiLeads, ...driveLeads].filter(l => !isFictitiousLead(l));
+      const allRawLeads: Lead[] = [...dbLeads, ...driveLeads].filter(l => !isFictitiousLead(l));
 
       function mergeSourcesStr(...sources: (string | undefined)[]): string {
         const set = new Set<string>();
@@ -1543,17 +1494,6 @@ export function useData() {
         .map(mapLPFromDb)
         .filter((lp) => !isDeleted(lp));
 
-      let serverLps: LandingPage[] = [];
-      try {
-        const resp = await fetch('/api/landing-pages', { cache: 'no-store' });
-        if (resp.ok) {
-          const json = await resp.json();
-          if (json && Array.isArray(json.landingPages)) {
-            serverLps = json.landingPages.map(mapLPFromDb).filter((lp: LandingPage) => !isDeleted(lp));
-          }
-        }
-      } catch {}
-
       const getLpKey = (lp: LandingPage) => {
         if (lp.id) return `id:${lp.id}`;
         if (lp.slug) return `slug:${lp.slug.trim().toLowerCase()}`;
@@ -1562,7 +1502,7 @@ export function useData() {
 
       const mergedMap = new Map<string, LandingPage>();
 
-      for (const lp of [...serverLps, ...cloudLps]) {
+      for (const lp of cloudLps) {
         if (!lp || isDeleted(lp)) continue;
         const key = getLpKey(lp);
         if (!mergedMap.has(key)) {
@@ -1756,17 +1696,7 @@ export function useData() {
   const surveysResponses = asArray(useQuery({ 
     queryKey: ['survey_responses'], 
     queryFn: async () => { 
-      let dbResp: SurveyResponse[] = [...(cloudStore.getState().surveyResponses || [])];
-
-      try {
-        const apiRes = await fetch("/api/surveys/responses", { cache: "no-store" });
-        if (apiRes.ok) {
-          const apiData = await apiRes.json();
-          if (Array.isArray(apiData)) {
-            dbResp = [...dbResp, ...apiData];
-          }
-        }
-      } catch {}
+      const dbResp: SurveyResponse[] = [...(cloudStore.getState().surveyResponses || [])];
 
       const map = new Map<string, SurveyResponse>();
       for (const r of dbResp) {
@@ -2225,21 +2155,6 @@ export function useData() {
       };
 
       try {
-        fetch("/api/submit-lead", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            pageId: fullLead.landingPage || "crm-manual",
-            pageTitle: fullLead.landingPage || "Cadastro Direto",
-            name: fullLead.name,
-            whatsapp: fullLead.whatsapp,
-            email: fullLead.email,
-            quizAnswers: fullLead.metadata?.answers || {},
-            source: fullLead.source,
-            isTest: fullLead.classification === "Lead Teste" || fullLead.tags.includes("leadtest"),
-          }),
-        }).catch(() => {});
-
         cloudStore.mutate((draft) => {
           draft.leads = [fullLead, ...(draft.leads || []).filter((x: any) => x.id !== fullLead.id)];
         }, { immediate: true });
