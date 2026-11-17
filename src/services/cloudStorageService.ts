@@ -249,11 +249,12 @@ function mergeLandingPageLists(
   for (const rawRemote of remoteList || []) {
     if (!rawRemote || isDeleted(rawRemote)) continue;
     let parsedConfig: any = {};
-    if (typeof rawRemote.config === "object" && rawRemote.config !== null) {
-      parsedConfig = rawRemote.config;
-    } else if (typeof rawRemote.config === "string") {
+    const configSource = rawRemote["Config JSON"] || rawRemote.configJson || rawRemote.config;
+    if (typeof configSource === "object" && configSource !== null) {
+      parsedConfig = configSource;
+    } else if (typeof configSource === "string") {
       try {
-        parsedConfig = JSON.parse(rawRemote.config);
+        parsedConfig = JSON.parse(configSource);
       } catch {}
     }
 
@@ -265,6 +266,15 @@ function mergeLandingPageLists(
 
     const existing = currentMap.get(key) || (rawRemote.slug ? currentMap.get(String(rawRemote.slug)) : null);
 
+    const existingTime = new Date(
+      existing?.updatedAt || existing?.updated_at || existing?.createdAt || 0
+    ).getTime();
+    const remoteTime = new Date(
+      rawRemote.updatedAt || rawRemote.updated_at || parsedConfig.updatedAt || parsedConfig.updated_at || rawRemote.createdAt || 0
+    ).getTime();
+
+    const preferExisting = Boolean(existing && existingTime > remoteTime);
+
     const remoteHeroModel =
       rawRemote.heroModel ||
       rawRemote.hero?.model ||
@@ -272,46 +282,44 @@ function mergeLandingPageLists(
       parsedConfig.hero?.model ||
       rawRemote.hero_model;
 
+    const existingHeroModel =
+      existing?.heroModel || existing?.hero?.model || existing?.hero_model;
+
+    const chosenHeroModel = preferExisting
+      ? (existingHeroModel || remoteHeroModel || "split_image")
+      : (remoteHeroModel || existingHeroModel || "split_image");
+
     const mergedHero =
       rawRemote.hero || parsedConfig.hero || existing?.hero
         ? {
-            ...(existing?.hero || {}),
-            ...(parsedConfig.hero || {}),
-            ...(rawRemote.hero || {}),
-            model:
-              remoteHeroModel ||
-              existing?.heroModel ||
-              existing?.hero?.model ||
-              "split_image",
+            ...(preferExisting ? parsedConfig.hero || {} : existing?.hero || {}),
+            ...(preferExisting ? rawRemote.hero || {} : parsedConfig.hero || {}),
+            ...(preferExisting ? existing?.hero || {} : rawRemote.hero || {}),
+            model: chosenHeroModel,
           }
         : undefined;
 
+    const primary = preferExisting ? existing : { ...parsedConfig, ...rawRemote };
+    const secondary = preferExisting ? { ...parsedConfig, ...rawRemote } : (existing || {});
+
     out.push({
-      ...(existing || {}),
-      ...parsedConfig,
-      ...rawRemote,
+      ...secondary,
+      ...primary,
       id: remoteId,
-      heroModel: mergedHero?.model || remoteHeroModel || existing?.heroModel,
+      heroModel: chosenHeroModel,
       hero: mergedHero,
-      quiz: rawRemote.quiz || parsedConfig.quiz || existing?.quiz,
-      bentoGrid: rawRemote.bentoGrid || parsedConfig.bentoGrid || existing?.bentoGrid,
-      testimonials:
-        rawRemote.testimonials || parsedConfig.testimonials || existing?.testimonials,
-      formSection:
-        rawRemote.formSection || parsedConfig.formSection || existing?.formSection,
-      photoGrid: rawRemote.photoGrid || parsedConfig.photoGrid || existing?.photoGrid,
-      visibility: rawRemote.visibility || parsedConfig.visibility || existing?.visibility,
-      sectionOrder:
-        rawRemote.sectionOrder || parsedConfig.sectionOrder || existing?.sectionOrder,
-      customElementStyles:
-        rawRemote.customElementStyles ||
-        parsedConfig.customElementStyles ||
-        existing?.customElementStyles,
-      floatingImages:
-        rawRemote.floatingImages ||
-        parsedConfig.floatingImages ||
-        existing?.floatingImages,
-      faq: rawRemote.faq || parsedConfig.faq || existing?.faq,
+      quiz: primary.quiz || secondary.quiz,
+      bentoGrid: primary.bentoGrid || secondary.bentoGrid,
+      testimonials: primary.testimonials || secondary.testimonials,
+      formSection: primary.formSection || secondary.formSection,
+      photoGrid: primary.photoGrid || secondary.photoGrid,
+      visibility: primary.visibility || secondary.visibility,
+      sectionOrder: primary.sectionOrder || secondary.sectionOrder,
+      customElementStyles: primary.customElementStyles || secondary.customElementStyles,
+      floatingImages: primary.floatingImages || secondary.floatingImages,
+      faq: primary.faq || secondary.faq,
+      visits: Math.max(Number(rawRemote.visits || 0), Number(existing?.visits || 0)),
+      leads: Math.max(Number(rawRemote.leads || 0), Number(existing?.leads || 0)),
     });
   }
 
@@ -603,11 +611,13 @@ class CloudStorageService {
     }
   }
 
+  private activePushPromise: Promise<boolean> | null = null;
+
   async pushNow(): Promise<boolean> {
     if (typeof window === "undefined") return false;
-    if (this.isPushing) {
-      this.scheduleSync(400);
-      return false;
+    if (this.isPushing && this.activePushPromise) {
+      await this.activePushPromise.catch(() => false);
+      if (!this.status.pendingWrite) return true;
     }
 
     const cfg = getDriveConfig();
@@ -618,57 +628,70 @@ class CloudStorageService {
     }
 
     const capturedDirtyRevision = this.status.dirtyRevision;
-    try {
-      this.isPushing = true;
-      this.status.syncing = true;
-      this.status.lastError = null;
+    const run = (async () => {
+      try {
+        this.isPushing = true;
+        this.status.syncing = true;
+        this.status.lastError = null;
 
-      const payload = {
-        ...this.db,
-        revision: (Number(this.db.revision) || 0) + 1,
-        ultimoBackup: new Date().toISOString(),
-        versao: "3.0-CloudEngine",
-      };
-      this.db.revision = payload.revision;
-      this.db.ultimoBackup = payload.ultimoBackup;
+        const payload = {
+          ...this.db,
+          revision: (Number(this.db.revision) || 0) + 1,
+          ultimoBackup: new Date().toISOString(),
+          versao: "3.1-SheetsFirst",
+        };
+        this.db.revision = payload.revision;
+        this.db.ultimoBackup = payload.ultimoBackup;
 
-      await pushToGoogleDrive(url, payload);
+        await pushToGoogleDrive(url, payload);
 
-      this.status.lastPushTimestamp = Date.now();
-      this.status.lastSyncTimestamp = Date.now();
-      this.status.loadedFromCloud = true;
-      this.status.connected = true;
+        this.status.lastPushTimestamp = Date.now();
+        this.status.lastSyncTimestamp = Date.now();
+        this.status.loadedFromCloud = true;
+        this.status.connected = true;
 
-      if (this.status.dirtyRevision === capturedDirtyRevision) {
-        this.status.pendingWrite = false;
-      } else {
-        this.scheduleSync(200);
+        if (this.status.dirtyRevision === capturedDirtyRevision) {
+          this.status.pendingWrite = false;
+        } else {
+          this.scheduleSync(200);
+        }
+
+        saveDriveConfig(
+          {
+            syncStatus: "synced",
+            lastSyncTimestamp: Date.now(),
+          },
+          false
+        );
+
+        this.emit(true);
+        return true;
+      } catch (err: any) {
+        this.status.pendingWrite = true;
+        this.status.lastError =
+          err?.message || "Falha ao gravar alterações no Google Drive/Sheets.";
+        saveDriveConfig(
+          {
+            syncStatus: err?.isBusy ? "syncing" : "error",
+            lastSyncMessage: this.status.lastError || undefined,
+          },
+          false
+        );
+        if (err?.isBusy) {
+          this.scheduleSync(1500);
+        }
+        this.emit(false);
+        return false;
+      } finally {
+        this.isPushing = false;
+        this.status.syncing = false;
+        this.activePushPromise = null;
+        this.emit(false);
       }
+    })();
 
-      saveDriveConfig(
-        {
-          syncStatus: "synced",
-          lastSyncTimestamp: Date.now(),
-        },
-        false
-      );
-
-      this.emit(true);
-      return true;
-    } catch (err: any) {
-      this.status.lastError =
-        err?.message || "Falha ao gravar alterações no Google Drive/Sheets.";
-      saveDriveConfig(
-        { syncStatus: "error", lastSyncMessage: this.status.lastError || undefined },
-        false
-      );
-      this.emit(false);
-      return false;
-    } finally {
-      this.isPushing = false;
-      this.status.syncing = false;
-      this.emit(false);
-    }
+    this.activePushPromise = run;
+    return run;
   }
 
   scheduleSync(delayMs = 180): void {
@@ -708,6 +731,29 @@ class CloudStorageService {
     }
 
     return this.db;
+  }
+
+  async mutateAndSync(
+    updater: (draft: CloudDatabase) => void | Partial<CloudDatabase>
+  ): Promise<{ db: CloudDatabase; synced: boolean; error?: string | null }> {
+    const draft: CloudDatabase = { ...this.db };
+    const result = updater(draft);
+    this.db = result && typeof result === "object" ? { ...draft, ...result } : draft;
+
+    this.status.dirtyRevision += 1;
+    this.status.pendingWrite = true;
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
+    }
+
+    this.emit(true);
+    const synced = await this.pushNow();
+    return {
+      db: this.db,
+      synced,
+      error: this.status.lastError,
+    };
   }
 
   startRealtimeEngine(): void {
@@ -766,7 +812,10 @@ class CloudStorageService {
     });
   }
 
-  async fetchPublicLP(idOrSlug: string): Promise<LandingPage | null> {
+  async fetchPublicLP(
+    idOrSlug: string,
+    options: { preferSheets?: boolean } = { preferSheets: true }
+  ): Promise<LandingPage | null> {
     if (!idOrSlug) return null;
     const cleanTarget = decodeURIComponent(idOrSlug).trim().toLowerCase();
 
@@ -776,33 +825,52 @@ class CloudStorageService {
           p &&
           (String(p.id || "").toLowerCase() === cleanTarget ||
             String(p.originalId || "").toLowerCase() === cleanTarget ||
+            String(p.previewToken || "").toLowerCase() === cleanTarget ||
             String(p.slug || "").toLowerCase() === cleanTarget)
       ) || null;
 
-    // 1. Verifica preview ativo ou estado já carregado em RAM
-    if (
-      this.db.activePreviewPage &&
-      findInList([this.db.activePreviewPage])
-    ) {
-      return this.db.activePreviewPage;
+    const fromPreviewRam =
+      this.db.activePreviewPage && findInList([this.db.activePreviewPage])
+        ? this.db.activePreviewPage
+        : null;
+    const fromRam = fromPreviewRam || findInList(this.db.landingPages);
+
+    // Se houver escrita local pendente neste navegador, prioriza RAM imediata
+    if (fromRam && this.status.pendingWrite) {
+      return fromRam;
     }
 
-    const fromRam = findInList(this.db.landingPages);
+    if (fromRam && this.status.loadedFromCloud && !options.preferSheets) {
+      return fromRam;
+    }
+
+    // Busca direta no Google Sheets / Apps Script (funciona em outro navegador e guia anônima)
+    await initializeSharedDriveConfig().catch(() => {});
+    const cloudLp = await fetchPublicLpFromDrive(idOrSlug, {
+      directSheets: options.preferSheets !== false,
+    });
+    if (cloudLp) {
+      const ramTime = new Date(
+        fromRam?.updatedAt || (fromRam as any)?.updated_at || 0
+      ).getTime();
+      const cloudTime = new Date(
+        cloudLp?.updatedAt || (cloudLp as any)?.updated_at || 0
+      ).getTime();
+
+      if (!fromRam || !this.status.loadedFromCloud || cloudTime >= ramTime) {
+        this.db.landingPages = [
+          cloudLp,
+          ...this.db.landingPages.filter((p) => p.id !== cloudLp.id),
+        ];
+        this.emit(false);
+        return cloudLp;
+      }
+      return fromRam;
+    }
+
     if (fromRam) return fromRam;
 
-    // 2. Busca direta na nuvem Google Apps Script (funciona em aba anônima e outro PC)
-    await initializeSharedDriveConfig().catch(() => {});
-    const cloudLp = await fetchPublicLpFromDrive(idOrSlug);
-    if (cloudLp) {
-      this.db.landingPages = [
-        cloudLp,
-        ...this.db.landingPages.filter((p) => p.id !== cloudLp.id),
-      ];
-      this.emit(false);
-      return cloudLp;
-    }
-
-    // 3. Fallback API local /api/public/lp/:id
+    // Fallback API local /api/public/lp/:id
     try {
       const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
         cache: "no-store",

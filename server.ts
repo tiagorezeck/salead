@@ -321,6 +321,8 @@ app.all("/api/drive-proxy", async (req, res) => {
       if (params.title) urlObj.searchParams.set("title", String(params.title));
       if (params.surveyId) urlObj.searchParams.set("surveyId", String(params.surveyId));
       if (params.nocache) urlObj.searchParams.set("nocache", String(params.nocache));
+      if (params.source) urlObj.searchParams.set("source", String(params.source));
+      if (params.spreadsheetId) urlObj.searchParams.set("spreadsheetId", String(params.spreadsheetId));
       if (apiToken) urlObj.searchParams.set("token", String(apiToken));
       urlObj.searchParams.set("t", Date.now().toString());
       fetchUrl = urlObj.toString();

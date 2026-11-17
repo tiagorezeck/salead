@@ -1,5 +1,5 @@
 // =========================================================================
-// GOOGLE APPS SCRIPT (Code.gs) - MOTOR SALEAD DATABASE NO GOOGLE DRIVE + SHEETS v3.0
+// GOOGLE APPS SCRIPT (Code.gs) - MOTOR SALEAD DATABASE NO GOOGLE DRIVE + SHEETS v3.1
 // Arquitetura Estilo Supabase / Firebase (Zero-LocalStorage, Cache em Chunks 65KB, Lock Atômico)
 // =========================================================================
 // Guia Rápido de Atualização / Publicação no Google Apps Script:
@@ -10,16 +10,16 @@
 // 5. No lápis (Editar) > Versão: selecione "Nova versão" > Quem pode acessar: "Qualquer pessoa" > "Implantar".
 //    (Ou crie uma Nova Implantação tipo "App da Web" com acesso "Qualquer pessoa" e cole a URL /exec no sistema).
 //
-// O QUE HÁ DE NOVO NA VERSÃO 3.0 (CLOUD ENGINE ZERO-LOCALSTORAGE):
+// O QUE HÁ DE NOVO NA VERSÃO 3.1 (SHEETS-FIRST PARA LANDING PAGES + CLOUD ENGINE):
 // ⚡ CacheService em Chunks (65KB por bloco via putAll): Respostas < 100ms mesmo com dezenas de LPs ricas!
-// 🎯 Endpoints Públicos Dedicados (GET_PUBLIC_LP / GET_PUBLIC_SURVEY): Abertura instantânea em aba anônima ou outro PC.
-// 🔒 Leitura Primária Fiel ao JSON (database_root.json): Preserva 100% do Hero Model, estilos, quiz e configs.
+// 📊 Landing_Pages direto no Sheets: Salva Modelo Hero, Tema, Cor e Config JSON nas colunas da planilha.
+// 🎯 GET_PUBLIC_LP direto do Sheets: Abertura fiel em qualquer navegador ou guia anônima sem voltar ao Modelo 1.
 // 🧹 Deleções Completas em Lote: Suporta DELETE_PRODUCT, DELETE_TASK, DELETE_SURVEY, CLEAR_LP_TEST_DATA e CLEAN_DATABASE_KEEP_ONE.
 // 📦 Escrita Atômica + LockService 30s + Batch Sheets Sync: Tabelas sempre atualizadas sem perder dados.
 // =========================================================================
 
 export const SALEAD_GOOGLE_APPS_SCRIPT_CODE = `// =========================================================================
-// MOTOR UNIVERSAL SALEAD v3.0: CLOUD ENGINE + GOOGLE SHEETS + DRIVE
+// MOTOR UNIVERSAL SALEAD v3.1: CLOUD ENGINE + GOOGLE SHEETS + DRIVE
 // =========================================================================
 
 const ROOT_FOLDER_NAME = "SALEAD";
@@ -80,9 +80,9 @@ function doGet(e) {
         cacheEnabled: true,
         chunkedCacheEnabled: true,
         lockEnabled: true,
-        version: "3.0-CloudEngine",
+        version: "3.1-SheetsFirst",
         timestamp: new Date().getTime(),
-        message: "Conexão ativa! Motor v3.0 Cloud Engine pronto (" + ss.getName() + " em " + ROOT_FOLDER_NAME + "/" + DATA_FOLDER_NAME + ")."
+        message: "Conexão ativa! Motor v3.1 Cloud Engine + Sheets-First pronto (" + ss.getName() + " em " + ROOT_FOLDER_NAME + "/" + DATA_FOLDER_NAME + ")."
       });
     }
 
@@ -131,32 +131,45 @@ function doGet(e) {
       });
     }
 
-    // 5. CONSULTA PÚBLICA RÁPIDA DE LANDING PAGE (ABAS / ANÔNIMO / DISPOSITIVOS EXTERNOS)
+    // 5. CONSULTA PÚBLICA DIRETA DE LANDING PAGE (LENDO DIRETO DO GOOGLE SHEETS + JSON)
     if (action === "GET_PUBLIC_LP" || action === "GET_LP_BY_SLUG") {
       var queryKey = String(params.id || params.lpId || params.slug || params.token || params.title || "").trim();
-      var dbPublic = readDatabaseRootObject(folder, params.nocache === "true" || params.nocache === "1");
-      var foundLp = findLandingPageInDb(dbPublic, queryKey);
+      var forceSheetsDirect = (params.source === "sheets" || params.nocache === "true" || params.nocache === "1");
+      var ssPublic = getOrCreateSpreadsheet(folder);
+      var sheetLps = forceSheetsDirect ? readLandingPagesFromSheet(ssPublic) : [];
+      var foundFromSheet = findLandingPageInList(sheetLps, queryKey);
+
+      var dbPublic = readDatabaseRootObject(folder, forceSheetsDirect);
+      var foundFromDb = findLandingPageInDb(dbPublic, queryKey);
+
+      if (!foundFromSheet && !forceSheetsDirect) {
+        sheetLps = readLandingPagesFromSheet(ssPublic);
+        foundFromSheet = findLandingPageInList(sheetLps, queryKey);
+      }
+
+      var foundLp = mergeSingleLandingPageCandidate(foundFromSheet, foundFromDb);
 
       if (!foundLp) {
         return jsonResponse({
           status: "error",
           statusCode: 404,
-          message: "Landing Page não encontrada na nuvem: " + queryKey
+          message: "Landing Page não encontrada no Google Sheets ou Drive: " + queryKey
         }, 404);
       }
 
       var linkedSurvey = null;
-      if (foundLp.surveyId && Array.isArray(dbPublic.surveys)) {
+      if (foundLp.surveyId && dbPublic && Array.isArray(dbPublic.surveys)) {
         linkedSurvey = findSurveyInDb(dbPublic, foundLp.surveyId);
       }
 
       return jsonResponse({
         status: "success",
+        source: foundFromSheet ? "sheets" : "drive_json",
         landingPage: foundLp,
         lp: foundLp,
         page: foundLp,
         survey: linkedSurvey,
-        company: dbPublic.company || null
+        company: (dbPublic && dbPublic.company) || null
       });
     }
 
@@ -997,22 +1010,173 @@ function normalizeLookupSlug(val) {
     .replace(/^-+|-+$/g, "");
 }
 
-function findLandingPageInDb(db, queryKey) {
-  if (!db || !Array.isArray(db.landingPages) || !queryKey) return null;
+function findLandingPageInList(list, queryKey) {
+  if (!Array.isArray(list) || !queryKey) return null;
   var qRaw = String(queryKey).trim();
   var qLow = qRaw.toLowerCase();
   var qSlug = normalizeLookupSlug(qRaw);
 
-  for (var i = 0; i < db.landingPages.length; i++) {
-    var lp = db.landingPages[i];
+  for (var i = 0; i < list.length; i++) {
+    var lp = list[i];
     if (!lp) continue;
     if (lp.id === qRaw || (lp.id && String(lp.id).toLowerCase() === qLow)) return lp;
+    if (lp.originalId && (lp.originalId === qRaw || String(lp.originalId).toLowerCase() === qLow)) return lp;
     if (lp.slug && (lp.slug === qRaw || String(lp.slug).toLowerCase() === qLow || normalizeLookupSlug(lp.slug) === qSlug)) return lp;
     if (lp.previewToken && (lp.previewToken === qRaw || String(lp.previewToken).toLowerCase() === qLow)) return lp;
     var titleSlug = normalizeLookupSlug(lp.title || lp.name || "");
     if (titleSlug && qSlug && titleSlug === qSlug) return lp;
   }
   return null;
+}
+
+function findLandingPageInDb(db, queryKey) {
+  if (!db || !Array.isArray(db.landingPages) || !queryKey) return null;
+  return findLandingPageInList(db.landingPages, queryKey);
+}
+
+function parseTimestampMs(lp) {
+  if (!lp) return 0;
+  var raw = lp.updatedAt || lp.updated_at || lp.createdAt || lp.created_at || 0;
+  var ms = new Date(raw).getTime();
+  return isNaN(ms) ? 0 : ms;
+}
+
+function normalizeLandingPageModel(lp) {
+  if (!lp || typeof lp !== "object") return lp;
+  var model = (lp.hero && lp.hero.model) || lp.heroModel || lp.hero_model || "split_image";
+  var out = Object.assign({}, lp, { heroModel: model });
+  if (out.hero && typeof out.hero === "object") {
+    out.hero = Object.assign({}, out.hero, { model: model });
+  }
+  if (out.config && typeof out.config === "object") {
+    out.config = Object.assign({}, out.config, {
+      heroModel: model,
+      hero: out.hero || out.config.hero
+    });
+  }
+  return out;
+}
+
+function mergeSingleLandingPageCandidate(sheetLp, dbLp) {
+  if (!sheetLp && !dbLp) return null;
+  if (!sheetLp) return normalizeLandingPageModel(dbLp);
+  if (!dbLp) return normalizeLandingPageModel(sheetLp);
+
+  var sheetHasRichJson = Boolean(sheetLp.hero && (sheetLp.hero.headline || sheetLp.hero.model));
+  var dbHasRichJson = Boolean(dbLp.hero && (dbLp.hero.headline || dbLp.hero.model));
+  var sheetTime = parseTimestampMs(sheetLp);
+  var dbTime = parseTimestampMs(dbLp);
+
+  // Prioriza o mais recente; em empate, prioriza o registro do Sheets se completo
+  var preferSheet = sheetHasRichJson && (!dbHasRichJson || sheetTime >= dbTime);
+  var primary = preferSheet ? sheetLp : dbLp;
+  var secondary = preferSheet ? dbLp : sheetLp;
+
+  var merged = Object.assign({}, secondary, primary);
+  var finalModel = (primary.hero && primary.hero.model) || primary.heroModel || primary.hero_model || (secondary.hero && secondary.hero.model) || secondary.heroModel || "split_image";
+  merged.heroModel = finalModel;
+  merged.hero = Object.assign({}, secondary.hero || {}, primary.hero || {}, { model: finalModel });
+  merged.visits = Math.max(Number(sheetLp.visits || 0), Number(dbLp.visits || 0));
+  merged.viewsCount = merged.visits;
+  merged.leads = Math.max(Number(sheetLp.leads || 0), Number(dbLp.leads || 0));
+  merged.leads_count = merged.leads;
+  return normalizeLandingPageModel(merged);
+}
+
+function readLandingPagesFromSheet(ss) {
+  var results = [];
+  if (!ss) return results;
+  var allSheets = ss.getSheets();
+  function normH(val) {
+    return String(val || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim();
+  }
+
+  for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
+    var curSheet = allSheets[sIdx];
+    var sNameNorm = normH(curSheet.getName());
+    if (sNameNorm.indexOf("landing") === -1 && sNameNorm.indexOf("pagina") === -1 && sNameNorm !== "lps") continue;
+
+    var sValues = curSheet.getDataRange().getValues();
+    if (!sValues || sValues.length < 2) continue;
+    var headersNorm = (sValues[0] || []).map(normH);
+
+    var colId = headersNorm.indexOf("id");
+    var colTitle = headersNorm.indexOf("nome / titulo") !== -1 ? headersNorm.indexOf("nome / titulo") : (headersNorm.indexOf("titulo") !== -1 ? headersNorm.indexOf("titulo") : 1);
+    var colSlug = headersNorm.indexOf("slug") !== -1 ? headersNorm.indexOf("slug") : 2;
+    var colStatus = headersNorm.indexOf("status") !== -1 ? headersNorm.indexOf("status") : 3;
+    var colVisits = headersNorm.indexOf("visitas") !== -1 ? headersNorm.indexOf("visitas") : 4;
+    var colLeads = headersNorm.indexOf("leads capturados") !== -1 ? headersNorm.indexOf("leads capturados") : 5;
+    var colConv = headersNorm.indexOf("taxa conv (%)") !== -1 ? headersNorm.indexOf("taxa conv (%)") : 6;
+    var colType = headersNorm.indexOf("tipo");
+    var colNiche = headersNorm.indexOf("nicho / oferta");
+    var colHeroModel = headersNorm.indexOf("modelo hero");
+    var colTheme = headersNorm.indexOf("tema");
+    var colAccent = headersNorm.indexOf("cor destaque");
+    var colSurveyId = headersNorm.indexOf("survey id");
+    var colExternalUrl = headersNorm.indexOf("url externa");
+    var colCreated = headersNorm.indexOf("data criacao");
+    var colUpdated = headersNorm.indexOf("ultima atualizacao");
+    var colJson1 = headersNorm.indexOf("config json");
+    var colJson2 = headersNorm.indexOf("config json (cont.)");
+
+    for (var rIdx = 1; rIdx < sValues.length; rIdx++) {
+      var row = sValues[rIdx];
+      if (!row || (!row[0] && !row[colTitle])) continue;
+
+      var jsonStr = "";
+      if (colJson1 !== -1 && row[colJson1]) jsonStr += String(row[colJson1]);
+      if (colJson2 !== -1 && row[colJson2]) jsonStr += String(row[colJson2]);
+
+      var parsedJson = {};
+      if (jsonStr && jsonStr.trim().charAt(0) === "{") {
+        try { parsedJson = JSON.parse(jsonStr); } catch (eJson) {}
+      }
+
+      var pId = String((colId !== -1 ? row[colId] : row[0]) || parsedJson.id || ("lp_sheet_" + rIdx));
+      var pTitle = String((colTitle !== -1 ? row[colTitle] : "") || parsedJson.title || parsedJson.name || "Landing Page");
+      var pSlug = String((colSlug !== -1 ? row[colSlug] : "") || parsedJson.slug || normalizeLookupSlug(pTitle));
+      var pStatus = String((colStatus !== -1 ? row[colStatus] : row[3]) || parsedJson.status || "Ativa");
+      var pVisits = Number((colVisits !== -1 ? row[colVisits] : row[4]) || parsedJson.visits || 0);
+      var pLeads = Number((colLeads !== -1 ? row[colLeads] : row[5]) || parsedJson.leads || 0);
+      var pConv = Number(String((colConv !== -1 ? row[colConv] : row[6]) || "0").replace("%", "")) || (pVisits > 0 ? Math.round((pLeads / pVisits) * 100) : 0);
+      var pHeroModel = String((colHeroModel !== -1 ? row[colHeroModel] : "") || parsedJson.heroModel || (parsedJson.hero && parsedJson.hero.model) || "").trim();
+      var pTheme = String((colTheme !== -1 ? row[colTheme] : "") || parsedJson.theme || "").trim();
+      var pAccent = String((colAccent !== -1 ? row[colAccent] : "") || parsedJson.accentColor || "").trim();
+      var pSurveyId = String((colSurveyId !== -1 ? row[colSurveyId] : "") || parsedJson.surveyId || "").trim();
+      var pExtUrl = String((colExternalUrl !== -1 ? row[colExternalUrl] : "") || parsedJson.externalUrl || "").trim();
+      var pCreated = (colCreated !== -1 && row[colCreated]) ? String(row[colCreated]) : (parsedJson.createdAt || parsedJson.created_at || "");
+      var pUpdated = (colUpdated !== -1 && row[colUpdated]) ? String(row[colUpdated]) : (parsedJson.updatedAt || parsedJson.updated_at || "");
+
+      var lpObj = Object.assign({}, parsedJson, {
+        id: pId,
+        title: pTitle,
+        name: pTitle,
+        slug: pSlug,
+        status: pStatus,
+        visits: pVisits,
+        viewsCount: pVisits,
+        leads: pLeads,
+        leads_count: pLeads,
+        conv: pConv,
+        type: (colType !== -1 && row[colType]) ? String(row[colType]) : (parsedJson.type || "COMET CRO"),
+        niche: (colNiche !== -1 && row[colNiche]) ? String(row[colNiche]) : (parsedJson.niche || parsedJson.sector || "Geral")
+      });
+
+      if (pHeroModel) {
+        lpObj.heroModel = pHeroModel;
+        lpObj.hero = Object.assign({}, lpObj.hero || {}, { model: pHeroModel });
+      }
+      if (pTheme) lpObj.theme = pTheme;
+      if (pAccent) lpObj.accentColor = pAccent;
+      if (pSurveyId) lpObj.surveyId = pSurveyId;
+      if (pExtUrl) lpObj.externalUrl = pExtUrl;
+      if (pCreated) { lpObj.createdAt = pCreated; lpObj.created_at = pCreated; }
+      if (pUpdated) { lpObj.updatedAt = pUpdated; lpObj.updated_at = pUpdated; }
+
+      results.push(normalizeLandingPageModel(lpObj));
+    }
+  }
+  return results;
 }
 
 function findSurveyInDb(db, queryKey) {
@@ -1040,18 +1204,28 @@ function handleRecordLpVisit(folder, targetId, targetTitle, existingSpreadsheet)
   var sheetLp = ssVisit.getSheetByName("Landing_Pages");
   if (sheetLp) {
     var vData = sheetLp.getDataRange().getValues();
+    var headersV = (vData[0] || []).map(function(h) {
+      return String(h || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim();
+    });
+    var idxVisits = headersV.indexOf("visitas") !== -1 ? headersV.indexOf("visitas") : 4;
+    var idxLeads = headersV.indexOf("leads capturados") !== -1 ? headersV.indexOf("leads capturados") : 5;
+    var idxConv = headersV.indexOf("taxa conv (%)") !== -1 ? headersV.indexOf("taxa conv (%)") : 6;
+    var idxUpdated = headersV.indexOf("ultima atualizacao") !== -1 ? headersV.indexOf("ultima atualizacao") : (vData[0] && vData[0].length >= 16 ? 15 : 10);
+
     for (var vi = 1; vi < vData.length; vi++) {
       var rId = String(vData[vi][0] || "");
       var rTitle = String(vData[vi][1] || "");
       var rSlug = String(vData[vi][2] || "");
       if ((targetId && (rId === String(targetId) || rSlug === String(targetId))) || (targetTitle && rTitle === String(targetTitle))) {
-        var currVisits = Number(vData[vi][4] || 0) + 1;
-        var currLeads = Number(vData[vi][5] || 0);
+        var currVisits = Number(vData[vi][idxVisits] || 0) + 1;
+        var currLeads = Number(vData[vi][idxLeads] || 0);
         lpVisits = currVisits;
         lpConv = currVisits > 0 ? Math.round((currLeads / currVisits) * 100) : 0;
-        vData[vi][4] = currVisits;
-        vData[vi][6] = lpConv + "%";
-        vData[vi][10] = new Date().toISOString();
+        vData[vi][idxVisits] = currVisits;
+        vData[vi][idxConv] = lpConv + "%";
+        if (idxUpdated < vData[vi].length) {
+          vData[vi][idxUpdated] = new Date().toISOString();
+        }
         sheetLp.getRange(vi + 1, 1, 1, vData[vi].length).setValues([vData[vi]]);
         break;
       }
@@ -1100,50 +1274,18 @@ function mergeSpreadsheetRecoveryIntoDb(ss, forcedData) {
     var headerRow = sValues[0] || [];
     var headersNorm = headerRow.map(normH);
 
-    // Landing Pages (sem sobrescrever hero.model ou JSON completo de LPs existentes!)
+    // Landing Pages (leitura completa incluindo Modelo Hero, Tema, Cor e Config JSON!)
     if (sNameNorm.indexOf("landing") !== -1 || sNameNorm.indexOf("pagina") !== -1 || sNameNorm === "lps") {
-      var colId = headersNorm.indexOf("id");
-      var colTitle = headersNorm.indexOf("nome / titulo") !== -1 ? headersNorm.indexOf("nome / titulo") : (headersNorm.indexOf("titulo") !== -1 ? headersNorm.indexOf("titulo") : 1);
-      var colSlug = headersNorm.indexOf("slug") !== -1 ? headersNorm.indexOf("slug") : 2;
-      var colStatus = headersNorm.indexOf("status") !== -1 ? headersNorm.indexOf("status") : 3;
-      var colVisits = headersNorm.indexOf("visitas") !== -1 ? headersNorm.indexOf("visitas") : 4;
-      var colLeads = headersNorm.indexOf("leads capturados") !== -1 ? headersNorm.indexOf("leads capturados") : 5;
-      var colConv = headersNorm.indexOf("taxa conv (%)") !== -1 ? headersNorm.indexOf("taxa conv (%)") : 6;
-
-      for (var rIdx = 1; rIdx < sValues.length; rIdx++) {
-        var row = sValues[rIdx];
-        if (!row || (!row[0] && !row[colTitle])) continue;
-        var pId = String((colId !== -1 ? row[colId] : row[0]) || ("lp_sheet_" + rIdx));
-        var pTitle = String(row[colTitle] || "Landing Page");
-        var pSlug = String((colSlug !== -1 ? row[colSlug] : "") || normalizeLookupSlug(pTitle));
-        var pVisits = Number((colVisits !== -1 ? row[colVisits] : row[4]) || 0);
-        var pLeads = Number((colLeads !== -1 ? row[colLeads] : row[5]) || 0);
-        var pConv = Number(String((colConv !== -1 ? row[colConv] : row[6]) || "0").replace("%", "")) || (pVisits > 0 ? Math.round((pLeads / pVisits) * 100) : 0);
-
-        var existingIndex = forcedData.landingPages.findIndex(function(p) { return p && (p.id === pId || (pSlug && p.slug === pSlug)); });
+      var sheetLpsRecovered = readLandingPagesFromSheet(ss);
+      for (var sri = 0; sri < sheetLpsRecovered.length; sri++) {
+        var sLp = sheetLpsRecovered[sri];
+        var existingIndex = forcedData.landingPages.findIndex(function(p) {
+          return p && (p.id === sLp.id || (sLp.slug && p.slug === sLp.slug));
+        });
         if (existingIndex !== -1) {
-          var existingLp = forcedData.landingPages[existingIndex];
-          forcedData.landingPages[existingIndex] = Object.assign({}, existingLp, {
-            visits: Math.max(Number(existingLp.visits || 0), pVisits),
-            leads: Math.max(Number(existingLp.leads || 0), pLeads),
-            conv: pConv || existingLp.conv || 0,
-            status: String((colStatus !== -1 ? row[colStatus] : row[3]) || existingLp.status || "Ativa")
-          });
+          forcedData.landingPages[existingIndex] = mergeSingleLandingPageCandidate(sLp, forcedData.landingPages[existingIndex]);
         } else {
-          forcedData.landingPages.push({
-            id: pId,
-            title: pTitle,
-            name: pTitle,
-            slug: pSlug,
-            status: String((colStatus !== -1 ? row[colStatus] : row[3]) || "Ativa"),
-            visits: pVisits,
-            viewsCount: pVisits,
-            leads: pLeads,
-            leads_count: pLeads,
-            conv: pConv,
-            type: "COMET CRO",
-            updated_at: new Date().toISOString()
-          });
+          forcedData.landingPages.push(sLp);
         }
       }
       continue;
@@ -1352,17 +1494,47 @@ function syncDataToGoogleSheets(ss, data) {
   }
 
   if (Array.isArray(data.landingPages)) {
-    var sheetLP = getOrCreateSheet(ss, "Landing_Pages", [
-      "ID", "Nome / Título", "Slug", "Status", "Visitas", "Leads Capturados", "Taxa Conv (%)", "Tipo", "Nicho / Oferta", "Data Criação", "Última Atualização"
-    ]);
-    var rowsLP = data.landingPages.map(function(lp) {
+    var lpHeaders = [
+      "ID", "Nome / Título", "Slug", "Status", "Visitas", "Leads Capturados",
+      "Taxa Conv (%)", "Tipo", "Nicho / Oferta", "Modelo Hero", "Tema",
+      "Cor Destaque", "Survey ID", "URL Externa", "Data Criação",
+      "Última Atualização", "Config JSON", "Config JSON (Cont.)"
+    ];
+    var sheetLP = getOrCreateSheet(ss, "Landing_Pages", lpHeaders);
+    var rowsLP = data.landingPages.map(function(rawLp) {
+      var lp = normalizeLandingPageModel(rawLp);
       var visits = Number(lp.visits || lp.viewsCount || 0);
       var leadsCount = Number(lp.leads || lp.leads_count || 0);
       var conv = visits > 0 ? Math.round((leadsCount / visits) * 100) : 0;
+      var heroModel = (lp.hero && lp.hero.model) || lp.heroModel || lp.hero_model || "split_image";
+      var fullJson = "";
+      try {
+        fullJson = JSON.stringify(lp);
+      } catch (eSer) {
+        fullJson = "";
+      }
+      var part1 = fullJson.length > 45000 ? fullJson.substring(0, 45000) : fullJson;
+      var part2 = fullJson.length > 45000 ? fullJson.substring(45000, 90000) : "";
+
       return [
-        lp.id || "", lp.title || lp.name || "", lp.slug || "", lp.status || "Ativa",
-        visits, leadsCount, conv + "%", lp.type || "COMET CRO",
-        lp.sector || lp.niche || "Geral", lp.created_at || lp.createdAt || "", lp.updated_at || lp.updatedAt || ""
+        lp.id || "",
+        lp.title || lp.name || "",
+        lp.slug || "",
+        lp.status || "Ativa",
+        visits,
+        leadsCount,
+        conv + "%",
+        lp.type || "COMET CRO",
+        lp.sector || lp.niche || "Geral",
+        heroModel,
+        lp.theme || "dark",
+        lp.accentColor || "purple",
+        lp.surveyId || "",
+        lp.externalUrl || "",
+        lp.created_at || lp.createdAt || "",
+        lp.updated_at || lp.updatedAt || "",
+        part1,
+        part2
       ];
     });
     writeRowsToSheet(sheetLP, rowsLP);
@@ -1563,19 +1735,29 @@ function updateLandingPageLeadCount(ss, lpId, lpTitle) {
     var lpSheet = ss.getSheetByName("Landing_Pages");
     if (lpSheet) {
       var data = lpSheet.getDataRange().getValues();
+      var headersL = (data[0] || []).map(function(h) {
+        return String(h || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim();
+      });
+      var idxVisits = headersL.indexOf("visitas") !== -1 ? headersL.indexOf("visitas") : 4;
+      var idxLeads = headersL.indexOf("leads capturados") !== -1 ? headersL.indexOf("leads capturados") : 5;
+      var idxConv = headersL.indexOf("taxa conv (%)") !== -1 ? headersL.indexOf("taxa conv (%)") : 6;
+      var idxUpdated = headersL.indexOf("ultima atualizacao") !== -1 ? headersL.indexOf("ultima atualizacao") : (data[0] && data[0].length >= 16 ? 15 : 10);
+
       for (var i = 1; i < data.length; i++) {
         var rowId = String(data[i][0] || "");
         var rowTitle = String(data[i][1] || "");
         var rowSlug = String(data[i][2] || "");
         if ((lpId && (rowId === String(lpId) || rowSlug === String(lpId))) || (lpTitle && rowTitle === String(lpTitle))) {
-          var currentLeads = Number(data[i][5] || 0) + 1;
-          var currentVisits = Number(data[i][4] || 0);
+          var currentLeads = Number(data[i][idxLeads] || 0) + 1;
+          var currentVisits = Number(data[i][idxVisits] || 0);
           if (currentVisits < currentLeads) currentVisits = currentLeads;
           var newConv = currentVisits > 0 ? Math.round((currentLeads / currentVisits) * 100) : 0;
-          data[i][4] = currentVisits;
-          data[i][5] = currentLeads;
-          data[i][6] = newConv + "%";
-          data[i][10] = new Date().toISOString();
+          data[i][idxVisits] = currentVisits;
+          data[i][idxLeads] = currentLeads;
+          data[i][idxConv] = newConv + "%";
+          if (idxUpdated < data[i].length) {
+            data[i][idxUpdated] = new Date().toISOString();
+          }
           lpSheet.getRange(i + 1, 1, 1, data[i].length).setValues([data[i]]);
           break;
         }
@@ -1585,13 +1767,12 @@ function updateLandingPageLeadCount(ss, lpId, lpTitle) {
 }
 
 function getOrCreateSpreadsheet(folder, customSpreadsheetId) {
-  var targetId = customSpreadsheetId || DEFAULT_SPREADSHEET_ID;
-  if (targetId) {
+  if (customSpreadsheetId) {
     try {
-      if (String(targetId).indexOf("docs.google.com") !== -1) {
-        return SpreadsheetApp.openByUrl(String(targetId));
+      if (String(customSpreadsheetId).indexOf("docs.google.com") !== -1) {
+        return SpreadsheetApp.openByUrl(String(customSpreadsheetId));
       }
-      return SpreadsheetApp.openById(String(targetId));
+      return SpreadsheetApp.openById(String(customSpreadsheetId));
     } catch (eCustom) {}
   }
 
@@ -1606,6 +1787,12 @@ function getOrCreateSpreadsheet(folder, customSpreadsheetId) {
     var sheetFiles = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
     if (sheetFiles.hasNext()) return SpreadsheetApp.openById(sheetFiles.next().getId());
   } catch (eSearch) {}
+
+  if (DEFAULT_SPREADSHEET_ID) {
+    try {
+      return SpreadsheetApp.openById(String(DEFAULT_SPREADSHEET_ID));
+    } catch (eDef) {}
+  }
 
   var newSs = SpreadsheetApp.create(SPREADSHEET_BASE_NAME);
   var ssFile = DriveApp.getFileById(newSs.getId());
@@ -1629,13 +1816,22 @@ function getOrCreateSheet(ss, sheetName, headers) {
       try { ss.deleteSheet(defaultSheet); } catch(e) {}
     }
   }
-  if (headers && sheet.getLastRow() === 0) {
-    sheet.appendRow(headers);
-    var range = sheet.getRange(1, 1, 1, headers.length);
-    range.setFontWeight("bold");
-    range.setBackground("#0F172A");
-    range.setFontColor("#FFFFFF");
-    sheet.setFrozenRows(1);
+  if (headers) {
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(headers);
+      var range = sheet.getRange(1, 1, 1, headers.length);
+      range.setFontWeight("bold");
+      range.setBackground("#0F172A");
+      range.setFontColor("#FFFFFF");
+      sheet.setFrozenRows(1);
+    } else if (sheet.getLastColumn() < headers.length) {
+      var headerRange = sheet.getRange(1, 1, 1, headers.length);
+      headerRange.setValues([headers]);
+      headerRange.setFontWeight("bold");
+      headerRange.setBackground("#0F172A");
+      headerRange.setFontColor("#FFFFFF");
+      sheet.setFrozenRows(1);
+    }
   }
   return sheet;
 }
@@ -1656,6 +1852,12 @@ function mergeDatabaseObjects(existing, incoming) {
     if (incoming[key] === undefined) {
       result[key] = existing[key];
     }
+  }
+  if (Array.isArray(result.landingPages)) {
+    result.landingPages = result.landingPages.map(normalizeLandingPageModel);
+  }
+  if (result.activePreviewPage) {
+    result.activePreviewPage = normalizeLandingPageModel(result.activePreviewPage);
   }
   result.ultimoBackup = new Date().toISOString();
   return result;

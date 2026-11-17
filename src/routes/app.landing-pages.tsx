@@ -364,9 +364,30 @@ function LPPage() {
         page={cometPage}
         onSave={async (updatedPage) => {
           try {
-            await updateLandingPage(updatedPage.id, updatedPage);
-            setEditingLP(updatedPage);
-            toast.success("Alterações da Landing Page salvas com sucesso!");
+            const activeModel = updatedPage.hero?.model || updatedPage.heroModel || "split_image";
+            const currentStatus = editingLP.status || "Ativa";
+            const newStatus = updatedPage.status === "draft"
+              ? "Pausada"
+              : (currentStatus === "Teste" || currentStatus === "Pausada" ? currentStatus : "Ativa");
+
+            const payload = {
+              ...updatedPage,
+              heroModel: activeModel,
+              hero: {
+                ...updatedPage.hero,
+                model: activeModel,
+              },
+              name: updatedPage.title || editingLP.name,
+              template: "COMET",
+              status: newStatus,
+              visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
+              leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
+              surveyId: updatedPage.surveyId || editingLP.surveyId || undefined,
+            };
+
+            const saved = await updateLandingPage(editingLP.id || updatedPage.id, payload);
+            setEditingLP(saved || payload);
+            toast.success("Landing Page salva e sincronizada no Google Sheets!");
           } catch (e) {
             console.error("Erro ao salvar LP:", e);
             toast.error("Erro ao salvar alterações da Landing Page.");
@@ -1250,7 +1271,8 @@ function LPPage() {
               setEditingLP(null);
               navigate({ to: "/app/landing-pages" });
             }} 
-            onSave={(updatedPage) => {
+            onSave={async (updatedPage) => {
+              const activeModel = updatedPage.hero?.model || updatedPage.heroModel || "split_image";
               const currentStatus = editingLP.status || "Ativa";
               const newStatus = updatedPage.status === "draft" 
                 ? "Pausada" 
@@ -1258,6 +1280,11 @@ function LPPage() {
 
               const payload = {
                 ...updatedPage,
+                heroModel: activeModel,
+                hero: {
+                  ...updatedPage.hero,
+                  model: activeModel,
+                },
                 name: updatedPage.title,
                 template: "COMET",
                 status: newStatus,
@@ -1265,9 +1292,9 @@ function LPPage() {
                 leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
                 surveyId: updatedPage.surveyId || editingLP.surveyId || null,
               };
-              updateLandingPage(editingLP.id, payload);
-              setEditingLP(payload);
-              toast.success("Landing Page atualizada com sucesso!");
+              const saved = await updateLandingPage(editingLP.id, payload);
+              setEditingLP(saved || payload);
+              toast.success("Landing Page salva e sincronizada no Google Sheets!");
             }} 
           />
         </div>

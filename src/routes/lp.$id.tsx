@@ -271,15 +271,17 @@ function PublicLPPage() {
         }
 
         // =====================================================================
-        // PASSO 2: BUSCA DIRETA NO GOOGLE APPS SCRIPT (GET_PUBLIC_LP) E SERVIDOR EXPRESS
-        // Garante abertura fiel (modelo hero, seções e tema) em nova aba / guia anônima
+        // PASSO 2: BUSCA DIRETA NO GOOGLE SHEETS / APPS SCRIPT (GET_PUBLIC_LP?source=sheets)
+        // Garante abertura fiel (modelo hero, seções e tema) em qualquer navegador ou guia anônima
         // =====================================================================
         try {
           const [cloudPage, serverPage] = await Promise.all([
-            cloudStore.fetchPublicLP(id).catch(() => null),
+            cloudStore.fetchPublicLP(id, { preferSheets: true }).catch(() => null),
             fetchPageFromServerPreview(id).catch(() => null),
           ]);
-          const remotePage = cloudPage || serverPage;
+          const cloudTime = new Date((cloudPage as any)?.updatedAt || (cloudPage as any)?.updated_at || 0).getTime();
+          const serverTime = new Date((serverPage as any)?.updatedAt || (serverPage as any)?.updated_at || 0).getTime();
+          const remotePage = cloudPage && (!serverPage || cloudTime >= serverTime) ? cloudPage : (serverPage || cloudPage);
           if (remotePage && !deletedIds.has(remotePage.id) && isMounted) {
             const ramTime = new Date((foundInRam as any)?.updatedAt || (foundInRam as any)?.updated_at || 0).getTime();
             const remoteTime = new Date((remotePage as any)?.updatedAt || (remotePage as any)?.updated_at || 0).getTime();
@@ -291,7 +293,7 @@ function PublicLPPage() {
             return;
           }
         } catch (srvErr) {
-          console.error("Step 2 (Cloud/Express Fetch) error:", srvErr);
+          console.error("Step 2 (Cloud/Sheets Fetch) error:", srvErr);
         }
 
         if (foundInRam) return;

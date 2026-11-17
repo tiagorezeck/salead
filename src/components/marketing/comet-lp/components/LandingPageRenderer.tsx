@@ -1274,6 +1274,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                     onSelectModel={(newModel) => {
                       updateP((p) => ({
                         ...p,
+                        heroModel: newModel,
                         hero: {
                           ...p.hero,
                           model: newModel,

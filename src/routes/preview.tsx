@@ -142,17 +142,19 @@ export function PreviewPage() {
         setLoading(false);
       }
 
-      // PASSO 2: Busca ao vivo no Google Apps Script (GET_PUBLIC_LP) e servidor Express
+      // PASSO 2: Busca ao vivo direto no Google Sheets / Apps Script (GET_PUBLIC_LP?source=sheets)
       try {
         const [cloudPage, serverPage] = await Promise.all([
-          cloudStore.fetchPublicLP(targetId).catch(() => null),
+          cloudStore.fetchPublicLP(targetId, { preferSheets: true }).catch(() => null),
           fetchPageFromServerPreview(targetId).catch(() => null),
         ]);
-        const remoteBest = cloudPage || serverPage;
+        const cloudTime = new Date((cloudPage as any)?.updatedAt || (cloudPage as any)?.updated_at || 0).getTime();
+        const serverTime = new Date((serverPage as any)?.updatedAt || (serverPage as any)?.updated_at || 0).getTime();
+        const remoteBest = cloudPage && (!serverPage || cloudTime >= serverTime) ? cloudPage : (serverPage || cloudPage);
         if (remoteBest && isMounted) {
           const ramTime = new Date((ramFound as any)?.updatedAt || (ramFound as any)?.updated_at || (ramFound as any)?.createdAt || 0).getTime();
           const remoteTime = new Date((remoteBest as any)?.updatedAt || (remoteBest as any)?.updated_at || (remoteBest as any)?.createdAt || 0).getTime();
-          if (!ramFound || remoteTime >= ramTime) {
+          if (!ramFound || !cloudStore.getStatus().pendingWrite || remoteTime >= ramTime) {
             setPage(remoteBest);
             setLoading(false);
             return;

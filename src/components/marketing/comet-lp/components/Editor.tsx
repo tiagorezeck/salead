@@ -92,7 +92,7 @@ import {
 
 interface EditorProps {
   page: LandingPage;
-  onSave: (page: LandingPage) => void;
+  onSave: (page: LandingPage) => void | Promise<any>;
   onBackToDashboard: () => void;
 }
 
@@ -292,10 +292,10 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
   const theme = THEME_CONFIGS[page.accentColor] || THEME_CONFIGS.purple;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaveStatus("saving");
     const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
-    const updatedPageWithTimestamp = {
+    const updatedPageWithTimestamp: LandingPage = {
       ...page,
       heroModel: activeHeroModel,
       hero: {
@@ -304,11 +304,14 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
       },
       updatedAt: new Date().toISOString(),
     };
-    onSave(updatedPageWithTimestamp);
-    setTimeout(() => {
+    setPage(updatedPageWithTimestamp);
+    try {
+      await Promise.resolve(onSave(updatedPageWithTimestamp));
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
-    }, 400);
+    } catch {
+      setSaveStatus("idle");
+    }
   };
 
   const handleExportHtml = () => {
@@ -759,9 +762,9 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
           {/* Link Teste (Network Preview / Share Modal) */}
           <button
-            onClick={() => {
+            onClick={async () => {
               const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
-              const updatedPageWithTimestamp = {
+              const updatedPageWithTimestamp: LandingPage = {
                 ...page,
                 heroModel: activeHeroModel,
                 hero: {
@@ -770,8 +773,8 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                 },
                 updatedAt: new Date().toISOString(),
               };
-              onSave(updatedPageWithTimestamp);
               setIsNetworkPreviewOpen(true);
+              await Promise.resolve(onSave(updatedPageWithTimestamp)).catch(() => {});
             }}
             className="px-3 py-2 rounded-xl bg-purple-950/60 border border-purple-500/40 hover:bg-purple-900/80 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-purple-950/40"
             title="Link de Teste (Visualizar em outro navegador ou celular via QR Code / URL)"
@@ -2143,34 +2146,31 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
                       {/* Model Selector Card */}
                       <div className="p-3 rounded-2xl bg-zinc-900 border border-purple-500/30 space-y-3">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-zinc-400 font-medium">Modelo do Hero:</span>
-                          <span className="font-bold text-purple-300 bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-800/60 text-[11px]">
-                            {page.hero.model === "split_video" && "Modelo 2: VSL Vertical"}
-                            {page.hero.model === "centered_showcase" && "Modelo 3: Vitrine Centralizada"}
-                            {page.hero.model === "split_lead_form" && "Modelo 4: Captura Direta (Form)"}
-                            {page.hero.model === "b2b_metrics" && "Modelo 5: B2B & Consultoria"}
-                            {page.hero.model === "editorial_ebook" && "Modelo 6: Editorial E-book"}
-                            {(!page.hero.model || page.hero.model === "split_image") && "Modelo 1: Split com Imagem"}
+                        <div className="flex items-center justify-between text-xs gap-2">
+                          <span className="text-zinc-400 font-medium shrink-0">Modelo do Hero:</span>
+                          <span className="font-bold text-purple-300 bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-800/60 text-[11px] truncate">
+                            {HERO_MODELS.find((m) => m.id === (page.hero.model || page.heroModel))?.title || "Modelo 1: Split com Imagem"}
                           </span>
                         </div>
 
                         <select
-                          value={page.hero.model || "split_image"}
-                          onChange={(e) =>
+                          value={page.hero.model || page.heroModel || "split_image"}
+                          onChange={(e) => {
+                            const selectedModel = e.target.value as HeroModel;
                             updatePage((p) => ({
                               ...p,
-                              hero: { ...p.hero, model: e.target.value as HeroModel },
-                            }))
-                          }
+                              heroModel: selectedModel,
+                              hero: { ...p.hero, model: selectedModel },
+                            }));
+                            showNotification(`Modelo "${HERO_MODELS.find((m) => m.id === selectedModel)?.title || selectedModel}" aplicado!`);
+                          }}
                           className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white focus:border-purple-500 focus:outline-none"
                         >
-                          <option value="split_image">Modelo 1: Split com Imagem / Mockup</option>
-                          <option value="split_video">Modelo 2: VSL Vertical & Avaliação Flutuante</option>
-                          <option value="centered_showcase">Modelo 3: Vitrine Centralizada & Métricas</option>
-                          <option value="split_lead_form">Modelo 4: Captura Direta com Formulário Embutido</option>
-                          <option value="b2b_metrics">Modelo 5: Consultoria B2B com Métricas e 2 Botões</option>
-                          <option value="editorial_ebook">Modelo 6: Editorial / E-book Clássico Imersivo</option>
+                          {HERO_MODELS.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.title} — {m.subtitle}
+                            </option>
+                          ))}
                         </select>
 
                         {/* Cor do Modelo (Accent Color da Landing Page e do Modelo) */}

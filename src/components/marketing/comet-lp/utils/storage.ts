@@ -147,7 +147,7 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
 
   try {
     const [cloudResult, apiResults] = await Promise.all([
-      cloudStore.fetchPublicLP(tokenOrId).catch(() => null),
+      cloudStore.fetchPublicLP(tokenOrId, { preferSheets: true }).catch(() => null),
       Promise.allSettled([
         fetchEndpoint(`/api/public/lp/${cleanId}`),
         fetchEndpoint(`/api/pages/preview/${cleanId}`),

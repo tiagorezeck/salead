@@ -597,8 +597,8 @@ export const getInitialAILandingPages = (): LandingPage[] => [
     accentColor: "purple",
     theme: "dark",
     slug: "mentoria-high-ticket-cro",
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: "2025-01-01T00:00:00.000Z",
+    updated_at: "2025-01-01T00:00:00.000Z",
     visibility: {
       hero: true,
       socialProof: true,
@@ -705,12 +705,11 @@ export const mapLPFromDb = (row: any): LandingPage => {
   if (!row || typeof row !== 'object') return { id: '', title: 'Landing Page', name: 'Landing Page' } as any;
   
   let config: any = {};
-  if (typeof row.config === 'object' && row.config !== null) {
-    config = row.config;
-  } else if (typeof row.config === 'string') {
-    try { config = JSON.parse(row.config); } catch {}
-  } else if (typeof row["Config"] === 'string') {
-    try { config = JSON.parse(row["Config"]); } catch {}
+  const rawConfigSource = row["Config JSON"] ?? row.configJson ?? row.config ?? row["Config"];
+  if (typeof rawConfigSource === 'object' && rawConfigSource !== null) {
+    config = rawConfigSource;
+  } else if (typeof rawConfigSource === 'string') {
+    try { config = JSON.parse(rawConfigSource); } catch {}
   }
 
   let content: any = {};
@@ -2652,10 +2651,10 @@ export function useData() {
       if (item.id) removeDeletedLandingPageId(item.id);
       if (item.slug) removeDeletedLandingPageId(item.slug);
 
-      cloudStore.mutate((draft) => {
+      const syncPromise = cloudStore.mutateAndSync((draft) => {
         draft.landingPages = [item, ...(draft.landingPages || []).filter((p: any) => p.id !== item.id && p.slug !== item.slug)];
         draft.activePreviewPage = item;
-      }, { immediate: true });
+      });
 
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
@@ -2664,6 +2663,7 @@ export function useData() {
 
       try {
         await Promise.allSettled([
+          syncPromise,
           fetch('/api/landing-pages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2795,14 +2795,14 @@ export function useData() {
         invalidate('leads');
       }
 
-      cloudStore.mutate((draft) => {
+      const syncPromise = cloudStore.mutateAndSync((draft) => {
         const list = Array.isArray(draft.landingPages) ? draft.landingPages : [];
         const exists = list.some((p: any) => p.id === targetId || p.originalId === targetId || (updatedItem.slug && p.slug === updatedItem.slug));
         draft.landingPages = exists
           ? list.map((p: any) => (p.id === targetId || p.originalId === targetId || (updatedItem.slug && p.slug === updatedItem.slug)) ? updatedItem : p)
           : [updatedItem, ...list];
         draft.activePreviewPage = updatedItem;
-      }, { immediate: true });
+      });
 
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
@@ -2814,18 +2814,25 @@ export function useData() {
       });
 
       try {
-        await Promise.allSettled([
-          fetch(`/api/landing-pages/${encodeURIComponent(targetId)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updatedItem),
-          }),
-          fetch('/api/pages/preview', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updatedItem),
-          }),
+        const [cloudRes] = await Promise.all([
+          syncPromise,
+          Promise.allSettled([
+            fetch(`/api/landing-pages/${encodeURIComponent(targetId)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedItem),
+            }),
+            fetch('/api/pages/preview', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedItem),
+            }),
+          ]),
         ]);
+
+        if (cloudRes && !cloudRes.synced && cloudRes.error && !cloudRes.error.includes("ocupado")) {
+          console.warn("Aviso ao sincronizar LP com Google Sheets:", cloudRes.error);
+        }
       } catch {}
 
       invalidate('landing_pages');

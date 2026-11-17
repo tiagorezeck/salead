@@ -247,7 +247,7 @@ export const executeDriveRequest = async (
   payload: any,
   retryCount = 0
 ): Promise<any> => {
-  const maxRetries = 3;
+  const maxRetries = 4;
   const cfg = getDriveConfig();
   const cleanUrl = cleanWebAppUrl(payload.targetUrl || cfg.webappUrl || "");
 
@@ -294,20 +294,18 @@ export const executeDriveRequest = async (
     retryCount < maxRetries
   ) {
     await new Promise((resolve) =>
-      setTimeout(resolve, 2500 * (retryCount + 1))
+      setTimeout(resolve, 1800 * (retryCount + 1))
     );
     return executeDriveRequest(payload, retryCount + 1);
   }
 
   if (data && data.status === "busy") {
-    return {
-      status: "busy",
-      success: true,
-      message:
-        data.message ||
-        "O Google Apps Script está temporariamente ocupado. Nova tentativa agendada.",
-      queued: true,
-    };
+    const busyErr: any = new Error(
+      data.message ||
+        "O Google Apps Script está temporariamente ocupado. Nova tentativa agendada."
+    );
+    busyErr.isBusy = true;
+    throw busyErr;
   }
 
   // Fallback direto apenas se /api/drive-proxy não existir (404) e houver URL válida
@@ -323,7 +321,9 @@ export const executeDriveRequest = async (
         if (payload.slug) directUrl.searchParams.set("slug", String(payload.slug));
         if (payload.title) directUrl.searchParams.set("title", String(payload.title));
         if (payload.surveyId) directUrl.searchParams.set("surveyId", String(payload.surveyId));
-        if (payload.nocache) directUrl.searchParams.set("nocache", "1");
+        if (payload.nocache) directUrl.searchParams.set("nocache", String(payload.nocache));
+        if (payload.source) directUrl.searchParams.set("source", String(payload.source));
+        if (payload.spreadsheetId) directUrl.searchParams.set("spreadsheetId", String(payload.spreadsheetId));
         if (effectiveToken) directUrl.searchParams.set("token", effectiveToken);
         directUrl.searchParams.set("t", Date.now().toString());
 
@@ -488,17 +488,6 @@ export async function pushToGoogleDrive<T>(
 
     if (res.status === "error") throw new Error(res.message);
 
-    if (res.status === "busy") {
-      saveDriveConfig(
-        {
-          syncStatus: "syncing",
-          lastSyncMessage: res.message,
-        },
-        false
-      );
-      return res;
-    }
-
     saveDriveConfig(
       {
         lastSyncTimestamp: Date.now(),
@@ -513,7 +502,13 @@ export async function pushToGoogleDrive<T>(
 
     return res;
   } catch (err: any) {
-    saveDriveConfig({ syncStatus: "error", lastSyncMessage: err.message }, false);
+    saveDriveConfig(
+      {
+        syncStatus: err?.isBusy ? "syncing" : "error",
+        lastSyncMessage: err.message,
+      },
+      false
+    );
     throw err;
   }
 }
@@ -555,15 +550,40 @@ export async function fetchFromGoogleDrive<T>(
   }
 }
 
-// LEITURA DIRETA DE LANDING PAGE PÚBLICA (Zero-LocalStorage, funciona em aba anônima)
+// LEITURA DIRETA DE LANDING PAGE PÚBLICA DIRETO DO GOOGLE SHEETS / DRIVE (Zero-LocalStorage)
 export const fetchPublicLpFromDrive = async (
-  idOrSlug: string
+  idOrSlug: string,
+  options: { directSheets?: boolean } = { directSheets: true }
 ): Promise<any | null> => {
   if (!idOrSlug) return null;
   const cleanUrl = cleanWebAppUrl(
     getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
   );
   if (!cleanUrl) return null;
+
+  const normalizeFetchedLp = (raw: any) => {
+    if (!raw || typeof raw !== "object") return raw;
+    let parsedConfig: any = {};
+    const jsonRaw = raw["Config JSON"] || raw.configJson || raw.config;
+    if (typeof jsonRaw === "object" && jsonRaw !== null) {
+      parsedConfig = jsonRaw;
+    } else if (typeof jsonRaw === "string") {
+      try { parsedConfig = JSON.parse(jsonRaw); } catch {}
+    }
+    const merged = { ...parsedConfig, ...raw };
+    const model =
+      merged.hero?.model ||
+      merged.heroModel ||
+      merged.hero_model ||
+      parsedConfig.hero?.model ||
+      parsedConfig.heroModel ||
+      "split_image";
+    return {
+      ...merged,
+      heroModel: model,
+      hero: merged.hero ? { ...merged.hero, model } : { model },
+    };
+  };
 
   try {
     const res = await executeDriveRequest({
@@ -572,30 +592,42 @@ export const fetchPublicLpFromDrive = async (
       id: idOrSlug,
       slug: idOrSlug,
       lpId: idOrSlug,
+      ...(options.directSheets !== false ? { source: "sheets", nocache: "1" } : {}),
     });
-    if (res && (res.status === "success" || res.success) && res.landingPage) {
-      return res.landingPage;
+    const lpData = res?.landingPage || res?.lp || res?.page;
+    if (res && (res.status === "success" || res.success) && lpData) {
+      return normalizeFetchedLp(lpData);
     }
   } catch {}
 
-  // Fallback para carga completa do banco caso o script ainda esteja em versão anterior
-  try {
-    const db: any = await fetchFromGoogleDrive(cleanUrl, true);
+  // Fallback: leitura completa direto das abas do Google Sheets e JSON mestre
+  const targetLow = decodeURIComponent(idOrSlug).trim().toLowerCase();
+  const findInDb = (db: any) => {
     const list = Array.isArray(db?.landingPages)
       ? db.landingPages
       : Array.isArray(db?.landing_pages)
       ? db.landing_pages
       : [];
-    const targetLow = idOrSlug.trim().toLowerCase();
-    return (
-      list.find(
-        (p: any) =>
-          p &&
-          (String(p.id || "").toLowerCase() === targetLow ||
-            String(p.originalId || "").toLowerCase() === targetLow ||
-            String(p.slug || "").toLowerCase() === targetLow)
-      ) || null
+    const found = list.find(
+      (p: any) =>
+        p &&
+        (String(p.id || "").toLowerCase() === targetLow ||
+          String(p.originalId || "").toLowerCase() === targetLow ||
+          String(p.previewToken || "").toLowerCase() === targetLow ||
+          String(p.slug || "").toLowerCase() === targetLow)
     );
+    return found ? normalizeFetchedLp(found) : null;
+  };
+
+  try {
+    const forcedDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
+    const fromSheet = findInDb(forcedDb);
+    if (fromSheet) return fromSheet;
+  } catch {}
+
+  try {
+    const db: any = await fetchFromGoogleDrive(cleanUrl, true);
+    return findInDb(db);
   } catch {
     return null;
   }
