@@ -55,6 +55,14 @@ export const Route = createFileRoute("/preview")({
   }),
 });
 
+function getLpTs(p: any): number {
+  if (!p || typeof p !== "object") return 0;
+  const t1 = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+  const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+  const t3 = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+  return Math.max(Number.isFinite(t1) ? t1 : 0, Number.isFinite(t2) ? t2 : 0, Number.isFinite(t3) ? t3 : 0);
+}
+
 export function PreviewPage() {
   const search = useSearch({ from: "/preview" });
   const navigate = useNavigate();
@@ -140,34 +148,50 @@ export function PreviewPage() {
       if (ramFound && isMounted) {
         setPage(ramFound);
         setLoading(false);
+        if (cloudStore.getStatus().pendingWrite) {
+          return;
+        }
       }
 
-      // PASSO 2: Busca ao vivo direto no Google Sheets / Apps Script (GET_PUBLIC_LP?source=sheets)
-      try {
-        const [cloudPage, serverPage] = await Promise.all([
-          cloudStore.fetchPublicLP(targetId, { preferSheets: true }).catch(() => null),
-          fetchPageFromServerPreview(targetId).catch(() => null),
-        ]);
-        const cloudTime = new Date((cloudPage as any)?.updatedAt || (cloudPage as any)?.updated_at || 0).getTime();
-        const serverTime = new Date((serverPage as any)?.updatedAt || (serverPage as any)?.updated_at || 0).getTime();
-        const remoteBest = cloudPage && (!serverPage || cloudTime >= serverTime) ? cloudPage : (serverPage || cloudPage);
-        if (remoteBest && isMounted) {
-          const ramTime = new Date((ramFound as any)?.updatedAt || (ramFound as any)?.updated_at || (ramFound as any)?.createdAt || 0).getTime();
-          const remoteTime = new Date((remoteBest as any)?.updatedAt || (remoteBest as any)?.updated_at || (remoteBest as any)?.createdAt || 0).getTime();
-          if (!ramFound || !cloudStore.getStatus().pendingWrite || remoteTime >= ramTime) {
-            setPage(remoteBest);
-            setLoading(false);
-            return;
-          }
+      // PASSO 2: Busca paralela rápida no servidor Express/Vercel E Google Sheets/Apps Script (exibe o primeiro válido imediatamente!)
+      let bestFound: any = ramFound || null;
+      let bestTime = getLpTs(ramFound);
+
+      const acceptIfNewer = (candidate: any) => {
+        if (!candidate || !isMounted) return false;
+        const candTime = getLpTs(candidate);
+        if (!bestFound || (!cloudStore.getStatus().pendingWrite && candTime > bestTime)) {
+          bestFound = candidate;
+          bestTime = candTime;
+          setPage(candidate);
+          setLoading(false);
+          return true;
         }
+        return false;
+      };
+
+      try {
+        await Promise.allSettled([
+          fetchPageFromServerPreview(targetId)
+            .then((srv) => {
+              acceptIfNewer(srv);
+            })
+            .catch(() => {}),
+          cloudStore
+            .fetchPublicLP(targetId, { preferSheets: false })
+            .then((cld) => {
+              acceptIfNewer(cld);
+            })
+            .catch(() => {}),
+        ]);
       } catch {}
 
-      if (ramFound && isMounted) {
+      if (bestFound && isMounted) {
         setLoading(false);
         return;
       }
 
-      // PASSO 3: Bootstrap completo da nuvem se outro navegador acabou de abrir a aba
+      // PASSO 3: Bootstrap completo da nuvem se outro navegador acabou de abrir a aba e ainda não achou
       if (!cloudStore.getStatus().loadedFromCloud) {
         try {
           const booted = await cloudStore.bootstrap();
@@ -229,8 +253,8 @@ export function PreviewPage() {
         findMatchingPage(db.landingPages || [], targetId);
       if (match) {
         setPage((prev: any) => {
-          const prevTime = new Date(prev?.updatedAt || prev?.updated_at || 0).getTime();
-          const nextTime = new Date(match?.updatedAt || match?.updated_at || 0).getTime();
+          const prevTime = getLpTs(prev);
+          const nextTime = getLpTs(match);
           return !prev || nextTime >= prevTime ? match : prev;
         });
         setLoading(false);

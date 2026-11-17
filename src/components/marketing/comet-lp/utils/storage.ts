@@ -2,12 +2,43 @@ import { LandingPage, LeadSubmission, DEFAULT_HEADER_NAV } from "../types/landin
 import { PRESET_TEMPLATES } from "../data/templates";
 import { cloudStore } from "@/services/cloudStorageService";
 
+function getLpTs(p: any): number {
+  if (!p || typeof p !== "object") return 0;
+  const t1 = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+  const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+  const t3 = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+  return Math.max(Number.isFinite(t1) ? t1 : 0, Number.isFinite(t2) ? t2 : 0, Number.isFinite(t3) ? t3 : 0);
+}
+
+function isCorruptedLeadRow(p: any): boolean {
+  if (!p || typeof p !== "object") return true;
+  if (p.hero || p.externalUrl || p.external_url || p.heroModel) return false;
+  const statusStr = String(p.status || "").trim().toLowerCase();
+  return statusStr === "novo lead";
+}
+
 function normalizePage(page: LandingPage): LandingPage {
-  const activeModel = page.heroModel || page.hero?.model || (page.hero as any)?.model || "split_image";
+  const activeModel =
+    (page as any).heroModel ||
+    page.hero?.model ||
+    (page as any).hero_model ||
+    (page as any).model ||
+    "split_image";
+
+  const rawUpdatedAt = (page as any).updatedAt;
+  const rawUpdatedSnake = (page as any).updated_at;
+  const t1 = rawUpdatedAt ? new Date(rawUpdatedAt).getTime() : 0;
+  const t2 = rawUpdatedSnake ? new Date(rawUpdatedSnake).getTime() : 0;
+  const resolvedUpdated =
+    (Number.isFinite(t1) ? t1 : 0) >= (Number.isFinite(t2) ? t2 : 0)
+      ? (rawUpdatedAt || rawUpdatedSnake)
+      : (rawUpdatedSnake || rawUpdatedAt);
+
   return {
     ...page,
     heroModel: activeModel,
     hero: page.hero ? { ...page.hero, model: activeModel } : page.hero,
+    ...(resolvedUpdated ? { updatedAt: resolvedUpdated, updated_at: resolvedUpdated } : {}),
     headerNav: page.headerNav
       ? {
           ...DEFAULT_HEADER_NAV,
@@ -29,28 +60,28 @@ export function loadSavedLandingPages(): LandingPage[] {
     const mergedMap = new Map<string, LandingPage>();
 
     for (const p of (db.landingPages || []) as any[]) {
-      if (!p || (!p.id && !p.slug)) continue;
+      if (!p || (!p.id && !p.slug) || isCorruptedLeadRow(p)) continue;
       if (deletedSet.has(String(p.id)) || (p.slug && deletedSet.has(String(p.slug)))) continue;
       const itemKey = String(p.id || p.slug);
       const existing = mergedMap.get(itemKey);
       if (!existing) {
         mergedMap.set(itemKey, normalizePage(p));
       } else {
-        const existingTime = new Date(existing.updatedAt || (existing as any).updated_at || 0).getTime();
-        const newTime = new Date(p.updatedAt || p.updated_at || 0).getTime();
+        const existingTime = getLpTs(existing);
+        const newTime = getLpTs(p);
         if (newTime >= existingTime) {
           mergedMap.set(itemKey, normalizePage({ ...existing, ...p }));
         }
       }
     }
 
-    if (db.activePreviewPage && (db.activePreviewPage.id || db.activePreviewPage.slug)) {
+    if (db.activePreviewPage && (db.activePreviewPage.id || db.activePreviewPage.slug) && !isCorruptedLeadRow(db.activePreviewPage)) {
       const active = db.activePreviewPage;
       if (!deletedSet.has(String(active.id)) && !(active.slug && deletedSet.has(String(active.slug)))) {
         const itemKey = String(active.id || active.slug);
         const existing = mergedMap.get(itemKey);
-        const existingTime = new Date(existing?.updatedAt || (existing as any)?.updated_at || 0).getTime();
-        const activeTime = new Date(active.updatedAt || active.updated_at || 0).getTime();
+        const existingTime = getLpTs(existing);
+        const activeTime = getLpTs(active);
         if (!existing || activeTime >= existingTime) {
           mergedMap.set(itemKey, normalizePage({ ...(existing || {}), ...active }));
         }
@@ -72,7 +103,7 @@ export function loadSavedLandingPages(): LandingPage[] {
 export function saveLandingPages(pages: LandingPage[]): void {
   if (typeof window === "undefined") return;
   try {
-    const normalized = pages.map(normalizePage);
+    const normalized = pages.filter((p) => !isCorruptedLeadRow(p)).map(normalizePage);
     cloudStore.mutate((draft) => {
       draft.landingPages = normalized as any[];
     });
@@ -81,40 +112,42 @@ export function saveLandingPages(pages: LandingPage[]): void {
   }
 }
 
-export function saveSingleLandingPage(page: LandingPage): LandingPage[] {
+export function saveSingleLandingPage(page: LandingPage, options: { immediate?: boolean } = {}): LandingPage[] {
   const pages = loadSavedLandingPages();
-  const normalizedInput = normalizePage(page);
+  const nowIso = new Date().toISOString();
+  const normalizedInput = normalizePage({
+    ...page,
+    updatedAt: nowIso,
+    updated_at: nowIso,
+  } as any);
   const index = pages.findIndex((p) => p.id === normalizedInput.id || (normalizedInput.slug && p.slug === normalizedInput.slug));
-  const pageWithUpdatedTimestamp: LandingPage = {
-    ...normalizedInput,
-    updatedAt: new Date().toISOString(),
-  };
 
-  let updated: LandingPage[];
-  if (index >= 0) {
-    updated = [...pages];
-    updated[index] = normalizePage({ ...updated[index], ...pageWithUpdatedTimestamp });
-  } else {
-    updated = [pageWithUpdatedTimestamp, ...pages];
-  }
+  const pageWithUpdatedTimestamp: LandingPage = index >= 0
+    ? normalizePage({ ...pages[index], ...normalizedInput, updatedAt: nowIso, updated_at: nowIso } as any)
+    : normalizedInput;
 
-  cloudStore.mutate((draft) => {
-    draft.landingPages = updated as any[];
-    draft.activePreviewPage = pageWithUpdatedTimestamp;
-  });
+  const updated = index >= 0
+    ? pages.map((p, idx) => (idx === index ? pageWithUpdatedTimestamp : p))
+    : [pageWithUpdatedTimestamp, ...pages];
 
-  // Sincronização assíncrona com cache de preview do servidor
-  syncPageWithServerPreview(pageWithUpdatedTimestamp).catch(() => {});
+  // Grava atomicamente no RAM, /api/pages/preview e Google Sheets (sem reescrever todas as 8 abas!)
+  cloudStore.saveLandingPageOnly(pageWithUpdatedTimestamp as any, { immediate: options.immediate === true }).catch(() => {});
 
   return updated;
 }
 
 export async function syncPageWithServerPreview(page: LandingPage): Promise<boolean> {
   try {
+    const nowIso = new Date().toISOString();
+    const payload = normalizePage({
+      ...page,
+      updatedAt: (page as any).updatedAt || (page as any).updated_at || nowIso,
+      updated_at: (page as any).updated_at || (page as any).updatedAt || nowIso,
+    } as any);
     const res = await fetch("/api/pages/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(normalizePage(page)),
+      body: JSON.stringify(payload),
     });
     return res.ok;
   } catch {
@@ -128,14 +161,14 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
 
   const fetchEndpoint = async (url: string): Promise<LandingPage | null> => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 2800);
     try {
       const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
       clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
         const pageData = data?.page || data?.landingPage || (data?.id && (data?.hero || data?.title || data?.name) ? data : null);
-        if (pageData && (pageData.title || pageData.name || pageData.hero)) {
+        if (pageData && !isCorruptedLeadRow(pageData) && (pageData.title || pageData.name || pageData.hero)) {
           return normalizePage(pageData);
         }
       }
@@ -146,32 +179,21 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
   };
 
   try {
-    const [cloudResult, apiResults] = await Promise.all([
-      cloudStore.fetchPublicLP(tokenOrId, { preferSheets: true }).catch(() => null),
-      Promise.allSettled([
-        fetchEndpoint(`/api/public/lp/${cleanId}`),
-        fetchEndpoint(`/api/pages/preview/${cleanId}`),
-      ]),
+    const apiResults = await Promise.allSettled([
+      fetchEndpoint(`/api/public/lp/${cleanId}`),
+      fetchEndpoint(`/api/pages/preview/${cleanId}`),
     ]);
 
-    const candidates: Array<{ page: LandingPage; fromCloud: boolean }> = [];
-    if (cloudResult) {
-      candidates.push({ page: normalizePage(cloudResult as any), fromCloud: true });
-    }
+    const candidates: LandingPage[] = [];
     for (const r of apiResults) {
       if (r.status === "fulfilled" && r.value) {
-        candidates.push({ page: r.value, fromCloud: false });
+        candidates.push(r.value);
       }
     }
 
     if (candidates.length > 0) {
-      candidates.sort((a, b) => {
-        const tA = new Date(a.page.updatedAt || (a.page as any).updated_at || 0).getTime();
-        const tB = new Date(b.page.updatedAt || (b.page as any).updated_at || 0).getTime();
-        if (tB !== tA) return tB - tA;
-        return Number(b.fromCloud) - Number(a.fromCloud);
-      });
-      return candidates[0].page;
+      candidates.sort((a, b) => getLpTs(b) - getLpTs(a));
+      return candidates[0];
     }
   } catch {}
 

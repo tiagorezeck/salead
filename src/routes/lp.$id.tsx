@@ -1,7 +1,7 @@
 "use client";
 
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useData, getDeletedLandingPageIds, getInitialAILandingPages, mapLeadToDb } from "@/hooks/use-data";
+import { getDeletedLandingPageIds, getInitialAILandingPages } from "@/hooks/use-data";
 import { useState, useEffect, useRef } from "react";
 import { 
   X, 
@@ -109,9 +109,26 @@ function normalizeSlug(str: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function getLpTs(p: any): number {
+  if (!p || typeof p !== "object") return 0;
+  const t1 = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+  const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+  const t3 = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+  return Math.max(Number.isFinite(t1) ? t1 : 0, Number.isFinite(t2) ? t2 : 0, Number.isFinite(t3) ? t3 : 0);
+}
+
 function PublicLPPage() {
   const { id } = useParams({ from: "/lp/$id" });
-  const { products, pipelines, surveys, leads } = useData();
+  const [cloudSnapshot, setCloudSnapshot] = useState(() => cloudStore.getState());
+  useEffect(() => {
+    return cloudStore.subscribe(() => {
+      setCloudSnapshot(cloudStore.getState());
+    });
+  }, []);
+  const products = cloudSnapshot.products || [];
+  const pipelines = cloudSnapshot.pipelines || [];
+  const surveys = cloudSnapshot.surveys || [];
+  const leads = cloudSnapshot.leads || [];
 
   const [lp, setLp] = useState<any>(null);
   const [assignedSurvey, setAssignedSurvey] = useState<any>(null);
@@ -265,38 +282,49 @@ function PublicLPPage() {
           setLp(foundInRam);
           setLoading(false);
           recordVisitForLP(foundInRam).catch(() => {});
-          if (cloudStore.getStatus().loadedFromCloud) {
+          if (cloudStore.getStatus().loadedFromCloud || cloudStore.getStatus().pendingWrite) {
             return;
           }
         }
 
         // =====================================================================
-        // PASSO 2: BUSCA DIRETA NO GOOGLE SHEETS / APPS SCRIPT (GET_PUBLIC_LP?source=sheets)
-        // Garante abertura fiel (modelo hero, seções e tema) em qualquer navegador ou guia anônima
+        // PASSO 2: BUSCA PARALELA RÁPIDA (SERVIDOR + APPS SCRIPT CACHE/SHEETS)
+        // Renderiza imediatamente assim que a primeira fonte responder, sem esperar 10s
         // =====================================================================
-        try {
-          const [cloudPage, serverPage] = await Promise.all([
-            cloudStore.fetchPublicLP(id, { preferSheets: true }).catch(() => null),
-            fetchPageFromServerPreview(id).catch(() => null),
-          ]);
-          const cloudTime = new Date((cloudPage as any)?.updatedAt || (cloudPage as any)?.updated_at || 0).getTime();
-          const serverTime = new Date((serverPage as any)?.updatedAt || (serverPage as any)?.updated_at || 0).getTime();
-          const remotePage = cloudPage && (!serverPage || cloudTime >= serverTime) ? cloudPage : (serverPage || cloudPage);
-          if (remotePage && !deletedIds.has(remotePage.id) && isMounted) {
-            const ramTime = new Date((foundInRam as any)?.updatedAt || (foundInRam as any)?.updated_at || 0).getTime();
-            const remoteTime = new Date((remotePage as any)?.updatedAt || (remotePage as any)?.updated_at || 0).getTime();
-            if (!foundInRam || remoteTime >= ramTime) {
-              setLp(remotePage);
-              setLoading(false);
-              recordVisitForLP(remotePage).catch(() => {});
+        let bestPage: any = foundInRam || null;
+        let bestTime = getLpTs(foundInRam);
+        let visitRecorded = Boolean(foundInRam);
+
+        const applyRemoteIfNewer = (candidate: any) => {
+          if (!candidate || deletedIds.has(candidate.id) || !isMounted) return;
+          const candTime = getLpTs(candidate);
+          if (!bestPage || (!cloudStore.getStatus().pendingWrite && candTime > bestTime)) {
+            bestPage = candidate;
+            bestTime = candTime;
+            setLp(candidate);
+            setLoading(false);
+            if (!visitRecorded) {
+              visitRecorded = true;
+              recordVisitForLP(candidate).catch(() => {});
             }
-            return;
           }
+        };
+
+        try {
+          await Promise.allSettled([
+            fetchPageFromServerPreview(id)
+              .then((srvPage) => applyRemoteIfNewer(srvPage))
+              .catch(() => {}),
+            cloudStore
+              .fetchPublicLP(id, { preferSheets: false })
+              .then((cloudPage) => applyRemoteIfNewer(cloudPage))
+              .catch(() => {}),
+          ]);
         } catch (srvErr) {
           console.error("Step 2 (Cloud/Sheets Fetch) error:", srvErr);
         }
 
-        if (foundInRam) return;
+        if (bestPage) return;
 
         // =====================================================================
         // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE CASO NECESSÁRIO
@@ -392,8 +420,8 @@ function PublicLPPage() {
       if (liveMatch) {
         setLp((prev: any) => {
           if (!prev) return liveMatch;
-          const prevTime = new Date(prev.updatedAt || prev.updated_at || 0).getTime();
-          const nextTime = new Date(liveMatch.updatedAt || liveMatch.updated_at || 0).getTime();
+          const prevTime = getLpTs(prev);
+          const nextTime = getLpTs(liveMatch);
           return nextTime > prevTime ? liveMatch : prev;
         });
         setLoading(false);
@@ -1043,7 +1071,7 @@ interface DirectExternalLeadFormProps {
 }
 
 function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLeadFormProps) {
-  const { leads } = useData();
+  const leads = cloudStore.getState().leads || [];
   const [name, setName] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [email, setEmail] = useState("");

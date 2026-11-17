@@ -36,19 +36,28 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
   // Construct origin and preview token URL
   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
   const tokenToUse = page.previewToken || page.id;
-  const versionParam = new Date(page.updatedAt || Date.now()).getTime();
+  const versionParam =
+    Math.max(
+      new Date(page.updatedAt || 0).getTime() || 0,
+      new Date((page as any).updated_at || 0).getTime() || 0
+    ) || Date.now();
+  const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
   
   const previewUrl = `${origin}/preview?pageId=${page.id}&token=${tokenToUse}&v=${versionParam}`;
   const publicUrl = `${origin}/lp/${page.slug || page.id}`;
   const [copiedPublic, setCopiedPublic] = useState(false);
 
-  // Always persist latest page state to storage & server preview when opening modal
+  // Persist latest page state to server preview & Sheets once when opening or when LP/version/model changes
   useEffect(() => {
     if (isOpen && page) {
-      saveLandingPageToStorage(page);
-      syncPageWithServerPreview(page).catch(() => {});
+      const normalizedPage: any = {
+        ...page,
+        heroModel: activeHeroModel,
+        hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
+      };
+      syncPageWithServerPreview(normalizedPage).catch(() => {});
     }
-  }, [isOpen, page]);
+  }, [isOpen, page?.id, versionParam, activeHeroModel]);
 
   // Generate QR Code dynamically
   useEffect(() => {
@@ -80,24 +89,35 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleOpenNewTab = () => {
-    // Ensure storage and server preview are written first
-    saveLandingPageToStorage(page);
-    syncPageWithServerPreview(page).catch(() => {});
+  const handleOpenNewTab = async () => {
+    const nowIso = new Date().toISOString();
+    const pageToSync: any = {
+      ...page,
+      heroModel: activeHeroModel,
+      hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
+      updatedAt: (page as any).updatedAt || nowIso,
+      updated_at: (page as any).updated_at || (page as any).updatedAt || nowIso,
+    };
+    saveLandingPageToStorage(pageToSync, { immediate: true });
+    await syncPageWithServerPreview(pageToSync).catch(() => {});
     window.open(previewUrl, "_blank");
   };
 
   // Generate a brand-new unique test link
-  const handleGenerateNewLink = () => {
+  const handleGenerateNewLink = async () => {
     const newToken = `lnk_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-    const updatedPage: LandingPage = {
+    const nowIso = new Date().toISOString();
+    const updatedPage: any = {
       ...page,
+      heroModel: activeHeroModel,
+      hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
       previewToken: newToken,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
+      updated_at: nowIso,
     };
 
-    saveLandingPageToStorage(updatedPage);
-    syncPageWithServerPreview(updatedPage).catch(() => {});
+    saveLandingPageToStorage(updatedPage, { immediate: true });
+    await syncPageWithServerPreview(updatedPage).catch(() => {});
     if (onUpdatePage) {
       onUpdatePage(updatedPage);
     }

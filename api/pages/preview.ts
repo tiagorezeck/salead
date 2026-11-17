@@ -1,180 +1,164 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createClient } from "@supabase/supabase-js";
+import { GLOBAL_GAS_CONFIG, normalizeGasUrl } from "../../src/config/gasConfig";
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://zhyihwtgsctlpzspgsop.supabase.co";
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoeWlod3Rnc2N0bHB6c3Bnc29wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5ODE1OTksImV4cCI6MjA5OTU1NzU5OX0.Eg8KGBN8HmyQ0vnpZLhhjrFBrvW0YnIqzKLwiKL6_Gk";
+const previewMemoryCache = new Map<string, any>();
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+function getGasEndpoint(req: VercelRequest): string {
+  const fromQuery =
+    (typeof req.query?.gasUrl === "string" && req.query.gasUrl) || "";
+  return normalizeGasUrl(
+    process.env.GAS_WEBAPP_URL ||
+      process.env.VITE_GAS_WEBAPP_URL ||
+      fromQuery ||
+      GLOBAL_GAS_CONFIG.WEBAPP_URL ||
+      ""
+  );
+}
 
-function isUUID(str: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+function normalizeLp(raw: any) {
+  if (!raw || typeof raw !== "object") return raw;
+  const heroModel =
+    raw.hero?.model || raw.heroModel || raw.hero_model || "split_image";
+  const ts = raw.updatedAt || raw.updated_at || new Date().toISOString();
+  return {
+    ...raw,
+    heroModel,
+    hero: raw.hero ? { ...raw.hero, model: heroModel } : { model: heroModel },
+    updatedAt: ts,
+    updated_at: ts,
+  };
+}
+
+function getTsMs(p: any): number {
+  if (!p) return 0;
+  const a = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+  const b = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+  return Math.max(Number.isNaN(a) ? 0 : a, Number.isNaN(b) ? 0 : b);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Cache-Control", "no-store, max-age=0");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  const queryId = (req.query.token || req.query.pageId || req.query.id || req.query.slug) as string;
+  const queryId = String(
+    req.query.token || req.query.pageId || req.query.id || req.query.slug || ""
+  ).trim();
 
   if (req.method === "GET") {
     if (!queryId) {
-      return res.status(400).json({ error: "Parâmetro id, token ou pageId obrigatório" });
+      return res
+        .status(400)
+        .json({ error: "Parâmetro id, token ou pageId obrigatório" });
     }
 
-    try {
-      // 1. Busca por UUID exato se for UUID
-      if (isUUID(queryId)) {
-        const { data, error } = await supabase.from("landing_pages").select("*").eq("id", queryId).maybeSingle();
-        if (data && !error) {
-          const mapped = {
-            id: data.id,
-            name: data.name,
-            title: data.name,
-            template: data.template,
-            status: data.status,
-            ...(typeof data.config === "object" ? data.config : {}),
-          };
-          return res.status(200).json({ page: mapped });
+    const memHit = previewMemoryCache.get(queryId);
+    const gasUrl = getGasEndpoint(req);
+
+    if (gasUrl) {
+      try {
+        const urlObj = new URL(gasUrl);
+        urlObj.searchParams.set("action", "GET_PUBLIC_LP");
+        urlObj.searchParams.set("id", queryId);
+        urlObj.searchParams.set("slug", queryId);
+        urlObj.searchParams.set("lpId", queryId);
+        urlObj.searchParams.set("t", Date.now().toString());
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const gasRes = await fetch(urlObj.toString(), {
+          method: "GET",
+          redirect: "follow",
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        const rawText = await gasRes.text();
+        if (rawText && !rawText.trim().startsWith("<")) {
+          const parsed = JSON.parse(rawText);
+          let candidate = parsed?.landingPage || parsed?.lp || parsed?.page;
+          if (!candidate && Array.isArray(parsed?.landingPages)) {
+            const qLow = queryId.toLowerCase();
+            candidate = parsed.landingPages.find(
+              (p: any) =>
+                p &&
+                (String(p.id || "").toLowerCase() === qLow ||
+                  String(p.slug || "").toLowerCase() === qLow ||
+                  String(p.previewToken || "").toLowerCase() === qLow)
+            );
+          }
+          if (candidate && candidate.id) {
+            const norm = normalizeLp(candidate);
+            const best =
+              memHit && getTsMs(memHit) > getTsMs(norm) ? memHit : norm;
+            previewMemoryCache.set(best.id, best);
+            if (best.slug) previewMemoryCache.set(best.slug, best);
+            if (best.previewToken) previewMemoryCache.set(best.previewToken, best);
+            return res.status(200).json({ success: true, page: best, landingPage: best });
+          }
         }
-      }
-
-      // 2. Busca por slug, client_id ou name
-      const { data: byQuery } = await supabase
-        .from("landing_pages")
-        .select("*")
-        .or(`config->>slug.eq.${queryId},config->>client_id.eq.${queryId},name.eq.${queryId}`)
-        .limit(1);
-
-      if (byQuery && byQuery.length > 0) {
-        const row = byQuery[0];
-        const mapped = {
-          id: row.id,
-          name: row.name,
-          title: row.name,
-          template: row.template,
-          status: row.status,
-          ...(typeof row.config === "object" ? row.config : {}),
-        };
-        return res.status(200).json({ page: mapped });
-      }
-
-      // 3. Fallback: lista recente para correspondência flexível
-      const { data: allLps } = await supabase.from("landing_pages").select("*").limit(30);
-      if (allLps && allLps.length > 0) {
-        const found = allLps.find(
-          (p) =>
-            p.id === queryId ||
-            p.config?.slug === queryId ||
-            p.config?.client_id === queryId ||
-            p.name?.toLowerCase().includes(queryId.toLowerCase())
-        );
-        if (found) {
-          const mapped = {
-            id: found.id,
-            name: found.name,
-            title: found.name,
-            template: found.template,
-            status: found.status,
-            ...(typeof found.config === "object" ? found.config : {}),
-          };
-          return res.status(200).json({ page: mapped });
-        }
-      }
-
-      return res.status(404).json({ error: "Página de preview não encontrada" });
-    } catch (e: any) {
-      return res.status(500).json({ error: e?.message || "Erro interno ao buscar preview" });
+      } catch {}
     }
+
+    if (memHit) {
+      return res.status(200).json({ success: true, page: memHit, landingPage: memHit });
+    }
+
+    return res.status(404).json({ error: "Página de preview não encontrada" });
   }
 
-  if (req.method === "POST") {
+  if (req.method === "POST" || req.method === "PUT") {
     try {
-      // Aceita tanto { page: ... } quanto o objeto page diretamente no body
-      const page = req.body?.page || (req.body?.id ? req.body : null);
-      if (!page) {
+      const body =
+        typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+      const rawPage = body?.page || (body?.id ? body : null);
+      if (!rawPage) {
         return res.status(400).json({ error: "Objeto page é obrigatório" });
       }
 
-      // Prepara o payload para o banco de dados (exatamente como mapLPToDb)
-      const { id, name, template, status, visits, leads, leads_count, created_at, updated_at, conv, ...config } = page;
-      
-      const payload: Record<string, any> = {
-        name: name || page.title || "Nova Landing Page",
-        template: template || "Modern",
-        status: status || "Ativa",
-        visits: visits !== undefined ? Number(visits) : 0,
-        leads_count: (leads_count ?? leads) !== undefined ? Number(leads_count ?? leads) : 0,
-        config: {
-          ...(config || {}),
-          client_id: id || (config && config.id) || (config && config.client_id),
-          slug: page.slug || (config && config.slug) || (page.title || name ? (page.title || name).toLowerCase().replace(/[^a-z0-9]+/g, "-") : undefined),
-          surveyId: page.surveyId || (config && config.surveyId),
-          externalUrl: page.externalUrl || (config && config.externalUrl)
-        }
-      };
+      const normalized = normalizeLp(rawPage);
+      previewMemoryCache.set(normalized.id, normalized);
+      if (normalized.slug) previewMemoryCache.set(normalized.slug, normalized);
+      if (normalized.previewToken) previewMemoryCache.set(normalized.previewToken, normalized);
 
-      let finalId = id;
-
-      if (id && isUUID(id)) {
-        payload.id = id;
-        const { error: upsertError } = await supabase.from("landing_pages").upsert([payload]);
-        if (upsertError) {
-          console.error("Upsert by id error in API:", upsertError);
-        }
-      } else {
-        const pageName = name || page.title || "Nova Landing Page";
-        const { data: existing } = await supabase
-          .from("landing_pages")
-          .select("id")
-          .eq("name", pageName)
-          .limit(1)
-          .maybeSingle();
-
-        if (existing?.id) {
-          payload.id = existing.id;
-          finalId = existing.id;
-          const { error: updateError } = await supabase.from("landing_pages").update(payload).eq("id", existing.id);
-          if (updateError) {
-            console.error("Update by name error in API:", updateError);
-          }
-        } else {
-          const { data: inserted, error: insertError } = await supabase
-            .from("landing_pages")
-            .insert([payload])
-            .select("id")
-            .single();
-          if (inserted?.id) {
-            payload.id = inserted.id;
-            finalId = inserted.id;
-          }
-          if (insertError) {
-            console.error("Insert error in API:", insertError);
-          }
-        }
+      const gasUrl = getGasEndpoint(req);
+      if (gasUrl) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          await fetch(gasUrl, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+              action: "SAVE_LANDING_PAGE",
+              landingPage: normalized,
+            }),
+            redirect: "follow",
+            signal: controller.signal,
+          }).catch(() => {});
+          clearTimeout(timeout);
+        } catch {}
       }
 
-      const generatedToken = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-      const token = page.previewToken || (isUUID(finalId) ? finalId : generatedToken);
-      const previewUrl = `/preview?pageId=${finalId}&token=${token}&v=${Date.now()}`;
+      const token = normalized.previewToken || normalized.id;
+      const previewUrl = `/preview?pageId=${normalized.id}&token=${token}&v=${Date.now()}`;
 
       return res.status(200).json({
         success: true,
         previewUrl,
         token,
-        pageId: finalId,
+        pageId: normalized.id,
+        id: normalized.id,
       });
     } catch (e: any) {
-      return res.status(500).json({ error: e?.message || "Erro ao salvar preview" });
+      return res
+        .status(500)
+        .json({ error: e?.message || "Erro ao salvar preview" });
     }
   }
 

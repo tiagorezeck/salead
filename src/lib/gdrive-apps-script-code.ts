@@ -1,6 +1,6 @@
 // =========================================================================
-// GOOGLE APPS SCRIPT (Code.gs) - MOTOR SALEAD DATABASE NO GOOGLE DRIVE + SHEETS v3.1
-// Arquitetura Estilo Supabase / Firebase (Zero-LocalStorage, Cache em Chunks 65KB, Lock Atômico)
+// GOOGLE APPS SCRIPT (Code.gs) - MOTOR SALEAD DATABASE NO GOOGLE DRIVE + SHEETS v3.2
+// Arquitetura Estilo Supabase / Firebase (Zero-LocalStorage, Cache em Chunks 65KB, Cache Individual de LPs, Lock Atômico)
 // =========================================================================
 // Guia Rápido de Atualização / Publicação no Google Apps Script:
 // 1. Abra script.google.com e abra seu projeto atual do SALEAD.
@@ -10,16 +10,15 @@
 // 5. No lápis (Editar) > Versão: selecione "Nova versão" > Quem pode acessar: "Qualquer pessoa" > "Implantar".
 //    (Ou crie uma Nova Implantação tipo "App da Web" com acesso "Qualquer pessoa" e cole a URL /exec no sistema).
 //
-// O QUE HÁ DE NOVO NA VERSÃO 3.1 (SHEETS-FIRST PARA LANDING PAGES + CLOUD ENGINE):
-// ⚡ CacheService em Chunks (65KB por bloco via putAll): Respostas < 100ms mesmo com dezenas de LPs ricas!
-// 📊 Landing_Pages direto no Sheets: Salva Modelo Hero, Tema, Cor e Config JSON nas colunas da planilha.
-// 🎯 GET_PUBLIC_LP direto do Sheets: Abertura fiel em qualquer navegador ou guia anônima sem voltar ao Modelo 1.
-// 🧹 Deleções Completas em Lote: Suporta DELETE_PRODUCT, DELETE_TASK, DELETE_SURVEY, CLEAR_LP_TEST_DATA e CLEAN_DATABASE_KEEP_ONE.
-// 📦 Escrita Atômica + LockService 30s + Batch Sheets Sync: Tabelas sempre atualizadas sem perder dados.
+// O QUE HÁ DE NOVO NA VERSÃO 3.2 (FAST-SHEETS PARA LANDING PAGES + SAVE INDIVIDUAL):
+// ⚡ CacheService Individual de LPs + Chunks (65KB): Abertura de /lp/:id e /preview em < 300ms (sem timeout de 10s!).
+// 🚀 SAVE_LANDING_PAGE Atômico: Salva 1 LP direto na linha certa da aba Landing_Pages sem reescrever as 8 abas.
+// 📊 Separação Estrita de Leads_LandingPages: Impede mistura de leads como LPs na recuperação da planilha.
+// 🎯 GET_PUBLIC_LP Ultrarrápido: Retorna Modelo Hero, Tema, Cor e JSON idênticos em qualquer navegador/aba anônima.
 // =========================================================================
 
 export const SALEAD_GOOGLE_APPS_SCRIPT_CODE = `// =========================================================================
-// MOTOR UNIVERSAL SALEAD v3.1: CLOUD ENGINE + GOOGLE SHEETS + DRIVE
+// MOTOR UNIVERSAL SALEAD v3.2: CLOUD ENGINE + FAST-SHEETS + DRIVE
 // =========================================================================
 
 const ROOT_FOLDER_NAME = "SALEAD";
@@ -30,9 +29,10 @@ const SPREADSHEET_BASE_NAME = "APP_DATABASE_SHEETS";
 const DEFAULT_SPREADSHEET_ID = "1BsOiK5dC7acweEnFEauh8aDXgKI9vIt4C9OVSw7jMu4";
 const ROOT_FILE_NAME = "database_root.json";
 
-// Cache em Chunks (seguro contra limite de 100KB do CacheService) & Concorrência
+// Cache em Chunks (seguro contra limite de 100KB do CacheService) & Cache Individual de LP
 const CACHE_META_KEY = "SALEAD_DB_META_V3";
 const CACHE_CHUNK_PREFIX = "SALEAD_DB_C_V3_";
+const LP_CACHE_PREFIX = "SALEAD_LP_V3_";
 const CHUNK_CHAR_SIZE = 65000;
 const MAX_CHUNKS = 45;
 const CACHE_TTL_SECONDS = 1800; // 30 minutos
@@ -80,9 +80,9 @@ function doGet(e) {
         cacheEnabled: true,
         chunkedCacheEnabled: true,
         lockEnabled: true,
-        version: "3.1-SheetsFirst",
+        version: "3.2-FastSheets",
         timestamp: new Date().getTime(),
-        message: "Conexão ativa! Motor v3.1 Cloud Engine + Sheets-First pronto (" + ss.getName() + " em " + ROOT_FOLDER_NAME + "/" + DATA_FOLDER_NAME + ")."
+        message: "Conexão ativa! Motor v3.2 Fast-Sheets + Cloud Engine pronto (" + ss.getName() + " em " + ROOT_FOLDER_NAME + "/" + DATA_FOLDER_NAME + ")."
       });
     }
 
@@ -131,19 +131,34 @@ function doGet(e) {
       });
     }
 
-    // 5. CONSULTA PÚBLICA DIRETA DE LANDING PAGE (LENDO DIRETO DO GOOGLE SHEETS + JSON)
+    // 5. CONSULTA PÚBLICA DIRETA DE LANDING PAGE (CACHE INDIVIDUAL < 100MS -> DB -> SHEETS)
     if (action === "GET_PUBLIC_LP" || action === "GET_LP_BY_SLUG") {
       var queryKey = String(params.id || params.lpId || params.slug || params.token || params.title || "").trim();
-      var forceSheetsDirect = (params.source === "sheets" || params.nocache === "true" || params.nocache === "1");
-      var ssPublic = getOrCreateSpreadsheet(folder);
-      var sheetLps = forceSheetsDirect ? readLandingPagesFromSheet(ssPublic) : [];
-      var foundFromSheet = findLandingPageInList(sheetLps, queryKey);
+      var forceNoCacheLp = (params.nocache === "true" || params.nocache === "1");
+      var forceSheetsDirect = (forceNoCacheLp || params.source === "sheets");
 
-      var dbPublic = readDatabaseRootObject(folder, forceSheetsDirect);
+      if (!forceNoCacheLp && queryKey) {
+        var fastLpPayload = getLpFromCache(queryKey);
+        if (fastLpPayload && fastLpPayload.landingPage) {
+          return jsonResponse({
+            status: "success",
+            source: "lp_cache",
+            landingPage: fastLpPayload.landingPage,
+            lp: fastLpPayload.landingPage,
+            page: fastLpPayload.landingPage,
+            survey: fastLpPayload.survey || null,
+            company: fastLpPayload.company || null
+          });
+        }
+      }
+
+      var dbPublic = readDatabaseRootObject(folder, forceNoCacheLp);
       var foundFromDb = findLandingPageInDb(dbPublic, queryKey);
+      var foundFromSheet = null;
 
-      if (!foundFromSheet && !forceSheetsDirect) {
-        sheetLps = readLandingPagesFromSheet(ssPublic);
+      if (forceSheetsDirect || !foundFromDb || !foundFromDb.hero || (!foundFromDb.hero.model && !foundFromDb.heroModel)) {
+        var ssPublic = getOrCreateSpreadsheet(folder);
+        var sheetLps = readLandingPagesFromSheet(ssPublic);
         foundFromSheet = findLandingPageInList(sheetLps, queryKey);
       }
 
@@ -161,6 +176,8 @@ function doGet(e) {
       if (foundLp.surveyId && dbPublic && Array.isArray(dbPublic.surveys)) {
         linkedSurvey = findSurveyInDb(dbPublic, foundLp.surveyId);
       }
+
+      putLpToCache(queryKey, foundLp, linkedSurvey, (dbPublic && dbPublic.company) || null);
 
       return jsonResponse({
         status: "success",
@@ -317,6 +334,65 @@ function doPost(e) {
         spreadsheetName: spreadsheet.getName(),
         spreadsheetUrl: spreadsheet.getUrl(),
         data: forcedData
+      });
+    }
+
+    // =========================================================================
+    // SALVAR / ATUALIZAR UMA ÚNICA LANDING PAGE (SUB-SEGUNDO NO SHEETS + DRIVE + CACHE)
+    // =========================================================================
+    if (action === "SAVE_LANDING_PAGE" || action === "UPSERT_LANDING_PAGE" || action === "SAVE_LP") {
+      var rawIncomingLp = payload.landingPage || payload.page || payload.lp || (payload.data && (payload.data.landingPage || payload.data.page || payload.data)) || {};
+      var savedLp = normalizeLandingPageModel(rawIncomingLp);
+      var saveIsoNow = new Date().toISOString();
+      if (!savedLp.id) savedLp.id = "lp_" + new Date().getTime();
+      savedLp.updatedAt = savedLp.updatedAt || savedLp.updated_at || saveIsoNow;
+      savedLp.updated_at = savedLp.updatedAt;
+      if (!savedLp.createdAt && !savedLp.created_at) {
+        savedLp.createdAt = saveIsoNow;
+        savedLp.created_at = saveIsoNow;
+      }
+
+      upsertSingleLandingPageInSheet(spreadsheet, savedLp);
+
+      var dbSaveLp = readDatabaseRootRaw(folder) || {
+        leads: [],
+        landingPages: [],
+        surveys: [],
+        surveyResponses: [],
+        products: [],
+        tasks: [],
+        pipelines: [],
+        playbooks: []
+      };
+      if (!Array.isArray(dbSaveLp.landingPages)) dbSaveLp.landingPages = [];
+      var existingLpIdx = dbSaveLp.landingPages.findIndex(function(p) {
+        return p && (p.id === savedLp.id || (savedLp.slug && p.slug === savedLp.slug));
+      });
+      if (existingLpIdx !== -1) {
+        dbSaveLp.landingPages[existingLpIdx] = mergeSingleLandingPageCandidate(savedLp, dbSaveLp.landingPages[existingLpIdx]);
+        savedLp = dbSaveLp.landingPages[existingLpIdx];
+      } else {
+        dbSaveLp.landingPages.unshift(savedLp);
+      }
+      dbSaveLp.activePreviewPage = savedLp;
+      dbSaveLp.revision = (Number(dbSaveLp.revision) || 0) + 1;
+      dbSaveLp.ultimoBackup = saveIsoNow;
+
+      var serializedSingleLpDb = writeDatabaseRootObject(folder, dbSaveLp);
+      putToChunkedCache(serializedSingleLpDb, CACHE_TTL_SECONDS);
+
+      var linkedSurveySave = (savedLp.surveyId && Array.isArray(dbSaveLp.surveys)) ? findSurveyInDb(dbSaveLp, savedLp.surveyId) : null;
+      putLpToCache(savedLp.id, savedLp, linkedSurveySave, dbSaveLp.company || null);
+      if (savedLp.slug) putLpToCache(savedLp.slug, savedLp, linkedSurveySave, dbSaveLp.company || null);
+      if (savedLp.previewToken) putLpToCache(savedLp.previewToken, savedLp, linkedSurveySave, dbSaveLp.company || null);
+
+      return jsonResponse({
+        status: "success",
+        revision: dbSaveLp.revision,
+        landingPage: savedLp,
+        lp: savedLp,
+        page: savedLp,
+        message: "Landing Page gravada atomicamente no Sheets e Drive!"
       });
     }
 
@@ -728,6 +804,8 @@ function doPost(e) {
       } else {
         invalidateDatabaseCache();
       }
+      invalidateLpCache(targetIds);
+      if (targetSlug) invalidateLpCache(targetSlug);
 
       return jsonResponse({
         status: "success",
@@ -910,6 +988,15 @@ function doPost(e) {
     var serializedSaved = writeDatabaseRootObject(folder, mergedData);
     syncDataToGoogleSheets(spreadsheet, mergedData);
     putToChunkedCache(serializedSaved, CACHE_TTL_SECONDS);
+    if (Array.isArray(mergedData.landingPages)) {
+      invalidateLpCache(mergedData.landingPages);
+      for (var lpci = 0; lpci < mergedData.landingPages.length; lpci++) {
+        var curSaveLp = mergedData.landingPages[lpci];
+        if (curSaveLp && curSaveLp.id) {
+          putLpToCache(curSaveLp.id, curSaveLp, null, mergedData.company || null);
+        }
+      }
+    }
     setupDailyBackupTrigger();
 
     var exportUrl = "https://docs.google.com/spreadsheets/d/" + spreadsheet.getId() + "/export?format=xlsx";
@@ -1036,15 +1123,21 @@ function findLandingPageInDb(db, queryKey) {
 
 function parseTimestampMs(lp) {
   if (!lp) return 0;
-  var raw = lp.updatedAt || lp.updated_at || lp.createdAt || lp.created_at || 0;
-  var ms = new Date(raw).getTime();
-  return isNaN(ms) ? 0 : ms;
+  var rawA = lp.updatedAt ? new Date(lp.updatedAt).getTime() : 0;
+  var rawB = lp.updated_at ? new Date(lp.updated_at).getTime() : 0;
+  var rawC = (!rawA && !rawB && (lp.createdAt || lp.created_at)) ? new Date(lp.createdAt || lp.created_at).getTime() : 0;
+  return Math.max(isNaN(rawA) ? 0 : rawA, isNaN(rawB) ? 0 : rawB, isNaN(rawC) ? 0 : rawC);
 }
 
 function normalizeLandingPageModel(lp) {
   if (!lp || typeof lp !== "object") return lp;
   var model = (lp.hero && lp.hero.model) || lp.heroModel || lp.hero_model || "split_image";
+  var canonicalUpdated = lp.updatedAt || lp.updated_at || "";
   var out = Object.assign({}, lp, { heroModel: model });
+  if (canonicalUpdated) {
+    out.updatedAt = canonicalUpdated;
+    out.updated_at = canonicalUpdated;
+  }
   if (out.hero && typeof out.hero === "object") {
     out.hero = Object.assign({}, out.hero, { model: model });
   }
@@ -1080,6 +1173,13 @@ function mergeSingleLandingPageCandidate(sheetLp, dbLp) {
   merged.viewsCount = merged.visits;
   merged.leads = Math.max(Number(sheetLp.leads || 0), Number(dbLp.leads || 0));
   merged.leads_count = merged.leads;
+  var bestUpdated = (parseTimestampMs(primary) >= parseTimestampMs(secondary))
+    ? (primary.updatedAt || primary.updated_at || secondary.updatedAt || secondary.updated_at || "")
+    : (secondary.updatedAt || secondary.updated_at || primary.updatedAt || primary.updated_at || "");
+  if (bestUpdated) {
+    merged.updatedAt = bestUpdated;
+    merged.updated_at = bestUpdated;
+  }
   return normalizeLandingPageModel(merged);
 }
 
@@ -1094,6 +1194,7 @@ function readLandingPagesFromSheet(ss) {
   for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
     var curSheet = allSheets[sIdx];
     var sNameNorm = normH(curSheet.getName());
+    if (sNameNorm.indexOf("lead") !== -1) continue; // NUNCA ler Leads_LandingPages como LPs!
     if (sNameNorm.indexOf("landing") === -1 && sNameNorm.indexOf("pagina") === -1 && sNameNorm !== "lps") continue;
 
     var sValues = curSheet.getDataRange().getValues();
@@ -1274,8 +1375,8 @@ function mergeSpreadsheetRecoveryIntoDb(ss, forcedData) {
     var headerRow = sValues[0] || [];
     var headersNorm = headerRow.map(normH);
 
-    // Landing Pages (leitura completa incluindo Modelo Hero, Tema, Cor e Config JSON!)
-    if (sNameNorm.indexOf("landing") !== -1 || sNameNorm.indexOf("pagina") !== -1 || sNameNorm === "lps") {
+    // Landing Pages (leitura completa incluindo Modelo Hero, Tema, Cor e Config JSON - ignora abas de Leads!)
+    if (sNameNorm.indexOf("lead") === -1 && (sNameNorm.indexOf("landing") !== -1 || sNameNorm.indexOf("pagina") !== -1 || sNameNorm === "lps")) {
       var sheetLpsRecovered = readLandingPagesFromSheet(ss);
       for (var sri = 0; sri < sheetLpsRecovered.length; sri++) {
         var sLp = sheetLpsRecovered[sri];
@@ -1641,6 +1742,125 @@ function syncDataToGoogleSheets(ss, data) {
 // =========================================================================
 // CACHE SERVICE EM CHUNKS (SUPORTA BANCO COMPLETO ACIMA DE 100KB)
 // =========================================================================
+function buildLpRowValues(rawLp) {
+  var lp = normalizeLandingPageModel(rawLp);
+  var visits = Number(lp.visits || lp.viewsCount || 0);
+  var leadsCount = Number(lp.leads || lp.leads_count || 0);
+  var conv = visits > 0 ? Math.round((leadsCount / visits) * 100) : 0;
+  var heroModel = (lp.hero && lp.hero.model) || lp.heroModel || lp.hero_model || "split_image";
+  var fullJson = "";
+  try {
+    fullJson = JSON.stringify(lp);
+  } catch (eSer) {
+    fullJson = "";
+  }
+  var part1 = fullJson.length > 45000 ? fullJson.substring(0, 45000) : fullJson;
+  var part2 = fullJson.length > 45000 ? fullJson.substring(45000, 90000) : "";
+
+  return [
+    lp.id || "",
+    lp.title || lp.name || "",
+    lp.slug || "",
+    lp.status || "Ativa",
+    visits,
+    leadsCount,
+    conv + "%",
+    lp.type || "COMET CRO",
+    lp.sector || lp.niche || "Geral",
+    heroModel,
+    lp.theme || "dark",
+    lp.accentColor || "purple",
+    lp.surveyId || "",
+    lp.externalUrl || "",
+    lp.created_at || lp.createdAt || "",
+    lp.updated_at || lp.updatedAt || "",
+    part1,
+    part2
+  ];
+}
+
+function upsertSingleLandingPageInSheet(ss, rawLp) {
+  var lpHeaders = [
+    "ID", "Nome / Título", "Slug", "Status", "Visitas", "Leads Capturados",
+    "Taxa Conv (%)", "Tipo", "Nicho / Oferta", "Modelo Hero", "Tema",
+    "Cor Destaque", "Survey ID", "URL Externa", "Data Criação",
+    "Última Atualização", "Config JSON", "Config JSON (Cont.)"
+  ];
+  var sheetLP = getOrCreateSheet(ss, "Landing_Pages", lpHeaders);
+  var rowValues = buildLpRowValues(rawLp);
+  var data = sheetLP.getDataRange().getValues();
+  var targetId = String(rawLp.id || "").trim();
+  var targetSlug = String(rawLp.slug || "").trim().toLowerCase();
+
+  for (var i = 1; i < data.length; i++) {
+    var rowId = String(data[i][0] || "").trim();
+    var rowSlug = String(data[i][2] || "").trim().toLowerCase();
+    if ((targetId && rowId === targetId) || (targetSlug && rowSlug && rowSlug === targetSlug)) {
+      sheetLP.getRange(i + 1, 1, 1, rowValues.length).setValues([rowValues]);
+      return;
+    }
+  }
+  sheetLP.appendRow(rowValues);
+}
+
+function buildLpCacheKey(queryKey) {
+  var norm = String(queryKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  if (norm.length > 80) norm = norm.substring(0, 80);
+  return LP_CACHE_PREFIX + norm;
+}
+
+function getLpFromCache(queryKey) {
+  try {
+    if (!queryKey) return null;
+    var cache = CacheService.getScriptCache();
+    var raw = cache.get(buildLpCacheKey(queryKey));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function putLpToCache(queryKey, lpObj, surveyObj, companyObj) {
+  try {
+    if (!queryKey || !lpObj) return;
+    var payloadStr = JSON.stringify({
+      landingPage: lpObj,
+      survey: surveyObj || null,
+      company: companyObj || null
+    });
+    if (payloadStr.length > 95000) return; // Limite seguro de 100KB do CacheService
+    var cache = CacheService.getScriptCache();
+    var batch = {};
+    batch[buildLpCacheKey(queryKey)] = payloadStr;
+    if (lpObj.id) batch[buildLpCacheKey(lpObj.id)] = payloadStr;
+    if (lpObj.slug) batch[buildLpCacheKey(lpObj.slug)] = payloadStr;
+    if (lpObj.previewToken) batch[buildLpCacheKey(lpObj.previewToken)] = payloadStr;
+    cache.putAll(batch, CACHE_TTL_SECONDS);
+  } catch (e) {}
+}
+
+function invalidateLpCache(lpListOrKeys) {
+  try {
+    if (!lpListOrKeys) return;
+    var keys = [];
+    var arr = Array.isArray(lpListOrKeys) ? lpListOrKeys : [lpListOrKeys];
+    arr.forEach(function(item) {
+      if (!item) return;
+      if (typeof item === "string") {
+        keys.push(buildLpCacheKey(item));
+      } else {
+        if (item.id) keys.push(buildLpCacheKey(item.id));
+        if (item.slug) keys.push(buildLpCacheKey(item.slug));
+        if (item.previewToken) keys.push(buildLpCacheKey(item.previewToken));
+      }
+    });
+    if (keys.length > 0) {
+      CacheService.getScriptCache().removeAll(keys);
+    }
+  } catch (e) {}
+}
+
 function getFromChunkedCache() {
   try {
     var cache = CacheService.getScriptCache();

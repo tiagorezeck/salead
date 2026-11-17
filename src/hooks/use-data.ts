@@ -739,6 +739,13 @@ export const mapLPFromDb = (row: any): LandingPage => {
     model: heroModel || rawHero.model || "split_image",
   } : undefined;
 
+  const tCam = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+  const tSnk = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+  const resolvedUpdated =
+    (Number.isFinite(tCam) ? tCam : 0) >= (Number.isFinite(tSnk) ? tSnk : 0)
+      ? (row.updatedAt || row.updated_at || config.updatedAt || config.updated_at)
+      : (row.updated_at || row.updatedAt || config.updated_at || config.updatedAt);
+
   return {
     ...content,
     ...config,
@@ -758,6 +765,7 @@ export const mapLPFromDb = (row: any): LandingPage => {
     externalUrl: row.externalUrl || config.externalUrl || row.external_url || undefined,
     heroModel: heroModel || hero?.model,
     hero,
+    ...(resolvedUpdated ? { updatedAt: resolvedUpdated, updated_at: resolvedUpdated } : {}),
   };
 };
 
@@ -1489,9 +1497,15 @@ export function useData() {
       };
 
       const cloudDb = cloudStore.getState();
+      const isCorruptedLead = (lp: any) => {
+        if (!lp || typeof lp !== "object") return true;
+        if (lp.hero || lp.externalUrl || (lp as any).external_url || lp.heroModel) return false;
+        return String(lp.status || "").trim().toLowerCase() === "novo lead";
+      };
       const cloudLps: LandingPage[] = (cloudDb.landingPages || [])
+        .filter((lp: any) => !isCorruptedLead(lp))
         .map(mapLPFromDb)
-        .filter((lp) => !isDeleted(lp));
+        .filter((lp) => !isDeleted(lp) && !isCorruptedLead(lp));
 
       const getLpKey = (lp: LandingPage) => {
         if (lp.id) return `id:${lp.id}`;
@@ -1508,26 +1522,34 @@ export function useData() {
           mergedMap.set(key, lp);
         } else {
           const prev = mergedMap.get(key)!;
-          const prevTime = new Date((prev as any).updatedAt || (prev as any).updated_at || (prev as any).createdAt || 0).getTime();
-          const lpTime = new Date((lp as any).updatedAt || (lp as any).updated_at || (lp as any).createdAt || 0).getTime();
+          const prevTime = Math.max(
+            new Date((prev as any).updatedAt || 0).getTime() || 0,
+            new Date((prev as any).updated_at || 0).getTime() || 0,
+            new Date((prev as any).createdAt || 0).getTime() || 0
+          );
+          const lpTime = Math.max(
+            new Date((lp as any).updatedAt || 0).getTime() || 0,
+            new Date((lp as any).updated_at || 0).getTime() || 0,
+            new Date((lp as any).createdAt || 0).getTime() || 0
+          );
           const base = lpTime >= prevTime ? { ...prev, ...lp } : { ...lp, ...prev };
-          const richSource = (lp.hero || (lp as any).heroModel) ? lp : prev;
-          const heroModel = base.heroModel || base.hero?.model || (richSource as any).heroModel || richSource.hero?.model || "split_image";
+          const newer = lpTime >= prevTime ? lp : prev;
+          const heroModel = (newer as any).heroModel || newer.hero?.model || (base as any).heroModel || base.hero?.model || "split_image";
           mergedMap.set(key, {
             ...base,
             id: isUUID(prev.id) ? prev.id : (isUUID(lp.id) ? lp.id : (prev.id || lp.id)),
             heroModel,
-            hero: (base.hero && base.hero.model) ? base.hero : (richSource.hero ? { ...richSource.hero, model: heroModel } : base.hero),
-            quiz: base.quiz || richSource.quiz,
-            bentoGrid: base.bentoGrid || richSource.bentoGrid,
-            testimonials: base.testimonials || richSource.testimonials,
-            formSection: base.formSection || richSource.formSection,
-            photoGrid: base.photoGrid || richSource.photoGrid,
-            visibility: base.visibility || richSource.visibility,
-            sectionOrder: base.sectionOrder || richSource.sectionOrder,
-            customElementStyles: base.customElementStyles || richSource.customElementStyles,
-            floatingImages: base.floatingImages || richSource.floatingImages,
-            faq: base.faq || richSource.faq,
+            hero: (newer.hero && newer.hero.model) ? { ...newer.hero, model: heroModel } : (base.hero ? { ...base.hero, model: heroModel } : base.hero),
+            quiz: base.quiz || prev.quiz || lp.quiz,
+            bentoGrid: base.bentoGrid || prev.bentoGrid || lp.bentoGrid,
+            testimonials: base.testimonials || prev.testimonials || lp.testimonials,
+            formSection: base.formSection || prev.formSection || lp.formSection,
+            photoGrid: base.photoGrid || prev.photoGrid || lp.photoGrid,
+            visibility: base.visibility || prev.visibility || lp.visibility,
+            sectionOrder: base.sectionOrder || prev.sectionOrder || lp.sectionOrder,
+            customElementStyles: base.customElementStyles || prev.customElementStyles || lp.customElementStyles,
+            floatingImages: base.floatingImages || prev.floatingImages || lp.floatingImages,
+            faq: base.faq || prev.faq || lp.faq,
           });
         }
       }
@@ -2622,6 +2644,7 @@ export function useData() {
       });
       const generatedId = isUUID(lp.id) ? lp.id : (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : fallbackUuid);
       const heroModel = lp.hero?.model || lp.heroModel || lp.model || "split_image";
+      const nowIso = new Date().toISOString();
       const item: LandingPage = {
         name: lp.name || lp.title || "Nova Landing Page",
         title: lp.title || lp.name || "Nova Landing Page",
@@ -2631,9 +2654,11 @@ export function useData() {
         leads: (lp.leads ?? lp.leads_count) !== undefined ? Number(lp.leads ?? lp.leads_count) : 0,
         conv: lp.conv !== undefined ? Number(lp.conv) : 0,
         type: lp.type || "COMET CRO",
-        created_at: lp.created_at || new Date().toISOString(),
-        updated_at: new Date().toISOString(),
         ...lp,
+        createdAt: lp.createdAt || lp.created_at || nowIso,
+        created_at: lp.created_at || lp.createdAt || nowIso,
+        updatedAt: nowIso,
+        updated_at: nowIso,
         heroModel,
         hero: lp.hero ? { ...lp.hero, model: heroModel } : undefined,
         id: generatedId,
@@ -2651,11 +2676,6 @@ export function useData() {
       if (item.id) removeDeletedLandingPageId(item.id);
       if (item.slug) removeDeletedLandingPageId(item.slug);
 
-      const syncPromise = cloudStore.mutateAndSync((draft) => {
-        draft.landingPages = [item, ...(draft.landingPages || []).filter((p: any) => p.id !== item.id && p.slug !== item.slug)];
-        draft.activePreviewPage = item;
-      });
-
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         return [item, ...list.filter(p => p.id !== item.id && p.slug !== item.slug)];
@@ -2663,13 +2683,8 @@ export function useData() {
 
       try {
         await Promise.allSettled([
-          syncPromise,
+          cloudStore.saveLandingPageOnly(item as any, { immediate: true }),
           fetch('/api/landing-pages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item),
-          }),
-          fetch('/api/pages/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item),
@@ -2716,13 +2731,15 @@ export function useData() {
         model: heroModel,
       } : undefined;
 
+      const nowIso = new Date().toISOString();
       let updatedItem: LandingPage = {
         ...(existing || {}),
         ...targetObj,
         id: targetId,
         heroModel,
         hero: mergedHero || targetObj.hero || (existing as any)?.hero,
-        updated_at: new Date().toISOString()
+        updatedAt: nowIso,
+        updated_at: nowIso,
       };
 
       if (updatedItem.config) {
@@ -2795,15 +2812,6 @@ export function useData() {
         invalidate('leads');
       }
 
-      const syncPromise = cloudStore.mutateAndSync((draft) => {
-        const list = Array.isArray(draft.landingPages) ? draft.landingPages : [];
-        const exists = list.some((p: any) => p.id === targetId || p.originalId === targetId || (updatedItem.slug && p.slug === updatedItem.slug));
-        draft.landingPages = exists
-          ? list.map((p: any) => (p.id === targetId || p.originalId === targetId || (updatedItem.slug && p.slug === updatedItem.slug)) ? updatedItem : p)
-          : [updatedItem, ...list];
-        draft.activePreviewPage = updatedItem;
-      });
-
       queryClient.setQueryData(['landing_pages'], (old: LandingPage[] | undefined) => {
         const list = Array.isArray(old) ? old : [];
         const found = list.some(p => p.id === targetId || (p as any).originalId === targetId);
@@ -2814,24 +2822,21 @@ export function useData() {
       });
 
       try {
-        const [cloudRes] = await Promise.all([
-          syncPromise,
-          Promise.allSettled([
-            fetch(`/api/landing-pages/${encodeURIComponent(targetId)}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updatedItem),
-            }),
-            fetch('/api/pages/preview', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updatedItem),
-            }),
-          ]),
+        const [saveRes] = await Promise.all([
+          cloudStore.saveLandingPageOnly(updatedItem as any, { immediate: true }),
+          fetch(`/api/landing-pages/${encodeURIComponent(targetId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedItem),
+          }).catch(() => null),
         ]);
 
-        if (cloudRes && !cloudRes.synced && cloudRes.error && !cloudRes.error.includes("ocupado")) {
-          console.warn("Aviso ao sincronizar LP com Google Sheets:", cloudRes.error);
+        if (isExitingTestMode) {
+          cloudStore.pushNow().catch(() => {});
+        }
+
+        if (saveRes && !saveRes.synced) {
+          console.warn("Aviso ao sincronizar LP com Google Sheets (fila em memória mantida).");
         }
       } catch {}
 

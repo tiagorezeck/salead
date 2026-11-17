@@ -295,14 +295,16 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
   const handleSave = async () => {
     setSaveStatus("saving");
     const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
-    const updatedPageWithTimestamp: LandingPage = {
+    const nowIso = new Date().toISOString();
+    const updatedPageWithTimestamp: any = {
       ...page,
       heroModel: activeHeroModel,
       hero: {
         ...page.hero,
         model: activeHeroModel,
       },
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
+      updated_at: nowIso,
     };
     setPage(updatedPageWithTimestamp);
     try {
@@ -336,23 +338,36 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
     setTimeout(() => setCopyNotification(null), 3000);
   };
 
-  const updatePage = (updater: (prev: LandingPage) => LandingPage) => {
+  const updatePage = (
+    updater: (prev: LandingPage) => LandingPage,
+    options: { immediateSave?: boolean } = {}
+  ) => {
     setPage((prev) => {
       const updated = updater(prev);
-      const withTime = { ...updated, updatedAt: new Date().toISOString() };
-      
-      // Instantly persist to cloudStore RAM + debounced Cloud sync for real-time preview across tabs
+      const nowIso = new Date().toISOString();
+      const heroModelChanged =
+        (updated as any).heroModel && (updated as any).heroModel !== (prev as any).heroModel;
+      const heroObjModelChanged =
+        updated.hero?.model && updated.hero.model !== prev.hero?.model;
+      const syncedHeroModel = heroObjModelChanged
+        ? updated.hero!.model
+        : heroModelChanged
+          ? (updated as any).heroModel
+          : (updated.hero?.model || (updated as any).heroModel || "split_image");
+
+      const withTime: LandingPage & { updated_at?: string } = {
+        ...updated,
+        heroModel: syncedHeroModel,
+        hero: updated.hero ? { ...updated.hero, model: syncedHeroModel } : updated.hero,
+        updatedAt: nowIso,
+        updated_at: nowIso,
+      };
+
+      // Persiste imediatamente em RAM + /api/pages/preview + fila atômica de 1 LP no Google Sheets
       if (typeof window !== "undefined") {
-        try {
-          cloudStore.mutate((draft) => {
-            const list = Array.isArray(draft.landingPages) ? draft.landingPages : [];
-            const exists = list.some((p: any) => p.id === withTime.id || (withTime.slug && p.slug === withTime.slug));
-            draft.landingPages = exists
-              ? list.map((p: any) => (p.id === withTime.id || (withTime.slug && p.slug === withTime.slug)) ? withTime : p)
-              : [withTime, ...list];
-            draft.activePreviewPage = withTime;
-          });
-        } catch {}
+        cloudStore
+          .saveLandingPageOnly(withTime as any, { immediate: options.immediateSave === true })
+          .catch(() => {});
       }
 
       // Update history safely without closure traps
@@ -764,15 +779,18 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
           <button
             onClick={async () => {
               const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
-              const updatedPageWithTimestamp: LandingPage = {
+              const nowIso = new Date().toISOString();
+              const updatedPageWithTimestamp: any = {
                 ...page,
                 heroModel: activeHeroModel,
                 hero: {
                   ...page.hero,
                   model: activeHeroModel,
                 },
-                updatedAt: new Date().toISOString(),
+                updatedAt: nowIso,
+                updated_at: nowIso,
               };
+              setPage(updatedPageWithTimestamp);
               setIsNetworkPreviewOpen(true);
               await Promise.resolve(onSave(updatedPageWithTimestamp)).catch(() => {});
             }}
@@ -785,7 +803,26 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
           {/* Toggle Full Preview */}
           <button
-            onClick={() => setIsPreviewMode(!isPreviewMode)}
+            onClick={() => {
+              const nextPreview = !isPreviewMode;
+              setIsPreviewMode(nextPreview);
+              if (nextPreview) {
+                const activeHeroModel = page.hero?.model || page.heroModel || "split_image";
+                const nowIso = new Date().toISOString();
+                cloudStore
+                  .saveLandingPageOnly(
+                    {
+                      ...page,
+                      heroModel: activeHeroModel,
+                      hero: { ...page.hero, model: activeHeroModel },
+                      updatedAt: nowIso,
+                      updated_at: nowIso,
+                    } as any,
+                    { immediate: true }
+                  )
+                  .catch(() => {});
+              }
+            }}
             className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
               isPreviewMode
                 ? "bg-purple-600 border-purple-500 text-white"
@@ -1029,14 +1066,17 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                                 key={mod.id}
                                 type="button"
                                 onClick={() => {
-                                  updatePage((p) => ({
-                                    ...p,
-                                    heroModel: mod.id,
-                                    hero: {
-                                      ...p.hero,
-                                      model: mod.id,
-                                    },
-                                  }));
+                                  updatePage(
+                                    (p) => ({
+                                      ...p,
+                                      heroModel: mod.id,
+                                      hero: {
+                                        ...p.hero,
+                                        model: mod.id,
+                                      },
+                                    }),
+                                    { immediateSave: true }
+                                  );
                                   showNotification(`Modelo "${mod.title}" aplicado!`);
                                 }}
                                 className={`p-2 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
@@ -4256,16 +4296,19 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
       {/* Hero Model Selector Modal */}
       {isHeroModelModalOpen && (
         <HeroModelSelector
-          currentModel={page.hero.model || "split_image"}
+          currentModel={page.hero.model || page.heroModel || "split_image"}
           onSelectModel={(newModel) => {
-            updatePage((p) => ({
-              ...p,
-              heroModel: newModel,
-              hero: {
-                ...p.hero,
-                model: newModel,
-              },
-            }));
+            updatePage(
+              (p) => ({
+                ...p,
+                heroModel: newModel,
+                hero: {
+                  ...p.hero,
+                  model: newModel,
+                },
+              }),
+              { immediateSave: true }
+            );
             setIsHeroModelModalOpen(false);
             showNotification("Modelo da Hero atualizado com sucesso!");
           }}

@@ -1277,8 +1277,9 @@ function LPPage() {
               const newStatus = updatedPage.status === "draft" 
                 ? "Pausada" 
                 : (currentStatus === "Teste" || currentStatus === "Pausada" ? currentStatus : "Ativa");
+              const nowIso = new Date().toISOString();
 
-              const payload = {
+              const payload: any = {
                 ...updatedPage,
                 heroModel: activeModel,
                 hero: {
@@ -1291,6 +1292,8 @@ function LPPage() {
                 visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
                 leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
                 surveyId: updatedPage.surveyId || editingLP.surveyId || null,
+                updatedAt: nowIso,
+                updated_at: nowIso,
               };
               const saved = await updateLandingPage(editingLP.id, payload);
               setEditingLP(saved || payload);

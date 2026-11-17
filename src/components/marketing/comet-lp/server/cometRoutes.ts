@@ -310,15 +310,55 @@ const DEFAULT_INITIAL_LANDING_PAGES: any[] = [
   }
 ];
 
+function getLpTimestampMs(p: any): number {
+  if (!p || typeof p !== "object") return 0;
+  const t1 = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+  const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+  const t3 = (!t1 && !t2 && (p.createdAt || p.created_at)) ? new Date(p.createdAt || p.created_at).getTime() : 0;
+  return Math.max(Number.isNaN(t1) ? 0 : t1, Number.isNaN(t2) ? 0 : t2, Number.isNaN(t3) ? 0 : t3);
+}
+
+function isCorruptedLeadRowAsLp(sp: any): boolean {
+  if (!sp || typeof sp !== "object") return true;
+  const st = String(sp.status || "").trim().toLowerCase();
+  if (st === "novo lead" && !sp.hero && !sp.externalUrl && !sp["Config JSON"] && !sp.config) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeLpServer(raw: any): any {
+  if (!raw || typeof raw !== "object") return raw;
+  let parsedConfig: any = {};
+  const rawConfigSource = raw["Config JSON"] ?? raw.configJson ?? raw.config;
+  if (typeof rawConfigSource === "object" && rawConfigSource !== null) {
+    parsedConfig = rawConfigSource;
+  } else if (typeof rawConfigSource === "string") {
+    try { parsedConfig = JSON.parse(rawConfigSource); } catch {}
+  }
+  const merged = { ...parsedConfig, ...raw };
+  const model = merged.hero?.model || merged.heroModel || merged.hero_model || parsedConfig.hero?.model || parsedConfig.heroModel || "split_image";
+  const ts = merged.updatedAt || merged.updated_at || "";
+  return {
+    ...merged,
+    heroModel: model,
+    hero: merged.hero ? { ...merged.hero, model } : { model },
+    ...(ts ? { updatedAt: ts, updated_at: ts } : {}),
+  };
+}
+
 function readStoredLandingPages(): any[] {
-  if (memoryLps && memoryLps.length > 0) return memoryLps;
+  if (memoryLps && memoryLps.length > 0) {
+    return memoryLps.filter((p) => !isCorruptedLeadRowAsLp(p));
+  }
   try {
     ensureDataDir();
     if (fs.existsSync(LP_DATA_FILE)) {
       const raw = fs.readFileSync(LP_DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        memoryLps = parsed;
+        const cleaned = parsed.filter((p) => !isCorruptedLeadRowAsLp(p)).map(normalizeLpServer);
+        memoryLps = cleaned;
         return memoryLps;
       }
     }
@@ -332,8 +372,9 @@ function readStoredLandingPages(): any[] {
 }
 
 function writeStoredLandingPages(pages: any[]) {
-  memoryLps = pages;
-  scheduleBackgroundWrite(LP_DATA_FILE, pages);
+  const cleaned = (Array.isArray(pages) ? pages : []).filter((p) => !isCorruptedLeadRowAsLp(p));
+  memoryLps = cleaned;
+  scheduleBackgroundWrite(LP_DATA_FILE, cleaned);
 }
 
 const DEFAULT_SERVER_SURVEYS: any[] = SURVEY_PRESETS.map((p) => ({
@@ -542,28 +583,47 @@ export function syncDriveDataToDisk(driveData: any): { leadsCount: number; pages
     const currentPages = readStoredLandingPages();
     const pageMap = new Map<string, any>();
     currentPages.forEach(p => {
+      if (!p || isCorruptedLeadRowAsLp(p)) return;
       if (p.id) pageMap.set(String(p.id), p);
       if (p.slug) pageMap.set(`slug:${p.slug}`, p);
     });
 
-    rawLps.forEach(sp => {
-      if (!sp) return;
+    rawLps.forEach(rawSp => {
+      if (!rawSp || isCorruptedLeadRowAsLp(rawSp)) return;
+      const sp = normalizeLpServer(rawSp);
       const id = String(sp.id || sp.ID || `lp_${Date.now()}`);
       const slug = String(sp.slug || sp.Slug || "");
       const existing = pageMap.get(id) || (slug ? pageMap.get(`slug:${slug}`) : null);
 
+      const existingTime = getLpTimestampMs(existing);
+      const spTime = getLpTimestampMs(sp);
+      const spHasHero = Boolean(sp.hero && (sp.hero.headline || sp.hero.model));
+      const existingHasHero = Boolean(existing?.hero && (existing.hero.headline || existing.hero.model));
+
+      // Preserva sempre a versão mais recente (NUNCA regride um Hero Model editado nem falsifica updated_at = now!)
+      const useExistingAsPrimary = Boolean(
+        existing && (existingTime > spTime || (existingTime === spTime && existingHasHero && !spHasHero))
+      );
+
+      const primary = useExistingAsPrimary ? existing : sp;
+      const secondary = useExistingAsPrimary ? sp : (existing || {});
+      const chosenHeroModel = primary.hero?.model || primary.heroModel || secondary.hero?.model || secondary.heroModel || "split_image";
+      const canonicalTs = primary.updatedAt || primary.updated_at || secondary.updatedAt || secondary.updated_at || "";
+
       const mergedPage = {
-        ...(existing || {}),
-        ...sp,
+        ...secondary,
+        ...primary,
         id: existing?.id || id,
-        name: sp.name || sp.title || sp["Título"] || existing?.name || "Landing Page",
-        title: sp.title || sp.name || sp["Título"] || existing?.title || "Landing Page",
+        name: primary.name || primary.title || secondary.name || secondary.title || "Landing Page",
+        title: primary.title || primary.name || secondary.title || secondary.name || "Landing Page",
         slug: slug || existing?.slug || "",
-        visits: Number(sp.visits || sp["Visitas"]) || existing?.visits || 0,
-        leads: Number(sp.leads || sp["Leads"]) || existing?.leads || 0,
-        conv: Number(sp.conv || sp["Conversão %"]) || existing?.conv || 0,
-        status: sp.status || sp["Status"] || existing?.status || "Ativa",
-        updated_at: new Date().toISOString(),
+        heroModel: chosenHeroModel,
+        hero: (primary.hero || secondary.hero) ? { ...(secondary.hero || {}), ...(primary.hero || {}), model: chosenHeroModel } : { model: chosenHeroModel },
+        visits: Math.max(Number(sp.visits || sp["Visitas"] || 0), Number(existing?.visits || 0)),
+        leads: Math.max(Number(sp.leads || sp["Leads"] || 0), Number(existing?.leads || 0)),
+        conv: Number(primary.conv || sp["Conversão %"] || existing?.conv) || 0,
+        status: primary.status || sp["Status"] || existing?.status || "Ativa",
+        ...(canonicalTs ? { updatedAt: canonicalTs, updated_at: canonicalTs } : {}),
       };
       pageMap.set(mergedPage.id, mergedPage);
       if (mergedPage.slug) pageMap.set(`slug:${mergedPage.slug}`, mergedPage);
@@ -654,7 +714,7 @@ export async function forwardSurveyResponseToGoogleSheetsServer(responsePayload:
 const previewPagesStore = new Map<string, any>();
 let lastSavedPreviewPage: any = null;
 
-// Unified resolver: busca no armazenamento persistente do disco, memória e presets (sem dependências externas)
+// Unified resolver: busca na memória, disco e nuvem comparando timestamps reais (sub-5ms se recém-salvo)
 export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | null> {
   if (!tokenOrId) return null;
   const rawId = tokenOrId.trim();
@@ -662,26 +722,43 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
   const slugId = normalizeSlugServer(rawId);
 
   const matches = (p: any) => {
-    if (!p) return false;
-    if (p.id === rawId || p.id === normId || p.id === slugId) return true;
-    if (p.slug === rawId || p.slug === normId || p.slug === slugId) return true;
-    if (p.previewToken === rawId || p.previewToken === normId || p.previewToken === slugId) return true;
+    if (!p || isCorruptedLeadRowAsLp(p)) return false;
+    if (p.id === rawId || String(p.id || "").toLowerCase() === normId || p.id === slugId) return true;
+    if (p.slug === rawId || String(p.slug || "").toLowerCase() === normId || p.slug === slugId) return true;
+    if (p.previewToken === rawId || String(p.previewToken || "").toLowerCase() === normId || p.previewToken === slugId) return true;
     if (p.config && (p.config.slug === rawId || p.config.slug === normId || p.config.slug === slugId || p.config.client_id === rawId)) return true;
-    
+
     const pNameNorm = normalizeSlugServer(p.name || p.title);
     if (pNameNorm && slugId && (pNameNorm === slugId || pNameNorm.includes(slugId) || slugId.includes(pNameNorm))) return true;
-    
+
     return false;
   };
 
   // 1. Memória ultra-rápida (preview store)
-  let page = previewPagesStore.get(rawId) ||
+  const memPage =
+    previewPagesStore.get(rawId) ||
     previewPagesStore.get(normId) ||
     previewPagesStore.get(slugId) ||
     Array.from(previewPagesStore.values()).find(matches);
-  if (page) return page;
 
-  // 2. Fonte mestre em nuvem Google Apps Script (funciona em Vercel cold start)
+  // Se foi salvo recentemente em RAM (< 30s), retorna instantaneamente (< 5ms) sem travar em rede
+  if (memPage && Date.now() - Number(memPage._previewSavedAt || 0) < 30000) {
+    return normalizeLpServer(memPage);
+  }
+
+  // 2. Disco persistente do servidor (rápido e já sincronizado)
+  const diskPages = readStoredLandingPages();
+  const fromDisk = diskPages.find(matches);
+
+  const localBest = memPage && (!fromDisk || getLpTimestampMs(memPage) >= getLpTimestampMs(fromDisk))
+    ? memPage
+    : fromDisk;
+
+  if (localBest) {
+    return normalizeLpServer(localBest);
+  }
+
+  // 3. Fonte mestre em nuvem Google Apps Script (funciona em Vercel cold start ou LP nunca aberta neste servidor)
   const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
   if (cloudDb) {
     const deletedSet = new Set(Array.isArray(cloudDb.deletedLpIds) ? cloudDb.deletedLpIds.map(String) : []);
@@ -693,25 +770,17 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
       (p) => p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug))) && matches(p)
     );
     if (fromCloud) {
-      previewPagesStore.set(fromCloud.id, fromCloud);
-      if (fromCloud.slug) previewPagesStore.set(fromCloud.slug, fromCloud);
-      return fromCloud;
+      const normalizedCloud = normalizeLpServer(fromCloud);
+      previewPagesStore.set(normalizedCloud.id, normalizedCloud);
+      if (normalizedCloud.slug) previewPagesStore.set(normalizedCloud.slug, normalizedCloud);
+      return normalizedCloud;
     }
-  }
-
-  // 3. Disco persistente do servidor (cache em memória)
-  const diskPages = readStoredLandingPages();
-  const fromDisk = diskPages.find(matches);
-  if (fromDisk) {
-    previewPagesStore.set(fromDisk.id, fromDisk);
-    if (fromDisk.slug) previewPagesStore.set(fromDisk.slug, fromDisk);
-    return fromDisk;
   }
 
   // 4. Presets e templates locais (apenas fallback final, sem poluir previewPagesStore)
   const fromPreset = PRESET_TEMPLATES.find(matches) || DEFAULT_INITIAL_LANDING_PAGES.find(matches);
   if (fromPreset) {
-    return fromPreset;
+    return normalizeLpServer(fromPreset);
   }
 
   return null;
@@ -949,10 +1018,18 @@ cometLpRouter.get("/api/health", (req, res) => {
 // Save / Sync preview page endpoint
 cometLpRouter.post("/api/pages/preview", async (req, res) => {
   try {
-    const page = req.body;
-    if (!page || !page.id) {
+    const rawPage = req.body?.page || req.body;
+    if (!rawPage || !rawPage.id) {
       return res.status(400).json({ error: "Invalid page payload" });
     }
+
+    const nowIso = rawPage.updatedAt || rawPage.updated_at || new Date().toISOString();
+    const page = normalizeLpServer({
+      ...rawPage,
+      updatedAt: nowIso,
+      updated_at: nowIso,
+      _previewSavedAt: Date.now(),
+    });
 
     invalidateCloudDbCache();
     // 1. Store in memory preview store
@@ -968,13 +1045,13 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
     // 2. Store on server disk
     try {
       const diskList = readStoredLandingPages();
-      const updatedDisk = [page, ...diskList.filter((p) => p.id !== page.id && p.slug !== page.slug)];
+      const updatedDisk = [page, ...diskList.filter((p) => p.id !== page.id && (!page.slug || p.slug !== page.slug))];
       writeStoredLandingPages(updatedDisk);
     } catch (diskErr) {
       console.warn("Notice: server disk write failed in preview sync:", diskErr);
     }
 
-    return res.json({ success: true, id: page.id, previewToken: page.previewToken });
+    return res.json({ success: true, id: page.id, previewToken: page.previewToken, heroModel: page.heroModel });
   } catch (err: any) {
     console.error("Error saving preview page:", err);
     return res.status(500).json({ error: "Failed to save preview page" });
@@ -1023,6 +1100,18 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
     return res.status(400).json({ error: "Missing tokenOrId" });
   }
 
+  // 0. Memória recente (recém salva via Editor / Preview nos últimos 20s) retorna em < 5ms sem travar no GAS
+  const fastLocal =
+    previewPagesStore.get(tokenOrId) ||
+    previewPagesStore.get(tokenOrId.trim().toLowerCase()) ||
+    Array.from(previewPagesStore.values()).find(
+      (p) => p && (p.id === tokenOrId || p.slug === tokenOrId || p.previewToken === tokenOrId)
+    );
+  if (fastLocal && Date.now() - Number(fastLocal._previewSavedAt || 0) < 20000) {
+    const normalizedFast = normalizeLpServer(fastLocal);
+    return res.json({ success: true, page: normalizedFast, landingPage: normalizedFast, source: "preview-memory" });
+  }
+
   // 1. Consulta direta ao Google Apps Script (fonte mestre em nuvem) quando configurado
   const webappUrl = getDriveWebAppUrlServer();
   if (webappUrl) {
@@ -1031,24 +1120,40 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
       urlObj.searchParams.set("action", "GET_PUBLIC_LP");
       urlObj.searchParams.set("id", tokenOrId);
       urlObj.searchParams.set("slug", tokenOrId);
+      urlObj.searchParams.set("lpId", tokenOrId);
       urlObj.searchParams.set("t", Date.now().toString());
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
       const gasRes = await fetch(urlObj.toString(), { method: "GET", redirect: "follow", signal: controller.signal });
       clearTimeout(timeout);
       const text = await gasRes.text();
       if (text && !text.trim().startsWith("<")) {
         const parsed = JSON.parse(text);
-        const cloudLp = parsed?.landingPage || parsed?.lp || parsed?.page;
+        let cloudLp = parsed?.landingPage || parsed?.lp || parsed?.page;
+        if (!cloudLp && Array.isArray(parsed?.landingPages)) {
+          const qLow = tokenOrId.trim().toLowerCase();
+          cloudLp = parsed.landingPages.find(
+            (p: any) =>
+              p &&
+              (String(p.id || "").toLowerCase() === qLow ||
+                String(p.slug || "").toLowerCase() === qLow ||
+                String(p.previewToken || "").toLowerCase() === qLow)
+          );
+        }
         if (cloudLp && cloudLp.id) {
-          previewPagesStore.set(cloudLp.id, cloudLp);
-          if (cloudLp.slug) previewPagesStore.set(cloudLp.slug, cloudLp);
+          const normalizedCloud = normalizeLpServer(cloudLp);
+          const localTime = getLpTimestampMs(fastLocal);
+          const cloudTime = getLpTimestampMs(normalizedCloud);
+          const winner = fastLocal && localTime > cloudTime ? normalizeLpServer(fastLocal) : normalizedCloud;
+          previewPagesStore.set(winner.id, winner);
+          if (winner.slug) previewPagesStore.set(winner.slug, winner);
+          if (winner.previewToken) previewPagesStore.set(winner.previewToken, winner);
           return res.json({
             success: true,
-            page: cloudLp,
-            landingPage: cloudLp,
+            page: winner,
+            landingPage: winner,
             survey: parsed?.survey || null,
-            source: "google-cloud",
+            source: winner === normalizedCloud ? "google-cloud" : "preview-memory",
           });
         }
       }
@@ -2250,12 +2355,31 @@ cometLpRouter.get("/api/landing-pages", async (_req, res) => {
     let storedLeads: any[] = [];
 
     if (cloudDb && Array.isArray(cloudDb.landingPages)) {
-      pages = cloudDb.landingPages.filter(
-        (p: any) => p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug)))
-      );
+      const diskPages = readStoredLandingPages();
+      const diskMap = new Map<string, any>();
+      diskPages.forEach((dp: any) => {
+        if (dp?.id) diskMap.set(String(dp.id), dp);
+      });
+
+      pages = cloudDb.landingPages
+        .filter(
+          (p: any) =>
+            p &&
+            !isCorruptedLeadRowAsLp(p) &&
+            !deletedSet.has(String(p.id || "")) &&
+            !(p.slug && deletedSet.has(String(p.slug)))
+        )
+        .map((p: any) => {
+          const normRemote = normalizeLpServer(p);
+          const localMatch = normRemote.id ? diskMap.get(String(normRemote.id)) : null;
+          if (localMatch && getLpTimestampMs(localMatch) > getLpTimestampMs(normRemote)) {
+            return normalizeLpServer(localMatch);
+          }
+          return normRemote;
+        });
       storedLeads = [...(cloudDb.leads || []), ...(cloudDb.leads_landing_pages || [])];
     } else {
-      pages = readStoredLandingPages();
+      pages = readStoredLandingPages().map(normalizeLpServer);
       storedLeads = readStoredLeads();
     }
 
@@ -2331,7 +2455,9 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
 
     const pageId = body.id && typeof body.id === "string" && body.id.trim() ? body.id : fallbackId;
     const effectiveHeroModel = body.heroModel || body.hero?.model || "split_image";
-    const newPage = {
+    const nowIso = body.updatedAt || body.updated_at || new Date().toISOString();
+    const createdIso = body.createdAt || body.created_at || nowIso;
+    const newPage = normalizeLpServer({
       ...body,
       id: pageId,
       heroModel: effectiveHeroModel,
@@ -2347,19 +2473,23 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
       leads: Number(body.leads ?? body.leads_count) || 0,
       conv: Number(body.conv) || 0,
       type: body.type || "COMET CRO",
-      created_at: body.created_at || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+      createdAt: createdIso,
+      created_at: createdIso,
+      updatedAt: nowIso,
+      updated_at: nowIso,
+      _previewSavedAt: Date.now(),
+    });
 
     // 1. Salva no arquivo do servidor
     const current = readStoredLandingPages();
-    const updatedList = [newPage, ...current.filter((p) => p.id !== newPage.id && p.slug !== newPage.slug)];
+    const updatedList = [newPage, ...current.filter((p) => p.id !== newPage.id && (!newPage.slug || p.slug !== newPage.slug))];
     writeStoredLandingPages(updatedList);
 
     // 2. Cache no preview store
     previewPagesStore.set(newPage.id, newPage);
     if (newPage.slug) previewPagesStore.set(newPage.slug, newPage);
     if (newPage.previewToken) previewPagesStore.set(newPage.previewToken, newPage);
+    lastSavedPreviewPage = newPage;
 
     res.json({ success: true, landingPage: newPage });
   } catch (err: any) {
@@ -2382,7 +2512,8 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     const isExitingTestMode = prevStatus === "Teste" && (nextStatus === "Ativa" || nextStatus === "Pausada");
 
     const effectiveHeroModel = body.heroModel || body.hero?.model || existing?.heroModel || existing?.hero?.model || "split_image";
-    let updatedPage = {
+    const nowIso = new Date().toISOString();
+    let updatedPage = normalizeLpServer({
       ...(existing || {}),
       ...body,
       heroModel: effectiveHeroModel,
@@ -2392,8 +2523,10 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
         model: effectiveHeroModel,
       },
       id: existing?.id || id,
-      updated_at: new Date().toISOString(),
-    };
+      updatedAt: nowIso,
+      updated_at: nowIso,
+      _previewSavedAt: Date.now(),
+    });
 
     // Se saiu de Teste para Ativa, zera métricas e limpa leads de teste
     if (isExitingTestMode || (nextStatus === "Ativa" && prevStatus === "Teste")) {
@@ -2438,6 +2571,7 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     previewPagesStore.set(updatedPage.id, updatedPage);
     if (updatedPage.slug) previewPagesStore.set(updatedPage.slug, updatedPage);
     if (updatedPage.previewToken) previewPagesStore.set(updatedPage.previewToken, updatedPage);
+    lastSavedPreviewPage = updatedPage;
 
     res.json({ success: true, landingPage: updatedPage });
   } catch (err: any) {

@@ -53,16 +53,20 @@ export function ensureCometLP(rawLP: any): LandingPage {
     ? currentOrder
     : [...currentOrder.filter((s: string) => s !== "photoGrid"), "photoGrid"];
 
-  // Ensure hero model is NEVER lost or overridden
+  // Ensure hero model is NEVER lost or overridden by stale nested config
   const heroModel = (
-    source.hero?.model ||
-    source.heroModel ||
-    source.model ||
-    source.hero_model ||
-    unpackedConfig?.hero?.model ||
-    unpackedConfig?.heroModel ||
-    unpackedContent?.hero?.model ||
+    rawLP.hero?.model ||
     rawLP.heroModel ||
+    rawLP.hero_model ||
+    rawLP.model ||
+    source.heroModel ||
+    source.hero?.model ||
+    source.hero_model ||
+    source.model ||
+    unpackedConfig?.heroModel ||
+    unpackedConfig?.hero?.model ||
+    unpackedContent?.heroModel ||
+    unpackedContent?.hero?.model ||
     base.hero.model ||
     "split_image"
   );
@@ -86,6 +90,13 @@ export function ensureCometLP(rawLP: any): LandingPage {
     socialProofAvatars: rawHero.socialProofAvatars || source.socialProofAvatars || base.hero.socialProofAvatars,
   };
 
+  const tUpdatedAt = new Date(source.updatedAt || 0).getTime() || 0;
+  const tUpdatedSnake = new Date(source.updated_at || 0).getTime() || 0;
+  const resolvedUpdatedAt =
+    tUpdatedAt >= tUpdatedSnake
+      ? (source.updatedAt || source.updated_at || new Date().toISOString())
+      : (source.updated_at || source.updatedAt || new Date().toISOString());
+
   return {
     ...base,
     ...source,
@@ -101,8 +112,9 @@ export function ensureCometLP(rawLP: any): LandingPage {
     viewsCount: Number(source.visits ?? source.viewsCount ?? source.views_count ?? 0),
     leadsCount: Number(source.leads ?? source.leads_count ?? source.leadsCount ?? 0),
     status: source.status === "draft" || source.status === "Pausada" ? "draft" : "published",
-    createdAt: source.created_at || source.createdAt || new Date().toISOString(),
-    updatedAt: source.updated_at || source.updatedAt || new Date().toISOString(),
+    createdAt: source.createdAt || source.created_at || new Date().toISOString(),
+    updatedAt: resolvedUpdatedAt,
+    updated_at: resolvedUpdatedAt,
     heroModel,
     hero,
     socialProof: source.socialProof ? { ...base.socialProof, ...source.socialProof } : (unpackedConfig.socialProof ? { ...base.socialProof, ...unpackedConfig.socialProof } : base.socialProof),

@@ -56,6 +56,11 @@ export interface SystemCheckpoint {
 let inMemoryDriveConfig: DriveConfig | null = null;
 let inMemoryDatabaseRoot: any = null;
 let inMemoryCheckpoints: SystemCheckpoint[] = [];
+let detectedGasVersion: string | null = null;
+
+export const getDetectedGasVersion = (): string | null => detectedGasVersion;
+export const isGasDeploymentOutdated = (): boolean =>
+  Boolean(detectedGasVersion !== null && !detectedGasVersion.startsWith("3.2"));
 
 const GET_ACTIONS = new Set([
   "ping",
@@ -398,6 +403,7 @@ export const testDriveConnection = async (
     });
 
     if (res.status === "success" || res.success) {
+      detectedGasVersion = String(res.version || "legacy");
       saveDriveConfig({
         webappUrl: cleanUrl,
         apiToken: token !== undefined ? token : getDriveConfig().apiToken,
@@ -550,10 +556,70 @@ export async function fetchFromGoogleDrive<T>(
   }
 }
 
+// SALVAMENTO ATÔMICO INDIVIDUAL DE 1 LANDING PAGE NO SHEETS + DRIVE + CACHE (< 1.5s)
+export const saveLandingPageToDrive = async (
+  landingPage: any
+): Promise<{ supported: boolean; landingPage?: any }> => {
+  if (!landingPage || typeof landingPage !== "object") {
+    return { supported: false };
+  }
+  const cleanUrl = cleanWebAppUrl(
+    getDriveConfig().webappUrl || getGlobalGasConfig().WEBAPP_URL
+  );
+  if (!cleanUrl) return { supported: false };
+
+  const activeModel =
+    landingPage.hero?.model ||
+    landingPage.heroModel ||
+    landingPage.hero_model ||
+    "split_image";
+  const ts =
+    landingPage.updatedAt || landingPage.updated_at || new Date().toISOString();
+
+  const normalizedLp = {
+    ...landingPage,
+    heroModel: activeModel,
+    hero: landingPage.hero
+      ? { ...landingPage.hero, model: activeModel }
+      : { model: activeModel },
+    updatedAt: ts,
+    updated_at: ts,
+  };
+
+  try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "SAVE_LANDING_PAGE",
+      landingPage: normalizedLp,
+    });
+
+    const returnedLp = res?.landingPage || res?.lp || res?.page;
+    if (res && (res.status === "success" || res.success) && returnedLp) {
+      detectedGasVersion = "3.2-FastSheets";
+      saveDriveConfig(
+        { lastSyncTimestamp: Date.now(), syncStatus: "synced" },
+        false
+      );
+      return { supported: true, landingPage: returnedLp };
+    }
+
+    // Old Code.gs without SAVE_LANDING_PAGE returns ping or data without landingPage
+    if (res && !returnedLp) {
+      detectedGasVersion = detectedGasVersion || "legacy";
+      return { supported: false };
+    }
+
+    return { supported: true, landingPage: normalizedLp };
+  } catch (err: any) {
+    if (err?.isBusy) throw err;
+    return { supported: false };
+  }
+};
+
 // LEITURA DIRETA DE LANDING PAGE PÚBLICA DIRETO DO GOOGLE SHEETS / DRIVE (Zero-LocalStorage)
 export const fetchPublicLpFromDrive = async (
   idOrSlug: string,
-  options: { directSheets?: boolean } = { directSheets: true }
+  options: { directSheets?: boolean; nocache?: boolean } = {}
 ): Promise<any | null> => {
   if (!idOrSlug) return null;
   const cleanUrl = cleanWebAppUrl(
@@ -568,7 +634,9 @@ export const fetchPublicLpFromDrive = async (
     if (typeof jsonRaw === "object" && jsonRaw !== null) {
       parsedConfig = jsonRaw;
     } else if (typeof jsonRaw === "string") {
-      try { parsedConfig = JSON.parse(jsonRaw); } catch {}
+      try {
+        parsedConfig = JSON.parse(jsonRaw);
+      } catch {}
     }
     const merged = { ...parsedConfig, ...raw };
     const model =
@@ -578,35 +646,22 @@ export const fetchPublicLpFromDrive = async (
       parsedConfig.hero?.model ||
       parsedConfig.heroModel ||
       "split_image";
+    const ts = merged.updatedAt || merged.updated_at || "";
     return {
       ...merged,
       heroModel: model,
       hero: merged.hero ? { ...merged.hero, model } : { model },
+      ...(ts ? { updatedAt: ts, updated_at: ts } : {}),
     };
   };
 
-  try {
-    const res = await executeDriveRequest({
-      targetUrl: cleanUrl,
-      action: "GET_PUBLIC_LP",
-      id: idOrSlug,
-      slug: idOrSlug,
-      lpId: idOrSlug,
-      ...(options.directSheets !== false ? { source: "sheets", nocache: "1" } : {}),
-    });
-    const lpData = res?.landingPage || res?.lp || res?.page;
-    if (res && (res.status === "success" || res.success) && lpData) {
-      return normalizeFetchedLp(lpData);
-    }
-  } catch {}
-
-  // Fallback: leitura completa direto das abas do Google Sheets e JSON mestre
   const targetLow = decodeURIComponent(idOrSlug).trim().toLowerCase();
   const findInDb = (db: any) => {
-    const list = Array.isArray(db?.landingPages)
-      ? db.landingPages
-      : Array.isArray(db?.landing_pages)
-      ? db.landing_pages
+    const sourceObj = db?.data && typeof db.data === "object" ? db.data : db;
+    const list = Array.isArray(sourceObj?.landingPages)
+      ? sourceObj.landingPages
+      : Array.isArray(sourceObj?.landing_pages)
+      ? sourceObj.landing_pages
       : [];
     const found = list.find(
       (p: any) =>
@@ -620,17 +675,43 @@ export const fetchPublicLpFromDrive = async (
   };
 
   try {
+    const res = await executeDriveRequest({
+      targetUrl: cleanUrl,
+      action: "GET_PUBLIC_LP",
+      id: idOrSlug,
+      slug: idOrSlug,
+      lpId: idOrSlug,
+      ...(options.directSheets ? { source: "sheets" } : {}),
+      ...(options.nocache ? { nocache: "1" } : {}),
+    });
+
+    const lpData = res?.landingPage || res?.lp || res?.page;
+    if (res && (res.status === "success" || res.success) && lpData) {
+      return normalizeFetchedLp(lpData);
+    }
+
+    // Se o Code.gs ainda não foi atualizado para v3.2, ele devolve o banco completo (landingPages/data) em resposta ao GET_PUBLIC_LP:
+    if (res && (Array.isArray(res.landingPages) || Array.isArray(res.data?.landingPages))) {
+      detectedGasVersion = detectedGasVersion || "legacy";
+      const fromLegacyDump = findInDb(res);
+      if (fromLegacyDump) return fromLegacyDump;
+    }
+  } catch {}
+
+  // Fallback final apenas se o GET_PUBLIC_LP falhou completamente: lê o JSON rápido (sem forceRead de 10s a menos que necessário)
+  try {
+    const db: any = await fetchFromGoogleDrive(cleanUrl, false);
+    const fromCachedDb = findInDb(db);
+    if (fromCachedDb) return fromCachedDb;
+  } catch {}
+
+  try {
     const forcedDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
     const fromSheet = findInDb(forcedDb);
     if (fromSheet) return fromSheet;
   } catch {}
 
-  try {
-    const db: any = await fetchFromGoogleDrive(cleanUrl, true);
-    return findInDb(db);
-  } catch {
-    return null;
-  }
+  return null;
 };
 
 // LEITURA DIRETA DE PESQUISA PÚBLICA (Zero-LocalStorage)

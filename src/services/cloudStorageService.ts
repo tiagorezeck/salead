@@ -22,12 +22,29 @@ import {
   fetchFromGoogleDrive,
   forceReadSpreadsheetFromDrive,
   pushToGoogleDrive,
+  saveLandingPageToDrive,
   fetchPublicLpFromDrive,
   fetchPublicSurveyFromDrive,
   saveLocalDatabaseRoot,
   saveDriveConfig,
 } from "@/services/googleDriveDatabaseService";
 import { getGlobalGasConfig } from "@/config/gasConfig";
+
+function getLpTimestampMs(lp: any): number {
+  if (!lp || typeof lp !== "object") return 0;
+  const t1 = lp.updatedAt ? new Date(lp.updatedAt).getTime() : 0;
+  const t2 = lp.updated_at ? new Date(lp.updated_at).getTime() : 0;
+  const t3 = !t1 && !t2 && (lp.createdAt || lp.created_at)
+    ? new Date(lp.createdAt || lp.created_at).getTime()
+    : 0;
+  return Math.max(Number.isNaN(t1) ? 0 : t1, Number.isNaN(t2) ? 0 : t2, Number.isNaN(t3) ? 0 : t3);
+}
+
+function isCorruptedLeadAsLp(lp: any): boolean {
+  if (!lp || typeof lp !== "object") return true;
+  const st = String(lp.status || "").trim().toLowerCase();
+  return st === "novo lead" && !lp.hero && !lp.externalUrl && !lp["Config JSON"] && !lp.config;
+}
 
 export interface CloudDatabase {
   leads: any[];
@@ -230,7 +247,7 @@ function mergeLandingPageLists(
   deletedSet: Set<string>
 ): LandingPage[] {
   const isDeleted = (lp: any) => {
-    if (!lp) return true;
+    if (!lp || isCorruptedLeadAsLp(lp)) return true;
     if (lp.id && deletedSet.has(String(lp.id))) return true;
     if (lp.slug && deletedSet.has(String(lp.slug))) return true;
     return false;
@@ -266,12 +283,8 @@ function mergeLandingPageLists(
 
     const existing = currentMap.get(key) || (rawRemote.slug ? currentMap.get(String(rawRemote.slug)) : null);
 
-    const existingTime = new Date(
-      existing?.updatedAt || existing?.updated_at || existing?.createdAt || 0
-    ).getTime();
-    const remoteTime = new Date(
-      rawRemote.updatedAt || rawRemote.updated_at || parsedConfig.updatedAt || parsedConfig.updated_at || rawRemote.createdAt || 0
-    ).getTime();
+    const existingTime = getLpTimestampMs(existing);
+    const remoteTime = Math.max(getLpTimestampMs(rawRemote), getLpTimestampMs(parsedConfig));
 
     const preferExisting = Boolean(existing && existingTime > remoteTime);
 
@@ -344,9 +357,11 @@ class CloudStorageService {
   };
 
   private listeners = new Set<() => void>();
-  private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private pushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lpSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private bootstrapPromise: Promise<CloudDatabase> | null = null;
+  private publicLpInflight = new Map<string, Promise<LandingPage | null>>();
   private isPushing = false;
   private isPulling = false;
   private realtimeStarted = false;
@@ -812,9 +827,114 @@ class CloudStorageService {
     });
   }
 
+  /**
+   * Salva 1 única Landing Page de forma ultrarrápida (RAM + /api/pages/preview + SAVE_LANDING_PAGE no Sheets)
+   * sem disparar reescrita completa das 8 abas da planilha a cada clique/digitação.
+   */
+  async saveLandingPageOnly(
+    rawLp: any,
+    options: { immediate?: boolean } = {}
+  ): Promise<{ page: LandingPage; synced: boolean }> {
+    const heroModel =
+      rawLp?.hero?.model || rawLp?.heroModel || rawLp?.hero_model || "split_image";
+    const nowIso = new Date().toISOString();
+    const normalized: LandingPage = {
+      ...rawLp,
+      heroModel,
+      hero: rawLp?.hero ? { ...rawLp.hero, model: heroModel } : { model: heroModel },
+      updatedAt: nowIso,
+      updated_at: nowIso,
+    };
+
+    // 1. Atualiza RAM imediatamente
+    const list = Array.isArray(this.db.landingPages) ? this.db.landingPages : [];
+    const exists = list.some(
+      (p: any) =>
+        p &&
+        (p.id === normalized.id ||
+          (normalized.slug && p.slug === normalized.slug))
+    );
+    this.db = {
+      ...this.db,
+      landingPages: exists
+        ? list.map((p: any) =>
+            p &&
+            (p.id === normalized.id ||
+              (normalized.slug && p.slug === normalized.slug))
+              ? normalized
+              : p
+          )
+        : [normalized, ...list],
+      activePreviewPage: normalized,
+    };
+
+    this.status.dirtyRevision += 1;
+    this.status.pendingWrite = true;
+    const capturedDirty = this.status.dirtyRevision;
+    this.emit(true);
+
+    // 2. Persiste instantaneamente no cache de preview do servidor (sub-10ms para /preview e /lp/:id)
+    if (typeof window !== "undefined") {
+      fetch("/api/pages/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalized),
+      }).catch(() => {});
+    }
+
+    const executeSingleSave = async (): Promise<boolean> => {
+      try {
+        await initializeSharedDriveConfig().catch(() => {});
+        this.status.syncing = true;
+        this.emit(false);
+
+        const driveRes = await saveLandingPageToDrive(normalized);
+        if (driveRes.supported) {
+          this.status.lastPushTimestamp = Date.now();
+          this.status.lastSyncTimestamp = Date.now();
+          this.status.loadedFromCloud = true;
+          this.status.connected = true;
+          this.status.lastError = null;
+          if (this.status.dirtyRevision === capturedDirty) {
+            this.status.pendingWrite = false;
+          }
+          this.emit(true);
+          return true;
+        }
+
+        // Fallback caso o Code.gs do usuário ainda seja antigo (< v3.2):
+        const pushed = await this.pushNow();
+        return pushed;
+      } catch (err: any) {
+        this.status.lastError = err?.message || "Erro ao salvar Landing Page na nuvem.";
+        return false;
+      } finally {
+        this.status.syncing = false;
+        this.emit(false);
+      }
+    };
+
+    if (options.immediate) {
+      if (this.lpSaveTimer) {
+        clearTimeout(this.lpSaveTimer);
+        this.lpSaveTimer = null;
+      }
+      const synced = await executeSingleSave();
+      return { page: normalized, synced };
+    }
+
+    if (this.lpSaveTimer) clearTimeout(this.lpSaveTimer);
+    this.lpSaveTimer = setTimeout(() => {
+      this.lpSaveTimer = null;
+      executeSingleSave().catch(() => {});
+    }, 350);
+
+    return { page: normalized, synced: false };
+  }
+
   async fetchPublicLP(
     idOrSlug: string,
-    options: { preferSheets?: boolean } = { preferSheets: true }
+    options: { preferSheets?: boolean } = {}
   ): Promise<LandingPage | null> {
     if (!idOrSlug) return null;
     const cleanTarget = decodeURIComponent(idOrSlug).trim().toLowerCase();
@@ -823,6 +943,7 @@ class CloudStorageService {
       list.find(
         (p) =>
           p &&
+          !isCorruptedLeadAsLp(p) &&
           (String(p.id || "").toLowerCase() === cleanTarget ||
             String(p.originalId || "").toLowerCase() === cleanTarget ||
             String(p.previewToken || "").toLowerCase() === cleanTarget ||
@@ -844,47 +965,55 @@ class CloudStorageService {
       return fromRam;
     }
 
-    // Busca direta no Google Sheets / Apps Script (funciona em outro navegador e guia anônima)
-    await initializeSharedDriveConfig().catch(() => {});
-    const cloudLp = await fetchPublicLpFromDrive(idOrSlug, {
-      directSheets: options.preferSheets !== false,
-    });
-    if (cloudLp) {
-      const ramTime = new Date(
-        fromRam?.updatedAt || (fromRam as any)?.updated_at || 0
-      ).getTime();
-      const cloudTime = new Date(
-        cloudLp?.updatedAt || (cloudLp as any)?.updated_at || 0
-      ).getTime();
+    // Deduplicação de requisições simultâneas para a mesma LP (evita 2-4 chamadas paralelas!)
+    const inflightKey = `${cleanTarget}:${options.preferSheets ? "s" : "c"}`;
+    const existingPromise = this.publicLpInflight.get(inflightKey);
+    if (existingPromise) return existingPromise;
 
-      if (!fromRam || !this.status.loadedFromCloud || cloudTime >= ramTime) {
-        this.db.landingPages = [
-          cloudLp,
-          ...this.db.landingPages.filter((p) => p.id !== cloudLp.id),
-        ];
-        this.emit(false);
-        return cloudLp;
-      }
-      return fromRam;
-    }
-
-    if (fromRam) return fromRam;
-
-    // Fallback API local /api/public/lp/:id
-    try {
-      const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
-        cache: "no-store",
+    const run = (async (): Promise<LandingPage | null> => {
+      await initializeSharedDriveConfig().catch(() => {});
+      const cloudLp = await fetchPublicLpFromDrive(idOrSlug, {
+        directSheets: options.preferSheets === true,
       });
-      if (res.ok) {
-        const json = await res.json();
-        const found = json?.landingPage || json;
-        if (found && (found.id || found.title || found.hero)) {
-          return found;
-        }
-      }
-    } catch {}
 
-    return null;
+      if (cloudLp) {
+        const ramTime = getLpTimestampMs(fromRam);
+        const cloudTime = getLpTimestampMs(cloudLp);
+
+        if (!fromRam || !this.status.loadedFromCloud || cloudTime >= ramTime) {
+          this.db.landingPages = [
+            cloudLp,
+            ...this.db.landingPages.filter((p) => p.id !== cloudLp.id),
+          ];
+          this.emit(false);
+          return cloudLp;
+        }
+        return fromRam;
+      }
+
+      if (fromRam) return fromRam;
+
+      // Fallback API local /api/public/lp/:id
+      try {
+        const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const found = json?.landingPage || json?.page || json;
+          if (found && (found.id || found.title || found.hero)) {
+            return found;
+          }
+        }
+      } catch {}
+
+      return null;
+    })().finally(() => {
+      this.publicLpInflight.delete(inflightKey);
+    });
+
+    this.publicLpInflight.set(inflightKey, run);
+    return run;
   }
 
   async fetchPublicSurvey(idOrSlug: string): Promise<Survey | null> {

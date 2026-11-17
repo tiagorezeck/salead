@@ -82,66 +82,6 @@
     "descriptionColor": "#c4c4ca"
   },
   {
-    "id": "2026-09-14_00-29",
-    "title": "Tiago Rezeck Rezeck",
-    "name": "Tiago Rezeck Rezeck",
-    "slug": "Campanha: venda...",
-    "status": "Novo Lead",
-    "visits": 0,
-    "viewsCount": 0,
-    "views_count": 0,
-    "leads": 0,
-    "leads_count": 0,
-    "conv": 0,
-    "type": "COMET CRO",
-    "updated_at": "2026-11-16T17:15:17.588Z"
-  },
-  {
-    "id": "2026-09-13_17-02",
-    "title": "dtynejt",
-    "name": "dtynejt",
-    "slug": "Campanha: venda... (Cópia)",
-    "status": "Novo Lead",
-    "visits": 0,
-    "viewsCount": 0,
-    "views_count": 0,
-    "leads": 524050570570,
-    "leads_count": 524050570570,
-    "conv": 0,
-    "type": "COMET CRO",
-    "updated_at": "2026-11-16T17:15:17.588Z"
-  },
-  {
-    "id": "2026-09-13_23-42",
-    "title": "Tiago Rezeck Rezeck",
-    "name": "Tiago Rezeck Rezeck",
-    "slug": "Landing Page",
-    "status": "Novo Lead",
-    "visits": 0,
-    "viewsCount": 0,
-    "views_count": 0,
-    "leads": 0,
-    "leads_count": 0,
-    "conv": 0,
-    "type": "COMET CRO",
-    "updated_at": "2026-11-16T17:15:17.588Z"
-  },
-  {
-    "id": "23-10-2026-20:31",
-    "title": "Tiago da Silva Sauro",
-    "name": "Tiago da Silva Sauro",
-    "slug": "Mentoria High-Ticket & CRO",
-    "status": "Novo Lead",
-    "visits": 0,
-    "viewsCount": 0,
-    "views_count": 0,
-    "leads": 0,
-    "leads_count": 0,
-    "conv": 0,
-    "type": "COMET CRO",
-    "updated_at": "2026-11-16T17:15:17.588Z"
-  },
-  {
     "id": "8fe0281b-fc17-47e6-a25d-cec570000d17",
     "title": "Aceleração CRO • Curso Online & Formação Profissional",
     "name": "Aceleração CRO • Curso Online & Formação Profissional",
@@ -154,7 +94,8 @@
     "leads_count": 0,
     "conv": 0,
     "type": "COMET CRO",
-    "updated_at": "2026-11-16T17:15:17.588Z",
+    "heroModel": "survey_hero_light",
+    "updated_at": "2026-10-24T23:46:28.897Z",
     "originalId": "8fe0281b-fc17-47e6-a25d-cec570000d17",
     "template": "Modern",
     "surveyId": "qualificacao-min-1min",
@@ -601,6 +542,7 @@
     "leads_count": 30,
     "conv": 1,
     "type": "COMET CRO",
-    "updated_at": "2026-11-16T17:15:17.588Z"
+    "updatedAt": "2026-10-24T23:46:28.897Z",
+    "updated_at": "2026-10-24T23:46:28.897Z"
   }
 ]
