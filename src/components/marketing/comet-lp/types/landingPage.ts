@@ -151,12 +151,12 @@ export interface HeroSection {
   headline: string;
   subheadline: string;
   mediaType: "video" | "image";
-  videoUrl: string; // YouTube, Vimeo, or MP4
-  videoThumbnail: string;
+  videoUrl?: string; // YouTube, Vimeo, or MP4
+  videoThumbnail?: string;
   imageUrl: string;
   ctaText: string;
-  ctaSubtext: string;
-  countdownMinutes: number;
+  ctaSubtext?: string;
+  countdownMinutes?: number;
   countdownHours?: number;
   countdownDays?: number;
   countdownSeconds?: number;
@@ -337,7 +337,7 @@ export interface TestimonialItem {
   name: string;
   role: string;
   companyOrCity: string;
-  avatarUrl: string;
+  avatarUrl?: string;
   avatarPositionX?: number;
   avatarPositionY?: number;
   avatarZoom?: number;
@@ -423,6 +423,7 @@ export interface FormSection {
 export interface FaqItem {
   id: string;
   question: string;
+  subtitle?: string;
   answer: string;
 }
 
@@ -727,6 +728,6 @@ export interface LeadSubmission {
   quizAnswers: Record<string, string>;
   utms: Record<string, string>;
   submittedAt: string;
-  webhookStatus: "success" | "skipped" | "failed";
+  webhookStatus: "success" | "skipped" | "failed" | "pending";
   webhookResponse?: string;
 }

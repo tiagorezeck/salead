@@ -1529,7 +1529,7 @@ export const PRESET_TEMPLATES: LandingPage[] = [
       items: [{ id: "t14_1", name: "Eduardo T.", role: "CEO", companyOrCity: "Rio de Janeiro / RJ", rating: 5, content: "A GrowthScale assumiu nosso tráfego e triplicou nossas vendas em 90 dias com ROAS constante acima de 4x.", resultHighlight: "Vendas triplicadas em 90 dias", verified: true }],
     },
     formSection: { badge: "REUNIÃO DE ESTRATÉGIA", title: "Agende uma Reunião de 30 Minutos com Nossos Estrategistas", subtitle: "Analisaremos sua conta de anúncios gratuitamente.", ctaButtonText: "QUERO ANALISAR MINHAS CAMPANHAS", guaranteeDays: 30, guaranteeText: "Sem contrato de fidelidade abusivo; resultados comprovados mês a mês.", securityBadges: ["Parceiro Oficial Meta/Google", "Estrategistas Dedicados", "Relatórios em Tempo Real"] },
-    faq: [{ id: "f14_1", question: "Qual o investimento mínimo em anúncios para trabalhar conosco?", subtitle: "Recomendamos verba mínima de R$ 5.000 mensais em mídia para garantir tração ideal.", answer: "Recomendamos verba mínima de R$ 5.000 mensais em mídia para garantir tração ideal." }],
+    faq: [{ id: "f14_1", question: "Qual o investimento mínimo em anúncios para trabalhar conosco?", answer: "Recomendamos verba mínima de R$ 5.000 mensais em mídia para garantir tração ideal." }],
   },
   {
     id: "template-imoveis-luxo",

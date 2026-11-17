@@ -1,4 +1,4 @@
-import { type SurveyQuestion } from "@/hooks/use-data";
+import { type SurveyQuestion } from "../hooks/use-data";
 
 export interface SurveyPreset {
   id: string;

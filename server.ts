@@ -86,7 +86,7 @@ function persistServerDriveConfig(config: Record<string, any>): Record<string, a
         ? String(config.API_TOKEN || "").trim()
         : String(current.apiToken || "");
 
-  const merged = {
+  const merged: Record<string, any> = {
     ...current,
     ...config,
     webappUrl: cleanUrl,

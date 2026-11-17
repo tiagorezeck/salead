@@ -3021,7 +3021,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                           </label>
                           <input
                             type="text"
-                            value={page.hero.videoUrl}
+                            value={page.hero.videoUrl || ""}
                             onChange={(e) =>
                               updatePage((p) => ({
                                 ...p,
@@ -3092,7 +3092,7 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                         </label>
                         <input
                           type="text"
-                          value={page.hero.ctaSubtext}
+                          value={page.hero.ctaSubtext || ""}
                           onChange={(e) =>
                             updatePage((p) => ({
                               ...p,

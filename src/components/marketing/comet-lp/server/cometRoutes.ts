@@ -589,7 +589,7 @@ export function syncDriveDataToDisk(driveData: any): { leadsCount: number; pages
       if (p.slug) pageMap.set(`slug:${p.slug}`, p);
     });
 
-    rawLps.forEach(rawSp => {
+    rawLps.forEach((rawSp: any) => {
       if (!rawSp || isCorruptedLeadRowAsLp(rawSp)) return;
       const sp = normalizeLpServer(rawSp);
       const id = String(sp.id || sp.ID || `lp_${Date.now()}`);
@@ -913,7 +913,7 @@ async function saveLeadLocally(leadData: {
         tags,
         score: parsedScore,
         submittedAt: new Date().toISOString(),
-        webhookStatus: "pending",
+        webhookStatus: "pending" as const,
         isTest: Boolean(isTest),
         metadata: leadRecord.metadata,
       };
