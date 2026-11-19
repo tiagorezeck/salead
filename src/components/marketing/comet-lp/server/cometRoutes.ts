@@ -1063,6 +1063,26 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
       console.warn("Notice: server disk write failed in preview sync:", diskErr);
     }
 
+    // 3. Em ambiente serverless (Vercel), persiste no GAS antes de encerrar a invocação
+    const webappUrl = getDriveWebAppUrlServer();
+    if (webappUrl && process.env.VERCEL) {
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), 3500);
+        await fetch(webappUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "SAVE_LANDING_PAGE",
+            landingPage: page,
+          }),
+          redirect: "follow",
+          signal: controller.signal,
+        }).catch(() => {});
+        clearTimeout(tId);
+      } catch {}
+    }
+
     return res.json({ success: true, id: page.id, previewToken: page.previewToken, heroModel: page.heroModel });
   } catch (err: any) {
     console.error("Error saving preview page:", err);
@@ -1682,52 +1702,84 @@ cometLpRouter.post("/api/submit-lead", async (req, res) => {
       console.warn("Express disk lead increment notice:", lpErr);
     }
 
-    // 3. Responde IMEDIATAMENTE ao navegador
-    res.json({
+    // 3. Sincroniza com Google Apps Script & Webhook (em Vercel aguarda antes do freeze da lambda)
+    const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
+    const gasWebappUrl = getDriveWebAppUrlServer();
+
+    const dispatchExternalTasks = async () => {
+      const tasks: Promise<any>[] = [];
+      if (gasWebappUrl && gasWebappUrl.startsWith("http")) {
+        tasks.push((async () => {
+          try {
+            const controller = new AbortController();
+            const tId = setTimeout(() => controller.abort(), 4000);
+            await fetch(gasWebappUrl, {
+              method: "POST",
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({
+                action: "SUBMIT_LP_LEAD",
+                isTest: isTestMode,
+                lead,
+              }),
+              redirect: "follow",
+              signal: controller.signal,
+            }).finally(() => clearTimeout(tId));
+          } catch {}
+        })());
+      }
+      if (targetWebhook && targetWebhook.trim().length > 0) {
+        tasks.push((async () => {
+          try {
+            const controller = new AbortController();
+            const tId = setTimeout(() => controller.abort(), 2500);
+            const payload = {
+              event: "lead_converted",
+              timestamp: lead.submittedAt,
+              lead: {
+                name: lead.name,
+                whatsapp: lead.whatsapp,
+                email: lead.email,
+                quiz_diagnosis: lead.quizAnswers,
+              },
+              tracking: {
+                page_id: lead.pageId,
+                page_title: lead.pageTitle,
+                source: effectiveSource,
+                ...(utms || {}),
+              },
+            };
+            await fetch(targetWebhook, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "User-Agent": "People-CRO-Builder/1.0",
+              },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            }).finally(() => clearTimeout(tId));
+          } catch (wErr) {
+            console.warn("Background webhook delivery notice:", wErr);
+          }
+        })());
+      }
+      if (tasks.length > 0) {
+        await Promise.allSettled(tasks);
+      }
+    };
+
+    if (process.env.VERCEL) {
+      await dispatchExternalTasks();
+    } else {
+      setImmediate(() => { void dispatchExternalTasks(); });
+    }
+
+    return res.json({
       success: true,
       leadId: lead.id,
       webhookStatus: lead.webhookStatus,
       lead,
       message: "Lead capturado e processado com sucesso!",
     });
-
-    // 4. Webhook externa opcional em background se configurado
-    const targetWebhook = webhookUrl || process.env.VITE_SYSTEM_WEBHOOK_URL;
-    if (targetWebhook && targetWebhook.trim().length > 0) {
-      setImmediate(async () => {
-        try {
-          const controller = new AbortController();
-          const tId = setTimeout(() => controller.abort(), 2000);
-          const payload = {
-            event: "lead_converted",
-            timestamp: lead.submittedAt,
-            lead: {
-              name: lead.name,
-              whatsapp: lead.whatsapp,
-              email: lead.email,
-              quiz_diagnosis: lead.quizAnswers,
-            },
-            tracking: {
-              page_id: lead.pageId,
-              page_title: lead.pageTitle,
-              source: effectiveSource,
-              ...(utms || {}),
-            },
-          };
-          await fetch(targetWebhook, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "User-Agent": "People-CRO-Builder/1.0",
-            },
-            body: JSON.stringify(payload),
-            signal: controller.signal,
-          }).finally(() => clearTimeout(tId));
-        } catch (wErr) {
-          console.warn("Background webhook delivery notice:", wErr);
-        }
-      });
-    }
   } catch (error: any) {
     console.error("Error in /api/submit-lead:", error);
     return res.status(500).json({ error: error.message || "Failed to process lead" });
@@ -2518,12 +2570,13 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
   }
 });
 
-// PUT update landing page
-cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
+// PUT / PATCH / POST update landing page
+const handleUpdateLandingPage = async (req: Request, res: Response) => {
   try {
     invalidateCloudDbCache();
     const { id } = req.params;
-    const body = req.body || {};
+    const rawBody = req.body || {};
+    const body = rawBody?.landingPage || rawBody?.page || rawBody;
     const current = readStoredLandingPages();
     const existing = current.find((p) => p.id === id || p.slug === id);
 
@@ -2593,11 +2646,37 @@ cometLpRouter.put("/api/landing-pages/:id", async (req, res) => {
     if (updatedPage.previewToken) previewPagesStore.set(updatedPage.previewToken, updatedPage);
     lastSavedPreviewPage = updatedPage;
 
-    res.json({ success: true, landingPage: updatedPage });
+    // Em ambiente serverless (Vercel), persiste no GAS antes de encerrar a invocação
+    let synced = false;
+    const webappUrl = getDriveWebAppUrlServer();
+    if (webappUrl && process.env.VERCEL) {
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), 5000);
+        const gasRes = await fetch(webappUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "SAVE_LANDING_PAGE",
+            landingPage: updatedPage,
+          }),
+          redirect: "follow",
+          signal: controller.signal,
+        });
+        clearTimeout(tId);
+        if (gasRes.ok) synced = true;
+      } catch {}
+    }
+
+    res.json({ success: true, synced, landingPage: updatedPage, page: updatedPage });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Internal server error" });
   }
-});
+};
+
+cometLpRouter.put("/api/landing-pages/:id", handleUpdateLandingPage);
+cometLpRouter.patch("/api/landing-pages/:id", handleUpdateLandingPage);
+cometLpRouter.post("/api/landing-pages/:id", handleUpdateLandingPage);
 
 // Endpoint explícito para limpar leads de teste de uma Landing Page
 cometLpRouter.post("/api/landing-pages/:id/clear-test-leads", async (req, res) => {
@@ -2639,7 +2718,27 @@ cometLpRouter.delete("/api/landing-pages/:id", async (req, res) => {
 
     previewPagesStore.delete(id);
 
-    res.json({ success: true });
+    const webappUrl = getDriveWebAppUrlServer();
+    if (webappUrl && process.env.VERCEL) {
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), 4000);
+        await fetch(webappUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "DELETE_LANDING_PAGE",
+            lpId: id,
+            id,
+          }),
+          redirect: "follow",
+          signal: controller.signal,
+        }).catch(() => {});
+        clearTimeout(tId);
+      } catch {}
+    }
+
+    res.json({ success: true, id });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Internal server error" });
   }
