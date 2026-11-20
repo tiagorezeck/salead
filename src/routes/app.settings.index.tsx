@@ -6,7 +6,8 @@ import {
   Image as ImageIcon, Sparkles, Eye, Phone, Mail, MapPin, Globe, Cloud, 
   CheckCircle2, BookOpen, MonitorPlay, Trophy, Medal, ClipboardCheck, 
   Layout, KanbanSquare, ChevronDown, ListTodo, Package, Megaphone, Zap, 
-  MessageSquare, UserCog, ClipboardList, RefreshCw, Bot, ArrowUpRight, Sliders
+  MessageSquare, UserCog, ClipboardList, RefreshCw, Bot, ArrowUpRight, Sliders,
+  Settings, KeyRound
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { 
@@ -125,6 +126,8 @@ function SettingsIndexPage() {
   
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<"empresa" | "kanban" | "permissoes" | "sla" | "integracoes" | "dados">("empresa");
+  const [empresaSubTab, setEmpresaSubTab] = useState<"dados" | "jornada" | "aparencia">("dados");
   const [newHoliday, setNewHoliday] = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
@@ -230,324 +233,770 @@ function SettingsIndexPage() {
     );
   }
 
+  const driveConnected = Boolean(driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0));
+
+  const TOP_TABS = [
+    { id: "empresa" as const, label: "Empresa", icon: Building2 },
+    { id: "kanban" as const, label: "Kanban", icon: LayoutGrid },
+    { id: "permissoes" as const, label: "Permissões", icon: Shield },
+    { id: "sla" as const, label: "SLA & Alertas", icon: Timer },
+    { id: "integracoes" as const, label: "Integrações", icon: KeyRound },
+    { id: "dados" as const, label: "Dados", icon: Database },
+  ];
+
+  const EMPRESA_SUBTABS = [
+    { id: "dados" as const, label: "Dados da Empresa", icon: FileText },
+    { id: "jornada" as const, label: "Jornada", icon: CalendarIcon },
+    { id: "aparencia" as const, label: "Aparência", icon: Palette },
+  ];
+
+  const SECTION_META = {
+    empresa: {
+      icon: Building2,
+      title: "Empresa",
+      subtitle: "Gerencie a identidade, jornada de trabalho e aparência da empresa.",
+    },
+    kanban: {
+      icon: LayoutGrid,
+      title: "Pipelines & Kanban",
+      subtitle: "Crie e organize diferentes tipos de funis (Vendas, CS, Operação).",
+    },
+    permissoes: {
+      icon: Eye,
+      title: "Visibilidade & Módulos",
+      subtitle: "Configure manualmente quais módulos do sistema e etapas Kanban cada cargo pode ver e usar.",
+    },
+    sla: {
+      icon: Timer,
+      title: "SLA & Alertas",
+      subtitle: "Defina os tempos de resposta para leads em cada nível.",
+    },
+    integracoes: {
+      icon: Zap,
+      title: "Integrações",
+      subtitle: "Conecte seus serviços externos de inteligência artificial e sincronização em nuvem.",
+    },
+    dados: {
+      icon: Database,
+      title: "Centro de Dados",
+      subtitle: "Gestão completa de backups, exportação modular e portabilidade de dados.",
+    },
+  }[activeSection];
+
+  const ActiveSectionIcon = SECTION_META.icon;
+
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-8 max-w-[1600px] mx-auto pb-20">
-      <div>
-        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Administração</div>
-        <h1 className="font-display text-2xl font-bold mt-1">Configurações</h1>
-        <p className="text-sm text-muted-foreground">Gerencie as preferências globais, pipelines, permissões e integrações.</p>
+    <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto pb-20">
+      {/* HEADER PRINCIPAL DA PÁGINA */}
+      <div className="flex items-center gap-4">
+        <div className="h-12 w-12 rounded-2xl bg-primary/10 border border-primary/15 flex items-center justify-center text-primary shrink-0">
+          <Settings className="h-6 w-6" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground">Configurações</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Gerencie as preferências globais, pipelines, permissões e integrações.</p>
+        </div>
       </div>
 
-      {/* SEÇÃO DE PERFIL E SISTEMA */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        <div className="bg-gradient-surface border border-border rounded-2xl p-6 shadow-card">
-          <div className="flex items-center gap-2 mb-6">
-            <Building2 className="h-5 w-5 text-primary" />
-            <h3 className="font-display text-lg font-bold">Perfil da Empresa</h3>
+      {/* BARRA HORIZONTAL DE CATEGORIAS */}
+      <div className="bg-card border border-border rounded-[1.5rem] p-2 shadow-sm">
+        <nav aria-label="Seções de configurações" className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+          {TOP_TABS.map((tab) => {
+            const TabIcon = tab.icon;
+            const isActive = activeSection === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveSection(tab.id)}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-1.5 px-3 py-3 rounded-2xl transition-all duration-150 cursor-pointer whitespace-nowrap shrink-0",
+                  isActive
+                    ? "bg-primary text-primary-foreground shadow-md"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
+              >
+                <TabIcon className={cn("h-5 w-5", isActive ? "text-primary-foreground" : "text-primary")} />
+                <span className="text-[11px] font-bold uppercase tracking-wider">{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* SUB-CABEÇALHO DA SEÇÃO ATIVA + SUB-ABAS À DIREITA */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-1">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center text-primary shrink-0">
+            <ActiveSectionIcon className="h-5 w-5" />
           </div>
-          
-          <div className="space-y-5">
-            <div className="flex items-center gap-6">
-              <div className="relative group">
-                <div className="h-24 w-24 rounded-2xl bg-muted border-2 border-dashed border-border overflow-hidden flex items-center justify-center transition-all group-hover:border-primary/50">
-                  {company?.logo ? <img src={company.logo} alt="Logo" className="w-full h-full object-contain p-2" /> : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
-                </div>
-                <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 text-white text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-2xl">ALTERAR LOGO</button>
-                <input type="file" ref={logoInputRef} onChange={handleLogoUpload} accept="image/*" className="hidden" />
-              </div>
-              <div className="flex-1 space-y-4">
-                <div className="space-y-1.5"><label className="text-[10px] uppercase font-bold text-muted-foreground">Empresa</label><input value={company?.name || ''} onChange={e => setCompany({...company, name: e.target.value})} className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm font-bold" /></div>
-                <div className="space-y-1.5"><label className="text-[10px] uppercase font-bold text-muted-foreground">Setor</label><input value={company?.sector || ''} onChange={e => setCompany({...company, sector: e.target.value})} className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm" /></div>
-              </div>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5"><label className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1.5"><Phone className="h-3 w-3 text-primary" /> Contato</label><input value={company?.contact || ''} onChange={e => setCompany({...company, contact: e.target.value})} className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm" /></div>
-              <div className="space-y-1.5"><label className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1.5"><Mail className="h-3 w-3 text-primary" /> E-mail</label><input value={company?.email || ''} onChange={e => setCompany({...company, email: e.target.value})} className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm" /></div>
-            </div>
-            <div className="space-y-1.5"><label className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-primary" /> Propósito (IA)</label><textarea value={company?.purpose || ''} onChange={e => setCompany({...company, purpose: e.target.value})} className="w-full bg-muted/50 border border-border rounded-lg px-3 py-3 text-sm min-h-[100px] resize-none" /></div>
+          <div className="min-w-0">
+            <h2 className="font-display text-lg font-bold text-foreground leading-tight">{SECTION_META.title}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{SECTION_META.subtitle}</p>
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="bg-gradient-surface border border-border rounded-2xl p-6 shadow-card">
-            <div className="flex items-center gap-2 mb-4"><CalendarIcon className="h-5 w-5 text-primary" /><h3 className="font-display text-lg font-bold">Jornada de Trabalho</h3></div>
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {WEEK_DAYS.map(day => (<button key={day.id} onClick={() => toggleWorkingDay(day.id)} className={cn("px-4 py-2 rounded-xl border text-xs font-bold transition-all", workingDays.includes(day.id) ? "bg-primary text-primary-foreground border-primary shadow-elegant" : "bg-muted/30 border-border text-muted-foreground hover:bg-muted")}>{day.label}</button>))}
+        {activeSection === "empresa" && (
+          <div className="inline-flex items-center p-1.5 rounded-2xl bg-card border border-border shadow-xs gap-1 overflow-x-auto max-w-full shrink-0">
+            {EMPRESA_SUBTABS.map((sub) => {
+              const SubIcon = sub.icon;
+              const isSubActive = empresaSubTab === sub.id;
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => setEmpresaSubTab(sub.id)}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0",
+                    isSubActive
+                      ? "bg-muted/70 dark:bg-muted text-primary border border-border/70 shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                  )}
+                >
+                  <SubIcon className={cn("h-3.5 w-3.5", isSubActive ? "text-primary" : "text-muted-foreground")} />
+                  <span>{sub.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {activeSection === "kanban" && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("pipelines")}
+            className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start lg:self-auto"
+          >
+            <LayoutGrid className="h-4 w-4" />
+            Gerenciar Pipelines
+          </button>
+        )}
+
+        {activeSection === "permissoes" && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("permissions")}
+            className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start lg:self-auto"
+          >
+            <Eye className="h-4 w-4" />
+            Configurar Permissões
+          </button>
+        )}
+
+        {activeSection === "sla" && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("sla")}
+            className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start lg:self-auto"
+          >
+            <Timer className="h-4 w-4" />
+            Editar Tempos de SLA
+          </button>
+        )}
+
+        {activeSection === "dados" && (
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/app/settings/data" })}
+            className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start lg:self-auto"
+          >
+            <Database className="h-4 w-4" />
+            Abrir Centro de Dados
+          </button>
+        )}
+      </div>
+
+      {/* CONTEÚDO PRINCIPAL EM CONTAINER ÚNICO ARREDONDADO */}
+      {activeSection === "empresa" && (
+        <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm">
+          {empresaSubTab === "dados" && (
+            <div>
+              {/* Bloco Superior: Logomarca e Identidade */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-6 pb-7 mb-7 border-b border-border">
+                <div className="relative w-28 h-28 shrink-0 group">
+                  <div className="h-28 w-28 rounded-[1.5rem] bg-muted/60 border border-border overflow-hidden flex items-center justify-center transition-colors group-hover:border-primary/40">
+                    {company?.logo ? (
+                      <img src={company.logo} alt="Logo da Empresa" className="w-full h-full object-contain p-3" />
+                    ) : (
+                      <ImageIcon className="h-9 w-9 text-muted-foreground/50" />
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    title="Alterar Logomarca"
+                    className="absolute -bottom-1.5 -right-1.5 h-9 w-9 rounded-xl bg-primary text-primary-foreground shadow-md flex items-center justify-center hover:scale-105 transition-transform cursor-pointer border-2 border-card"
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                  </button>
+                  <input type="file" ref={logoInputRef} onChange={handleLogoUpload} accept="image/*" className="hidden" />
+                </div>
+
+                <div className="space-y-1.5 min-w-0">
+                  <h3 className="text-base font-bold text-foreground">Logomarca e Identidade</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
+                    Esta imagem aparecerá na identidade visual da empresa, materiais comerciais e relatórios do sistema.
+                  </p>
+                </div>
               </div>
-              <div className="pt-4 border-t border-border flex gap-2">
-                <input type="date" value={newHoliday} onChange={e => setNewHoliday(e.target.value)} className="flex-1 bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm" />
-                <button onClick={() => { if(!newHoliday) return; setHolidays([...holidays, newHoliday].sort()); setNewHoliday(""); }} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-bold text-xs">MARCAR DIA</button>
+
+              {/* Faixa de Status Informativa */}
+              <div className="rounded-2xl bg-emerald-500/8 dark:bg-emerald-500/10 border border-emerald-500/20 p-4 mb-7 flex items-start sm:items-center gap-3.5">
+                <div className="h-10 w-10 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Phone className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">
+                      Contato & Identidade da Empresa
+                    </span>
+                    <span className={cn(
+                      "text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-md",
+                      (company?.contact || company?.email)
+                        ? "bg-emerald-600 text-white"
+                        : "bg-muted text-muted-foreground"
+                    )}>
+                      {(company?.contact || company?.email) ? "Configurado" : "Pendente"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Contato principal: <strong className="text-foreground font-semibold">{company?.contact || "Não informado"}</strong>
+                    {" · "}
+                    E-mail: <strong className="text-foreground font-semibold">{company?.email || "Não informado"}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Campos do Perfil da Empresa */}
+              <div className="space-y-5">
+                <div className="grid sm:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <label className="text-[11px] uppercase tracking-wider font-bold text-foreground/80 block">
+                      Nome da Empresa*
+                    </label>
+                    <input
+                      value={company?.name || ""}
+                      onChange={(e) => setCompany({ ...company, name: e.target.value })}
+                      placeholder="Nome da sua empresa"
+                      className="w-full bg-muted/50 dark:bg-muted/30 border border-border rounded-2xl px-4 py-3 text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] uppercase tracking-wider font-bold text-foreground/80 block">
+                      Setor
+                    </label>
+                    <input
+                      value={company?.sector || ""}
+                      onChange={(e) => setCompany({ ...company, sector: e.target.value })}
+                      placeholder="Ex: Tecnologia, Consultoria, Educação"
+                      className="w-full bg-muted/50 dark:bg-muted/30 border border-border rounded-2xl px-4 py-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <label className="text-[11px] uppercase tracking-wider font-bold text-foreground/80 flex items-center gap-1.5">
+                      <Phone className="h-3.5 w-3.5 text-primary" />
+                      <span>Celular / WhatsApp</span>
+                    </label>
+                    <input
+                      value={company?.contact || ""}
+                      onChange={(e) => setCompany({ ...company, contact: e.target.value })}
+                      placeholder="+55 (00) 00000-0000"
+                      className="w-full bg-muted/50 dark:bg-muted/30 border border-border rounded-2xl px-4 py-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] uppercase tracking-wider font-bold text-foreground/80 flex items-center gap-1.5">
+                      <Mail className="h-3.5 w-3.5 text-primary" />
+                      <span>E-mail</span>
+                    </label>
+                    <input
+                      value={company?.email || ""}
+                      onChange={(e) => setCompany({ ...company, email: e.target.value })}
+                      placeholder="contato@empresa.com"
+                      className="w-full bg-muted/50 dark:bg-muted/30 border border-border rounded-2xl px-4 py-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] uppercase tracking-wider font-bold text-foreground/80 flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    <span>Propósito (IA)</span>
+                  </label>
+                  <textarea
+                    value={company?.purpose || ""}
+                    onChange={(e) => setCompany({ ...company, purpose: e.target.value })}
+                    placeholder="Descreva a proposta de valor e o público-alvo da empresa..."
+                    className="w-full bg-muted/50 dark:bg-muted/30 border border-border rounded-2xl px-4 py-3.5 text-sm text-foreground min-h-[110px] resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                  />
+                </div>
               </div>
             </div>
-          </div>
-          <div className="bg-gradient-surface border border-border rounded-2xl p-6 shadow-card">
-            <div className="flex items-center gap-2 mb-4"><Palette className="h-5 w-5 text-primary" /><h3 className="font-display text-lg font-bold">Aparência & Identidade</h3></div>
-            <div className="space-y-3">
-              <button onClick={toggleTheme} className="w-full flex items-center justify-between p-4 rounded-xl bg-muted/30 border border-border group hover:border-primary/40 transition-all text-sm font-semibold">
-                <div className="flex items-center gap-3">
-                  {theme === "dark" ? <Moon className="h-5 w-5 text-primary" /> : <Sun className="h-5 w-5 text-warning" />}
-                  <span>{theme === "dark" ? "Modo Escuro Ativo (clique para alternar)" : "Modo Claro Ativo (clique para alternar)"}</span>
-                </div>
-                <div className={cn(
-                  "h-6 w-11 rounded-full relative transition-colors border border-border",
-                  theme === "dark" ? "bg-primary/20 border-primary/40" : "bg-muted"
-                )}>
-                  <div className={cn(
-                    "absolute top-0.5 w-4 h-4 rounded-full transition-all bg-primary shadow-sm",
-                    theme === "dark" ? "left-6" : "left-1 bg-white"
-                  )} />
-                </div>
-              </button>
+          )}
 
-              {LOGO_EDITOR_ENABLED && (
+          {empresaSubTab === "jornada" && (
+            <div className="space-y-7">
+              <div className="pb-6 border-b border-border space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Dias Úteis de Operação</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Selecione os dias da semana considerados para cálculos de SLA e jornada comercial.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2.5">
+                  {WEEK_DAYS.map((day) => {
+                    const selected = workingDays.includes(day.id);
+                    return (
+                      <button
+                        key={day.id}
+                        type="button"
+                        onClick={() => toggleWorkingDay(day.id)}
+                        className={cn(
+                          "px-5 py-2.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer",
+                          selected
+                            ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                            : "bg-muted/40 border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                        )}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Feriados e Dias Não Úteis</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Marque datas específicas em que o atendimento comercial não opera.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3 max-w-md">
+                  <input
+                    type="date"
+                    value={newHoliday}
+                    onChange={(e) => setNewHoliday(e.target.value)}
+                    className="flex-1 bg-muted/50 dark:bg-muted/30 border border-border rounded-2xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newHoliday) return;
+                      setHolidays([...holidays, newHoliday].sort());
+                      setNewHoliday("");
+                    }}
+                    className="px-6 py-2.5 rounded-2xl bg-primary text-primary-foreground font-bold text-xs uppercase tracking-wider cursor-pointer hover:opacity-95 transition-opacity whitespace-nowrap"
+                  >
+                    Marcar Dia
+                  </button>
+                </div>
+                {Array.isArray(holidays) && holidays.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {holidays.map((h: string) => (
+                      <span
+                        key={h}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted/50 border border-border text-xs font-mono text-foreground"
+                      >
+                        {h}
+                        <button
+                          type="button"
+                          onClick={() => setHolidays(holidays.filter((d: string) => d !== h))}
+                          className="text-muted-foreground hover:text-destructive cursor-pointer"
+                          title="Remover data"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {empresaSubTab === "aparencia" && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-base font-bold text-foreground">Aparência & Identidade Visual</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Alterne entre tema claro e escuro ou personalize dimensões de exibição da marca.
+                </p>
+              </div>
+
+              <div className="space-y-4">
                 <button
-                  onClick={() => useBrandStore.getState().openModal()}
-                  className="w-full flex items-center justify-between p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 group hover:border-orange-500/60 hover:bg-orange-500/15 transition-all text-sm font-bold text-orange-500"
+                  type="button"
+                  onClick={toggleTheme}
+                  className="w-full flex items-center justify-between p-5 rounded-2xl bg-muted/40 border border-border hover:border-primary/40 transition-all text-sm font-semibold cursor-pointer"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="h-7 w-7 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-sm">
-                      <Sliders className="h-4 w-4" />
+                  <div className="flex items-center gap-3.5">
+                    <div className="h-10 w-10 rounded-xl bg-card border border-border flex items-center justify-center shrink-0">
+                      {theme === "dark" ? <Moon className="h-5 w-5 text-primary" /> : <Sun className="h-5 w-5 text-warning" />}
                     </div>
                     <div className="text-left">
-                      <div>Personalizar Logotipo & Dimensões</div>
-                      <div className="text-[10px] font-normal text-muted-foreground">Editar logotipo e tamanhos para Modo Escuro e Claro</div>
+                      <div className="font-bold text-foreground">
+                        {theme === "dark" ? "Modo Escuro Ativo" : "Modo Claro Ativo"}
+                      </div>
+                      <div className="text-xs font-normal text-muted-foreground">
+                        Clique para alternar a aparência da interface
+                      </div>
                     </div>
                   </div>
-                  <ArrowUpRight className="h-4 w-4 text-orange-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                  <div
+                    className={cn(
+                      "h-6 w-11 rounded-full relative transition-colors border border-border shrink-0",
+                      theme === "dark" ? "bg-primary/20 border-primary/40" : "bg-muted"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "absolute top-0.5 w-4 h-4 rounded-full transition-all bg-primary shadow-sm",
+                        theme === "dark" ? "left-6" : "left-1 bg-white"
+                      )}
+                    />
+                  </div>
                 </button>
-              )}
+
+                {LOGO_EDITOR_ENABLED && (
+                  <button
+                    type="button"
+                    onClick={() => useBrandStore.getState().openModal()}
+                    className="w-full flex items-center justify-between p-5 rounded-2xl bg-primary/8 border border-primary/25 hover:border-primary/50 hover:bg-primary/12 transition-all text-sm font-bold text-primary cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="h-10 w-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shadow-sm shrink-0">
+                        <Sliders className="h-5 w-5" />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-foreground font-bold">Personalizar Logotipo & Dimensões</div>
+                        <div className="text-xs font-normal text-muted-foreground">
+                          Editar logotipo e tamanhos para Modo Escuro e Claro
+                        </div>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-4 w-4 text-primary shrink-0" />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* SEÇÃO INTEGRAÇÕES (LAN IA & GOOGLE DRIVE) */}
-      <div className="space-y-4">
-        <div>
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Conectividade & Nuvem</div>
-          <h2 className="font-display text-xl font-bold mt-0.5 flex items-center gap-2">
-            <Zap className="w-5 h-5 text-primary" />
-            Integrações
-          </h2>
-          <p className="text-xs text-muted-foreground">Conecte seus serviços externos de inteligência artificial e sincronização em nuvem.</p>
-        </div>
+      {activeSection === "integracoes" && (
+        <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm">
+          <div className="grid md:grid-cols-3 gap-5">
+            {/* Card Integração: LAN AI Agent */}
+            <div
+              onClick={() => setActiveModal("ai")}
+              className="group bg-muted/25 hover:bg-muted/40 border border-border hover:border-primary/40 rounded-2xl p-6 transition-all cursor-pointer flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-11 w-11 rounded-2xl bg-emerald-500/12 border border-emerald-500/25 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                      <Bot className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-display text-base font-bold text-foreground">LANAI — Agente de IA</h3>
+                        <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                          {isAIConfigured ? "Ativo" : "Pendente"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Criador Autônomo de Landing Pages & LLMs</p>
+                    </div>
+                  </div>
+                  <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary shrink-0 transition-colors" />
+                </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          {/* Card Integração: LAN AI Agent */}
-          <div 
-            onClick={() => setActiveModal("ai")}
-            className="group relative bg-gradient-to-br from-card/90 to-card/50 hover:from-card hover:to-primary/5 border border-border hover:border-primary/50 rounded-2xl p-6 shadow-card transition-all duration-300 cursor-pointer flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
-                    <Bot className="w-6 h-6" />
+                <p className="text-xs text-muted-foreground leading-relaxed mb-5">
+                  Conecte modelos de linguagem do OpenRouter, Google Gemini ou APIs Pagas (OpenAI GPT-4o, Claude, DeepSeek) para gerar e reestruturar Landing Pages com autonomia total.
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 pt-4 border-t border-border">
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Provedor Ativo</div>
+                    <div className="text-xs font-bold text-foreground truncate mt-0.5">{getProviderName()}</div>
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-display text-lg font-bold text-foreground">LANAI — Agente de IA</h3>
-                      <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        {isAIConfigured ? "Ativo" : "Pendente"}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">Criador Autônomo de Landing Pages & LLMs</p>
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Modelo em Uso</div>
+                    <div className="text-xs font-bold text-foreground truncate mt-0.5">{aiConfig.modelName || aiConfig.modelId}</div>
                   </div>
                 </div>
-
-                <div className="h-8 w-8 rounded-full bg-muted/60 flex items-center justify-center text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-colors">
-                  <ArrowUpRight className="w-4 h-4" />
-                </div>
               </div>
 
-              <p className="text-xs text-muted-foreground leading-relaxed mb-5">
-                Conecte modelos de linguagem do OpenRouter, Google Gemini ou APIs Pagas (OpenAI GPT-4o, Claude, DeepSeek) para gerar e reestruturar Landing Pages com autonomia total.
-              </p>
-
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border/60">
-                <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
-                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Provedor Ativo</div>
-                  <div className="text-xs font-bold text-foreground truncate mt-0.5">{getProviderName()}</div>
-                </div>
-                <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
-                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Modelo em Uso</div>
-                  <div className="text-xs font-bold text-foreground truncate mt-0.5">{aiConfig.modelName || aiConfig.modelId}</div>
-                </div>
+              <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
+                <span className="text-[11px] font-bold text-primary group-hover:underline">
+                  Configurar Chaves & Modelos
+                </span>
+                <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                  {aiConfig.customModels[aiConfig.activeProvider]?.length || 0} modelos
+                </span>
               </div>
             </div>
 
-            <div className="mt-5 pt-4 border-t border-border/50 flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-primary group-hover:underline flex items-center gap-1">
-                Configurar Chaves & Modelos do LANAI
-              </span>
-              <span className="text-[10px] text-muted-foreground font-mono">
-                {aiConfig.customModels[aiConfig.activeProvider]?.length || 0} modelos
-              </span>
-            </div>
-          </div>
+            {/* Card Integração: Google Drive */}
+            <div
+              onClick={() => setActiveModal("gdrive")}
+              className="group bg-muted/25 hover:bg-muted/40 border border-border hover:border-blue-500/40 rounded-2xl p-6 transition-all cursor-pointer flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-11 w-11 rounded-2xl bg-blue-500/12 border border-blue-500/25 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                      <Cloud className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-display text-base font-bold text-foreground">Google Drive</h3>
+                        <span
+                          className={cn(
+                            "text-[10px] uppercase font-bold px-2 py-0.5 rounded-md",
+                            driveConnected
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {driveConnected ? "Conectado" : "Desconectado"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Nuvem & Backup Automático de Dados</p>
+                    </div>
+                  </div>
+                  <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-blue-500 shrink-0 transition-colors" />
+                </div>
 
-          {/* Card Integração: Google Drive */}
-          <div 
-            onClick={() => setActiveModal("gdrive")}
-            className="group relative bg-gradient-to-br from-card/90 to-card/50 hover:from-card hover:to-blue-500/5 border border-border hover:border-blue-500/50 rounded-2xl p-6 shadow-card transition-all duration-300 cursor-pointer flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-sky-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition-transform">
-                    <Cloud className="w-6 h-6" />
+                <p className="text-xs text-muted-foreground leading-relaxed mb-5">
+                  Sincronize seus dados com o Google Drive para backups em tempo real, restauração de snapshots do CRM, histórico de pipelines e relatórios em nuvem com segurança.
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 pt-4 border-t border-border">
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Status do Backup</div>
+                    <div className="text-xs font-bold text-foreground truncate mt-0.5">
+                      {driveConnected ? "Sincronização Ativa" : "Aguardando Conexão"}
+                    </div>
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-display text-lg font-bold text-foreground">Google Drive</h3>
-                      <span className={cn(
-                        "text-[10px] uppercase font-black px-2 py-0.5 rounded-full border",
-                        (driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0))
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
-                          : "bg-muted text-muted-foreground border-border"
-                      )}>
-                        {(driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0)) ? "Conectado" : "Desconectado"}
-                      </span>
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Pasta Destino</div>
+                    <div className="text-xs font-bold text-foreground truncate mt-0.5 font-mono">
+                      {driveConfig?.folderId ? driveConfig.folderId.slice(0, 10) + "..." : "Raiz Google Drive"}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">Nuvem & Backup Automático de Dados</p>
-                  </div>
-                </div>
-
-                <div className="h-8 w-8 rounded-full bg-muted/60 flex items-center justify-center text-muted-foreground group-hover:text-blue-400 group-hover:bg-blue-500/10 transition-colors">
-                  <ArrowUpRight className="w-4 h-4" />
-                </div>
-              </div>
-
-              <p className="text-xs text-muted-foreground leading-relaxed mb-5">
-                Sincronize seus dados com o Google Drive para backups em tempo real, restauração de snapshots do CRM, histórico de pipelines e relatórios em nuvem com segurança.
-              </p>
-
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border/60">
-                <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
-                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Status do Backup</div>
-                  <div className="text-xs font-bold text-foreground truncate mt-0.5">
-                    {(driveConfig?.connected || (driveConfig?.webappUrl && driveConfig.webappUrl.length > 0)) ? "Sincronização Ativa" : "Aguardando Conexão"}
-                  </div>
-                </div>
-                <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
-                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Pasta Destino</div>
-                  <div className="text-xs font-bold text-foreground truncate mt-0.5 font-mono">
-                    {driveConfig?.folderId ? driveConfig.folderId.slice(0, 10) + "..." : "Raiz Google Drive"}
                   </div>
                 </div>
               </div>
+
+              <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
+                <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 group-hover:underline">
+                  Configurar Google Drive & Backups
+                </span>
+                <span className="text-[11px] text-muted-foreground font-mono">OAuth 2.0</span>
+              </div>
             </div>
 
-            <div className="mt-5 pt-4 border-t border-border/50 flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-blue-400 group-hover:underline flex items-center gap-1">
-                Configurar Google Drive & Backups
-              </span>
-              <span className="text-[10px] text-muted-foreground font-mono">
-                OAuth 2.0
-              </span>
-            </div>
-          </div>
+            {/* Card Integração: Google Agenda */}
+            <div
+              onClick={handleToggleCalendar}
+              className="group bg-muted/25 hover:bg-muted/40 border border-border hover:border-primary/40 rounded-2xl p-6 transition-all cursor-pointer flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-11 w-11 rounded-2xl bg-primary/12 border border-primary/25 flex items-center justify-center text-primary shrink-0">
+                      <CalendarIcon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-display text-base font-bold text-foreground">Google Agenda</h3>
+                        <span
+                          className={cn(
+                            "text-[10px] uppercase font-bold px-2 py-0.5 rounded-md",
+                            calendarConn.connected
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {calendarConn.connected ? "Conectado" : "Desconectado"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Agendamento & Google Meet Automático</p>
+                    </div>
+                  </div>
+                  <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary shrink-0 transition-colors" />
+                </div>
 
-          {/* Card Integração: Google Agenda */}
-          <div 
-            onClick={handleToggleCalendar}
-            className="group relative bg-gradient-to-br from-card/90 to-card/50 hover:from-card hover:to-primary/5 border border-border hover:border-primary/50 rounded-2xl p-6 shadow-card transition-all duration-300 cursor-pointer flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/20 to-amber-500/10 border border-primary/30 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
-                    <CalendarIcon className="w-6 h-6" />
+                <p className="text-xs text-muted-foreground leading-relaxed mb-5">
+                  Crie e sincronize reuniões comerciais direto no Google Calendar dos clientes e vendedores com link de vídeo do Google Meet gerado automaticamente.
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 pt-4 border-t border-border">
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Status da Agenda</div>
+                    <div className="text-xs font-bold text-foreground truncate mt-0.5">
+                      {calendarConn.connected ? "OAuth Ativo" : "Não Conectado"}
+                    </div>
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-display text-lg font-bold text-foreground">Google Agenda</h3>
-                      <span className={cn(
-                        "text-[10px] uppercase font-black px-2 py-0.5 rounded-full border",
-                        calendarConn.connected 
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
-                          : "bg-muted text-muted-foreground border-border"
-                      )}>
-                        {calendarConn.connected ? "Conectado" : "Desconectado"}
-                      </span>
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Conta Conectada</div>
+                    <div className="text-xs font-bold text-foreground truncate mt-0.5 font-mono">
+                      {calendarConn.connected ? calendarConn.email : "Nenhuma"}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">Agendamento & Google Meet Automático</p>
-                  </div>
-                </div>
-
-                <div className="h-8 w-8 rounded-full bg-muted/60 flex items-center justify-center text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-colors">
-                  <ArrowUpRight className="w-4 h-4" />
-                </div>
-              </div>
-
-              <p className="text-xs text-muted-foreground leading-relaxed mb-5">
-                Crie e sincronize reuniões comerciais direto no Google Calendar dos clientes e vendedores com link de vídeo do Google Meet gerado automaticamente.
-              </p>
-
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border/60">
-                <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
-                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Status da Agenda</div>
-                  <div className="text-xs font-bold text-foreground truncate mt-0.5">
-                    {calendarConn.connected ? "OAuth Ativo" : "Não Conectado"}
-                  </div>
-                </div>
-                <div className="bg-background/60 border border-border/40 rounded-xl p-2.5">
-                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Conta Conectada</div>
-                  <div className="text-xs font-bold text-foreground truncate mt-0.5 font-mono">
-                    {calendarConn.connected ? calendarConn.email : "Nenhuma"}
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="mt-5 pt-4 border-t border-border/50 flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-primary group-hover:underline flex items-center gap-1">
-                {isConnectingCalendar ? "Conectando..." : calendarConn.connected ? "Gerenciar / Desconectar Agenda" : "Conectar Google Agenda com OAuth"}
-              </span>
-              <span className="text-[10px] text-muted-foreground font-mono">
-                Calendar API
-              </span>
+              <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
+                <span className="text-[11px] font-bold text-primary group-hover:underline">
+                  {isConnectingCalendar
+                    ? "Conectando..."
+                    : calendarConn.connected
+                    ? "Gerenciar / Desconectar Agenda"
+                    : "Conectar Google Agenda com OAuth"}
+                </span>
+                <span className="text-[11px] text-muted-foreground font-mono">Calendar API</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* SEÇÃO MÓDULOS E OPERAÇÃO */}
-      <div className="space-y-4">
-        <div>
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Estrutura & Regras</div>
-          <h2 className="font-display text-xl font-bold mt-0.5">Módulos & Operação</h2>
-          <p className="text-xs text-muted-foreground">Controle funis, visibilidade por cargo, tempos de SLA e central de dados.</p>
-        </div>
+      {activeSection === "kanban" && (
+        <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border">
+            <div>
+              <h3 className="text-base font-bold text-foreground">Funis e Etapas Configurados</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Clique em qualquer pipeline ou em &ldquo;Gerenciar Pipelines&rdquo; para adicionar, renomear ou reordenar etapas.
+              </p>
+            </div>
+            <span className="text-xs font-mono tabular-nums text-muted-foreground">
+              {pipelines.length} {pipelines.length === 1 ? "pipeline ativo" : "pipelines ativos"}
+            </span>
+          </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-12">
-          <ConfigCard 
-            icon={Database} 
-            title="Centro de Dados" 
-            desc="Gestão completa de backups, exportação modular e portabilidade de dados." 
-            onClick={() => navigate({ to: "/app/settings/data" })} 
-          />
-          <ConfigCard 
-            icon={LayoutGrid} 
-            title="Pipelines & Kanban" 
-            desc="Crie diferentes tipos de funis (Vendas, CS, Operação)." 
-            onClick={() => setActiveModal("pipelines")} 
-          />
-          <ConfigCard 
-            icon={Eye} 
-            title="Visibilidade & Módulos" 
-            desc="Configure manualmente quais módulos do sistema e etapas Kanban cada cargo pode ver e usar." 
-            onClick={() => setActiveModal("permissions")} 
-          />
-          <ConfigCard 
-            icon={Shield} 
-            title="SLA & Alertas" 
-            desc="Defina os tempos de resposta para leads em cada nível." 
-            onClick={() => setActiveModal("sla")} 
-          />
+          <div className="grid md:grid-cols-2 gap-4">
+            {pipelines.map((pipe) => (
+              <button
+                key={pipe.id}
+                type="button"
+                onClick={() => setActiveModal("pipelines")}
+                className="text-left p-5 rounded-2xl bg-muted/25 border border-border hover:border-primary/40 hover:bg-muted/40 transition-all cursor-pointer space-y-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-display font-bold text-sm text-foreground">{pipe.name}</span>
+                  <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
+                    {pipe.stages.length} etapas
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {pipe.stages.map((st, idx) => (
+                    <span
+                      key={`${pipe.id}-${idx}`}
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-background border border-border text-muted-foreground font-medium"
+                    >
+                      {st.name}
+                    </span>
+                  ))}
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {activeSection === "permissoes" && (
+        <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border">
+            <div>
+              <h3 className="text-base font-bold text-foreground">Matriz de Visibilidade por Cargo</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Controle quais módulos laterais, etapas do Kanban e telas de Performance cada cargo acessa.
+              </p>
+            </div>
+            <span className="text-xs font-mono tabular-nums text-muted-foreground">
+              {ROLES.length} cargos · {SYSTEM_MODULES.length} módulos
+            </span>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {ROLES.map((role) => {
+              const mods = (roleModulePermissions?.[role] || DEFAULT_ROLE_MODULES[role] || DEFAULT_ROLE_MODULES["Closer"] || []).length;
+              const stages = (rolePermissions?.[role] || []).length;
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => setActiveModal("permissions")}
+                  className="text-left p-4 rounded-2xl bg-muted/25 border border-border hover:border-primary/40 hover:bg-muted/40 transition-all cursor-pointer flex items-center justify-between gap-3"
+                >
+                  <span className="text-sm font-bold text-foreground truncate">{role}</span>
+                  <span className="text-xs font-mono tabular-nums text-muted-foreground shrink-0">
+                    {mods} mód · {stages} etapas
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {activeSection === "sla" && (
+        <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border">
+            <div>
+              <h3 className="text-base font-bold text-foreground">Limites de Tempo de Resposta (SLA)</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Define quando os leads disparam avisos visuais de alerta, crítico ou vencido.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="p-5 rounded-2xl bg-muted/30 border border-border space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">Alerta</div>
+              <div className="text-2xl font-display font-extrabold tabular-nums text-foreground">{slaThresholds.alerta}h</div>
+              <p className="text-xs text-muted-foreground">Primeiro aviso de atendimento pendente</p>
+            </div>
+            <div className="p-5 rounded-2xl bg-muted/30 border border-border space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wider font-bold text-orange-600 dark:text-orange-400">Crítico</div>
+              <div className="text-2xl font-display font-extrabold tabular-nums text-foreground">{slaThresholds.critico}h</div>
+              <p className="text-xs text-muted-foreground">Prioridade máxima para abordagem</p>
+            </div>
+            <div className="p-5 rounded-2xl bg-muted/30 border border-border space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wider font-bold text-destructive">Vencido</div>
+              <div className="text-2xl font-display font-extrabold tabular-nums text-foreground">{slaThresholds.vencido}h</div>
+              <p className="text-xs text-muted-foreground">Lead fora do prazo configurado</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSection === "dados" && (
+        <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-xl">
+              <h3 className="text-base font-bold text-foreground">Portabilidade, Backups e Exportação Modular</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Exporte todo o banco de dados em JSON, baixe módulos individuais em CSV ou JSON e restaure backups com segurança sem perder leads.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/app/settings/data" })}
+              className="px-6 py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-xs uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start md:self-auto"
+            >
+              <Database className="h-4 w-4" />
+              Acessar Centro de Dados
+              <ArrowUpRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {activeModal === "pipelines" && (
         <PipelineManagerModal pipelines={pipelines} onAdd={addPipeline} onUpdate={updatePipeline} onDelete={deletePipeline} onClose={() => setActiveModal(null)} />
@@ -592,18 +1041,6 @@ function SettingsIndexPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-function ConfigCard({ icon: Icon, title, desc, onClick }: { icon: any; title: string; desc: string; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="text-left bg-gradient-surface border border-border rounded-2xl p-5 shadow-card hover:border-primary/40 hover:shadow-elegant transition-all group">
-      <div className="h-11 w-11 rounded-xl bg-accent border border-border grid place-items-center group-hover:bg-primary/10 transition-colors">
-        <Icon className="h-5 w-5 text-primary" />
-      </div>
-      <div className="font-display font-bold mt-4">{title}</div>
-      <div className="text-xs text-muted-foreground mt-1">{desc}</div>
-    </button>
   );
 }
 
