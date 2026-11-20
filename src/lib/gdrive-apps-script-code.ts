@@ -154,15 +154,20 @@ function doGet(e) {
 
       var dbPublic = readDatabaseRootObject(folder, forceNoCacheLp);
       var foundFromDb = findLandingPageInDb(dbPublic, queryKey);
+      var foundFromDriveFile = readLpFileFromDrive(folder, queryKey, (foundFromDb && foundFromDb.id) || "");
       var foundFromSheet = null;
 
-      if (forceSheetsDirect || !foundFromDb || !foundFromDb.hero || (!foundFromDb.hero.model && !foundFromDb.heroModel)) {
+      if (
+        forceSheetsDirect ||
+        (!foundFromDb && !foundFromDriveFile) ||
+        (foundFromDb && (!foundFromDb.hero || (!foundFromDb.hero.model && !foundFromDb.heroModel)))
+      ) {
         var ssPublic = getOrCreateSpreadsheet(folder);
         var sheetLps = readLandingPagesFromSheet(ssPublic);
         foundFromSheet = findLandingPageInList(sheetLps, queryKey);
       }
 
-      var foundLp = mergeSingleLandingPageCandidate(foundFromSheet, foundFromDb);
+      var foundLp = mergeSingleLandingPageCandidate(foundFromDriveFile, mergeSingleLandingPageCandidate(foundFromSheet, foundFromDb));
 
       if (!foundLp) {
         return jsonResponse({
@@ -181,7 +186,7 @@ function doGet(e) {
 
       return jsonResponse({
         status: "success",
-        source: foundFromSheet ? "sheets" : "drive_json",
+        source: foundFromDriveFile ? "drive_lp_file" : (foundFromSheet ? "sheets" : "drive_json"),
         landingPage: foundLp,
         lp: foundLp,
         page: foundLp,
@@ -345,13 +350,15 @@ function doPost(e) {
       var savedLp = normalizeLandingPageModel(rawIncomingLp);
       var saveIsoNow = new Date().toISOString();
       if (!savedLp.id) savedLp.id = "lp_" + new Date().getTime();
-      savedLp.updatedAt = savedLp.updatedAt || savedLp.updated_at || saveIsoNow;
-      savedLp.updated_at = savedLp.updatedAt;
+      savedLp.updatedAt = saveIsoNow;
+      savedLp.updated_at = saveIsoNow;
       if (!savedLp.createdAt && !savedLp.created_at) {
         savedLp.createdAt = saveIsoNow;
         savedLp.created_at = saveIsoNow;
       }
 
+      // Grava arquivo JSON individual 100% lossless no Drive (nunca trunca mesmo com fotos em Base64)
+      writeLpFileToDrive(folder, savedLp);
       upsertSingleLandingPageInSheet(spreadsheet, savedLp);
 
       var dbSaveLp = readDatabaseRootRaw(folder) || {
@@ -369,7 +376,9 @@ function doPost(e) {
         return p && (p.id === savedLp.id || (savedLp.slug && p.slug === savedLp.slug));
       });
       if (existingLpIdx !== -1) {
-        dbSaveLp.landingPages[existingLpIdx] = mergeSingleLandingPageCandidate(savedLp, dbSaveLp.landingPages[existingLpIdx]);
+        var existingItem = dbSaveLp.landingPages[existingLpIdx];
+        invalidateLpCache(existingItem);
+        dbSaveLp.landingPages[existingLpIdx] = mergeSingleLandingPageCandidate(savedLp, existingItem);
         savedLp = dbSaveLp.landingPages[existingLpIdx];
       } else {
         dbSaveLp.landingPages.unshift(savedLp);
@@ -1088,6 +1097,68 @@ function writeDatabaseRootObject(folder, dbObj) {
   return serialized;
 }
 
+function getSafeLpFileName(lpId) {
+  var safe = String(lpId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return "LP_" + safe + ".json";
+}
+
+function writeLpFileToDrive(folder, lpObj) {
+  try {
+    if (!folder || !lpObj || !lpObj.id) return;
+    var lpFolder = getOrCreateFolder("LandingPages_JSON", folder);
+    var fileName = getSafeLpFileName(lpObj.id);
+    var serialized = JSON.stringify(lpObj);
+    var existing = lpFolder.getFilesByName(fileName);
+    if (existing.hasNext()) {
+      var f = existing.next();
+      f.setContent(serialized);
+      while (existing.hasNext()) {
+        try { existing.next().setTrashed(true); } catch (eTr) {}
+      }
+    } else {
+      lpFolder.createFile(fileName, serialized, MimeType.PLAIN_TEXT);
+    }
+  } catch (eWr) {}
+}
+
+function readLpFileFromDrive(folder, queryKey, resolvedId) {
+  try {
+    if (!folder) return null;
+    var folders = folder.getFoldersByName("LandingPages_JSON");
+    if (!folders.hasNext()) return null;
+    var lpFolder = folders.next();
+
+    var directId = resolvedId || queryKey;
+    if (directId) {
+      var directFiles = lpFolder.getFilesByName(getSafeLpFileName(directId));
+      if (directFiles.hasNext()) {
+        var txt = directFiles.next().getBlob().getDataAsString("UTF-8");
+        if (txt) return normalizeLandingPageModel(JSON.parse(txt));
+      }
+    }
+
+    var qLow = String(queryKey || "").trim().toLowerCase();
+    var qSlug = normalizeLookupSlug(queryKey);
+    var it = lpFolder.getFiles();
+    while (it.hasNext()) {
+      var file = it.next();
+      try {
+        var raw = file.getBlob().getDataAsString("UTF-8");
+        if (!raw) continue;
+        var parsed = JSON.parse(raw);
+        if (
+          (parsed.id && String(parsed.id).toLowerCase() === qLow) ||
+          (parsed.slug && (String(parsed.slug).toLowerCase() === qLow || normalizeLookupSlug(parsed.slug) === qSlug)) ||
+          (parsed.previewToken && String(parsed.previewToken).toLowerCase() === qLow)
+        ) {
+          return normalizeLandingPageModel(parsed);
+        }
+      } catch (eF) {}
+    }
+  } catch (eRd) {}
+  return null;
+}
+
 function normalizeLookupSlug(val) {
   return String(val || "")
     .toLowerCase()
@@ -1133,7 +1204,7 @@ function normalizeLandingPageModel(lp) {
   if (!lp || typeof lp !== "object") return lp;
   var model = (lp.hero && lp.hero.model) || lp.heroModel || lp.hero_model || "split_image";
   var canonicalUpdated = lp.updatedAt || lp.updated_at || "";
-  var out = Object.assign({}, lp, { heroModel: model });
+  var out = Object.assign({}, lp, { heroModel: model, hero_model: model });
   if (canonicalUpdated) {
     out.updatedAt = canonicalUpdated;
     out.updated_at = canonicalUpdated;
@@ -1219,6 +1290,7 @@ function readLandingPagesFromSheet(ss) {
     var colUpdated = headersNorm.indexOf("ultima atualizacao");
     var colJson1 = headersNorm.indexOf("config json");
     var colJson2 = headersNorm.indexOf("config json (cont.)");
+    var colJson3 = headersNorm.indexOf("config json (cont. 2)");
 
     for (var rIdx = 1; rIdx < sValues.length; rIdx++) {
       var row = sValues[rIdx];
@@ -1227,6 +1299,7 @@ function readLandingPagesFromSheet(ss) {
       var jsonStr = "";
       if (colJson1 !== -1 && row[colJson1]) jsonStr += String(row[colJson1]);
       if (colJson2 !== -1 && row[colJson2]) jsonStr += String(row[colJson2]);
+      if (colJson3 !== -1 && row[colJson3]) jsonStr += String(row[colJson3]);
 
       var parsedJson = {};
       if (jsonStr && jsonStr.trim().charAt(0) === "{") {
@@ -1599,44 +1672,11 @@ function syncDataToGoogleSheets(ss, data) {
       "ID", "Nome / Título", "Slug", "Status", "Visitas", "Leads Capturados",
       "Taxa Conv (%)", "Tipo", "Nicho / Oferta", "Modelo Hero", "Tema",
       "Cor Destaque", "Survey ID", "URL Externa", "Data Criação",
-      "Última Atualização", "Config JSON", "Config JSON (Cont.)"
+      "Última Atualização", "Config JSON", "Config JSON (Cont.)", "Config JSON (Cont. 2)"
     ];
     var sheetLP = getOrCreateSheet(ss, "Landing_Pages", lpHeaders);
     var rowsLP = data.landingPages.map(function(rawLp) {
-      var lp = normalizeLandingPageModel(rawLp);
-      var visits = Number(lp.visits || lp.viewsCount || 0);
-      var leadsCount = Number(lp.leads || lp.leads_count || 0);
-      var conv = visits > 0 ? Math.round((leadsCount / visits) * 100) : 0;
-      var heroModel = (lp.hero && lp.hero.model) || lp.heroModel || lp.hero_model || "split_image";
-      var fullJson = "";
-      try {
-        fullJson = JSON.stringify(lp);
-      } catch (eSer) {
-        fullJson = "";
-      }
-      var part1 = fullJson.length > 45000 ? fullJson.substring(0, 45000) : fullJson;
-      var part2 = fullJson.length > 45000 ? fullJson.substring(45000, 90000) : "";
-
-      return [
-        lp.id || "",
-        lp.title || lp.name || "",
-        lp.slug || "",
-        lp.status || "Ativa",
-        visits,
-        leadsCount,
-        conv + "%",
-        lp.type || "COMET CRO",
-        lp.sector || lp.niche || "Geral",
-        heroModel,
-        lp.theme || "dark",
-        lp.accentColor || "purple",
-        lp.surveyId || "",
-        lp.externalUrl || "",
-        lp.created_at || lp.createdAt || "",
-        lp.updated_at || lp.updatedAt || "",
-        part1,
-        part2
-      ];
+      return buildLpRowValues(rawLp);
     });
     writeRowsToSheet(sheetLP, rowsLP);
   }
@@ -1756,6 +1796,7 @@ function buildLpRowValues(rawLp) {
   }
   var part1 = fullJson.length > 45000 ? fullJson.substring(0, 45000) : fullJson;
   var part2 = fullJson.length > 45000 ? fullJson.substring(45000, 90000) : "";
+  var part3 = fullJson.length > 90000 ? fullJson.substring(90000, 135000) : "";
 
   return [
     lp.id || "",
@@ -1775,7 +1816,8 @@ function buildLpRowValues(rawLp) {
     lp.created_at || lp.createdAt || "",
     lp.updated_at || lp.updatedAt || "",
     part1,
-    part2
+    part2,
+    part3
   ];
 }
 
@@ -1784,7 +1826,7 @@ function upsertSingleLandingPageInSheet(ss, rawLp) {
     "ID", "Nome / Título", "Slug", "Status", "Visitas", "Leads Capturados",
     "Taxa Conv (%)", "Tipo", "Nicho / Oferta", "Modelo Hero", "Tema",
     "Cor Destaque", "Survey ID", "URL Externa", "Data Criação",
-    "Última Atualização", "Config JSON", "Config JSON (Cont.)"
+    "Última Atualização", "Config JSON", "Config JSON (Cont.)", "Config JSON (Cont. 2)"
   ];
   var sheetLP = getOrCreateSheet(ss, "Landing_Pages", lpHeaders);
   var rowValues = buildLpRowValues(rawLp);

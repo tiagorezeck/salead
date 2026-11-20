@@ -192,15 +192,52 @@ export const ImagePickerModal: React.FC<ImagePickerModalProps> = ({
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setSelectedUrl(reader.result);
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      if (!dataUrl) return;
+      if (dataUrl.length <= 55000 || !file.type.startsWith("image/") || file.type === "image/svg+xml") {
+        setSelectedUrl(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = targetType === "avatar" ? 480 : 1280;
+          let w = img.naturalWidth || img.width;
+          let h = img.naturalHeight || img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w >= h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const compressed = canvas.toDataURL("image/webp", 0.78);
+            const fallbackJpeg = compressed.startsWith("data:image/webp")
+              ? compressed
+              : canvas.toDataURL("image/jpeg", 0.78);
+            setSelectedUrl(fallbackJpeg.length < dataUrl.length ? fallbackJpeg : dataUrl);
+          } else {
+            setSelectedUrl(dataUrl);
+          }
+        } catch {
+          setSelectedUrl(dataUrl);
         }
       };
-      reader.readAsDataURL(file);
-    }
+      img.onerror = () => setSelectedUrl(dataUrl);
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleApply = () => {

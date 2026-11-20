@@ -3841,6 +3841,7 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                             if (onOpenImagePicker) {
                               onOpenImagePicker({
                                 type: "hero",
+                                itemId: "slideshow_add",
                                 currentUrl: currentImage,
                                 title: "Adicionar Imagem ao Slideshow",
                               });

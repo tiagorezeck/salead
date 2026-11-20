@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { LandingPage } from "../types/landingPage";
 import { saveLandingPageToStorage, syncPageWithServerPreview } from "../utils/storage";
+import { cloudStore } from "@/services/cloudStorageService";
 import {
   X,
   ExternalLink,
@@ -56,6 +57,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
         hero_model: activeHeroModel,
         hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
       };
+      cloudStore.saveLandingPageOnly(normalizedPage, { immediate: true }).catch(() => {});
       syncPageWithServerPreview(normalizedPage).catch(() => {});
     }
   }, [isOpen, page?.id, versionParam, activeHeroModel]);
@@ -101,8 +103,17 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
       updated_at: (page as any).updated_at || (page as any).updatedAt || nowIso,
     };
     saveLandingPageToStorage(pageToSync, { immediate: true });
-    await syncPageWithServerPreview(pageToSync).catch(() => {});
-    window.open(previewUrl, "_blank");
+    await Promise.allSettled([
+      cloudStore.saveLandingPageOnly(pageToSync, { immediate: true }),
+      syncPageWithServerPreview(pageToSync),
+    ]);
+    const a = document.createElement("a");
+    a.href = previewUrl;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   // Generate a brand-new unique test link

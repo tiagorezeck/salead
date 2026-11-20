@@ -31,21 +31,41 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
   
   const [copied, setCheckCopied] = useState(false);
 
-  // Identifica e sincroniza o objeto real e editado da LP a partir do cloudStore
+  const pickLpTs = (item: any) =>
+    Math.max(
+      new Date(item?.updatedAt || 0).getTime() || 0,
+      new Date(item?.updated_at || 0).getTime() || 0,
+      new Date(item?.createdAt || 0).getTime() || 0
+    );
+
+  // Identifica e sincroniza o objeto mais recente da LP (comparando timestamp do cloudStore com a prop)
   const resolvedLP = useMemo(() => {
-    if (lp) return lp;
+    let best: any = lp || null;
     if (typeof window !== "undefined") {
       try {
-        const active = cloudStore.getState().activePreviewPage;
-        if (active && (active.id === lpId || (slug && active.slug === slug) || active.slug === lpId)) {
-          return active;
-        }
+        const db = cloudStore.getState();
+        const candidates: any[] = [];
+        if (db.activePreviewPage) candidates.push(db.activePreviewPage);
+        if (Array.isArray(db.landingPages)) candidates.push(...db.landingPages);
         const saved = loadSavedLandingPages();
-        const found = saved.find((p: any) => p.id === lpId || (slug && p.slug === slug) || p.slug === lpId);
-        if (found) return found;
+        if (Array.isArray(saved)) candidates.push(...saved);
+
+        for (const cand of candidates) {
+          if (!cand) continue;
+          const isMatch =
+            cand.id === lpId ||
+            cand.originalId === lpId ||
+            (slug && cand.slug === slug) ||
+            cand.slug === lpId ||
+            (lp?.id && cand.id === lp.id);
+          if (!isMatch) continue;
+          if (!best || pickLpTs(cand) >= pickLpTs(best)) {
+            best = cand;
+          }
+        }
       } catch {}
     }
-    return null;
+    return best;
   }, [lp, lpId, slug]);
 
   const isExt = Boolean(isExternal || lp?.isExternal || resolvedLP?.isExternal || externalUrl || lp?.externalUrl || resolvedLP?.externalUrl);
@@ -53,17 +73,7 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
 
   // Garante que a versão mais recente da LP (com seu Modelo Hero) esteja salva na nuvem ao abrir o modal
   useEffect(() => {
-    const pickTs = (item: any) =>
-      Math.max(
-        new Date(item?.updatedAt || 0).getTime() || 0,
-        new Date(item?.updated_at || 0).getTime() || 0
-      );
-    const target =
-      resolvedLP && lp
-        ? pickTs(resolvedLP) >= pickTs(lp)
-          ? resolvedLP
-          : lp
-        : resolvedLP || lp;
+    const target = resolvedLP || lp;
     if (target) {
       try {
         const model = target.hero?.model || target.heroModel || target.hero_model || "split_image";
@@ -74,6 +84,7 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
           hero: target.hero ? { ...target.hero, model } : { model },
         };
         cloudStore.saveLandingPageOnly(normalizedTarget, { immediate: true }).catch(() => {});
+        syncPageWithServerPreview(normalizedTarget).catch(() => {});
       } catch {}
     }
   }, [resolvedLP, lp]);
@@ -304,13 +315,20 @@ export function SmartLinkModal({ lpId, lpName, slug, lp, isExternal, externalUrl
                           hero_model: model,
                           hero: target.hero ? { ...target.hero, model } : { model },
                         };
+                        saveLandingPageToStorage(normalizedTarget, { immediate: true });
                         await Promise.allSettled([
                           cloudStore.saveLandingPageOnly(normalizedTarget, { immediate: true }),
                           syncPageWithServerPreview(normalizedTarget),
                         ]);
                       } catch {}
                     }
-                    window.open(generatedUrl, "_blank");
+                    const a = document.createElement("a");
+                    a.href = generatedUrl;
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
                   }}
                   className="px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 bg-muted hover:bg-muted/80 text-foreground border border-border transition-all cursor-pointer shadow-sm shrink-0"
                   title="Abrir e testar no navegador em nova aba"

@@ -553,5 +553,24 @@
     "hero": {
       "model": "split_image"
     }
+  },
+  {
+    "id": "313a2abf-2f44-4a5b-97a4-31e9610dec15",
+    "title": "Aceleração CRO • Consultoria Comercial & Processos de Vendas",
+    "name": "Aceleração CRO • Consultoria Comercial & Processos de Vendas",
+    "slug": "acelera-o-cro-consultoria-comercial-processos-de-vendas",
+    "status": "Ativa",
+    "visits": 2,
+    "leads": 0,
+    "conv": 0,
+    "type": "Gerada por IA",
+    "sector": "Consultoria Comercial & Processos de Vendas",
+    "created_at": "2026-11-19T21:30:51.283Z",
+    "updated_at": "2026-11-19T21:36:26.046Z",
+    "heroModel": "split_image",
+    "hero": {
+      "model": "split_image"
+    },
+    "updatedAt": "2026-11-19T21:36:26.046Z"
   }
 ]

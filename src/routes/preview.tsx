@@ -189,7 +189,7 @@ export function PreviewPage() {
               })
               .catch(() => {}),
           ]),
-          new Promise((resolve) => setTimeout(resolve, 4500)),
+          new Promise((resolve) => setTimeout(resolve, 9000)),
         ]);
       } catch {}
 
@@ -203,7 +203,7 @@ export function PreviewPage() {
         try {
           const booted: any = await Promise.race([
             cloudStore.bootstrap(),
-            new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+            new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
           ]);
           const bootedMatch = booted
             ? (booted.activePreviewPage && findMatchingPage([booted.activePreviewPage], targetId)) ||

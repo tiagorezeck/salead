@@ -1124,17 +1124,48 @@ function applyHeuristicModifications(prompt: string, currentLP: any) {
     }
   }
 
-  // 6. Video / VSL
-  if (p.includes("vídeo") || p.includes("video") || p.includes("vsl")) {
-    lp.hero.mediaType = "video";
-    lp.hero.videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
-    lp.sections = lp.sections.map((sec: any) => {
-      if (sec.type === "hero") {
-        return { ...sec, mediaType: "video", layoutVariant: "full-vsl", videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+  // 6. Hero Model & Video / VSL / Slideshow
+  const heroModelRules: Array<{ regex: RegExp; model: string; label: string }> = [
+    { regex: /\bmodelo\s*14\b|\bmodo\s*14\b|survey_hero_dark|pesquisa.*escur/, model: "survey_hero_dark", label: "Modelo 14 (Pesquisa Hero Escuro)" },
+    { regex: /\bmodelo\s*13\b|\bmodo\s*13\b|survey_hero_light|pesquisa.*clar/, model: "survey_hero_light", label: "Modelo 13 (Pesquisa Hero Claro)" },
+    { regex: /\bmodelo\s*12\b|\bmodo\s*12\b|portfolio_dark_neon|portf[óo]lio.*neon/, model: "portfolio_dark_neon", label: "Modelo 12 (Portfólio Dark Neon)" },
+    { regex: /\bmodelo\s*11\b|\bmodo\s*11\b|kids_school_doodle|infantil|escolar|doodle/, model: "kids_school_doodle", label: "Modelo 11 (Escolar / Criativo)" },
+    { regex: /\bmodelo\s*10\b|\bmodo\s*10\b|fullscreen_slideshow|slideshow|tela\s*cheia|slides\b/, model: "fullscreen_slideshow", label: "Modelo 10 (Slideshow Tela Cheia)" },
+    { regex: /\bmodelo\s*9\b|\bmodo\s*9\b|white_pro|cl[íi]nica\s*clean/, model: "white_pro", label: "Modelo 9 (White Pro Clean)" },
+    { regex: /\bmodelo\s*8\b|\bmodo\s*8\b|urgency_counter|urg[êe]ncia|escassez|contador/, model: "urgency_counter", label: "Modelo 8 (Urgência & Contador)" },
+    { regex: /\bmodelo\s*7\b|\bmodo\s*7\b|minimal_glow|minimalista/, model: "minimal_glow", label: "Modelo 7 (Minimal Glow)" },
+    { regex: /\bmodelo\s*6\b|\bmodo\s*6\b|editorial_ebook|e-?book|editorial/, model: "editorial_ebook", label: "Modelo 6 (Editorial / E-book)" },
+    { regex: /\bmodelo\s*5\b|\bmodo\s*5\b|b2b_metrics|m[ée]tricas\s*b2b/, model: "b2b_metrics", label: "Modelo 5 (B2B Métricas)" },
+    { regex: /\bmodelo\s*4\b|\bmodo\s*4\b|split_lead_form|formul[áa]rio\s*no\s*topo/, model: "split_lead_form", label: "Modelo 4 (Captura no Topo)" },
+    { regex: /\bmodelo\s*3\b|\bmodo\s*3\b|centered_showcase|vitrine/, model: "centered_showcase", label: "Modelo 3 (Vitrine Centralizada)" },
+    { regex: /\bmodelo\s*2\b|\bmodo\s*2\b|split_video|\bvsl\b|\bv[íi]deo\b/, model: "split_video", label: "Modelo 2 (Vídeo VSL)" },
+    { regex: /\bmodelo\s*1\b|\bmodo\s*1\b|split_image/, model: "split_image", label: "Modelo 1 (Split com Foto)" },
+  ];
+
+  const matchedHeroRule = heroModelRules.find((r) => r.regex.test(p));
+  if (matchedHeroRule) {
+    lp.hero = lp.hero || {};
+    lp.hero.model = matchedHeroRule.model;
+    lp.heroModel = matchedHeroRule.model;
+    lp.hero_model = matchedHeroRule.model;
+    if (matchedHeroRule.model === "fullscreen_slideshow") {
+      if (!Array.isArray(lp.hero.slideshowImages) || lp.hero.slideshowImages.length === 0) {
+        lp.hero.slideshowImages = [
+          lp.hero.imageUrl || "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1600&q=80",
+          "https://images.unsplash.com/photo-1515187029135-18ee286d815b?auto=format&fit=crop&w=1600&q=80",
+          "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1600&q=80",
+        ];
       }
-      return sec;
-    });
-    changesDone.push("Hero transformado em VSL com vídeo de alto impacto");
+      lp.hero.slideshowIntervalSeconds = lp.hero.slideshowIntervalSeconds || 3;
+      lp.hero.slideshowOverlayOpacity = lp.hero.slideshowOverlayOpacity ?? 50;
+    } else if (matchedHeroRule.model === "split_video") {
+      lp.hero.mediaType = "video";
+      if (!lp.hero.videoUrl) lp.hero.videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+      lp.sections = (lp.sections || []).map((sec: any) =>
+        sec.type === "hero" ? { ...sec, mediaType: "video", layoutVariant: "full-vsl", videoUrl: lp.hero.videoUrl } : sec
+      );
+    }
+    changesDone.push(`Layout do Hero alterado para ${matchedHeroRule.label}`);
   }
 
   // Build user message response summary

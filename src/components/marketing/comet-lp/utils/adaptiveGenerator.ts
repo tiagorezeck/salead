@@ -1,6 +1,6 @@
 // Adaptive Heuristic CRO Landing Page Generator
 // Portable for both client-side and server-side zero-downtime execution
-import { applyThematicImagesToPage } from "./imageResolver";
+import { applyThematicImagesToPage, detectHeroModelFromPrompt } from "./imageResolver";
 
 export interface AdaptiveLandingPageParams {
   prompt?: string;
@@ -71,9 +71,12 @@ export function generateAdaptiveLandingPage(params: AdaptiveLandingPageParams) {
   }
 
   // 4. Intelligent Hero Model Selection
+  const promptHeroModel = detectHeroModelFromPrompt(`${rawPrompt} ${niche}`);
   let chosenHeroModel: string = "split_image";
   if (params.heroModel && params.heroModel !== "auto") {
     chosenHeroModel = params.heroModel;
+  } else if (promptHeroModel) {
+    chosenHeroModel = promptHeroModel;
   } else {
     if (isHealthOrClinic) {
       chosenHeroModel = chosenTheme === "light" ? "white_pro" : "split_image";
@@ -115,6 +118,8 @@ export function generateAdaptiveLandingPage(params: AdaptiveLandingPageParams) {
     targetAudience: audience,
     accentColor: chosenColor,
     theme: chosenTheme,
+    heroModel: chosenHeroModel,
+    hero_model: chosenHeroModel,
     sectionOrder: chosenSectionOrder,
     hero: {
       model: chosenHeroModel,
@@ -122,7 +127,7 @@ export function generateAdaptiveLandingPage(params: AdaptiveLandingPageParams) {
       headline: `Multiplique seus Resultados com a Metodologia Definitiva para ${niche}`,
       subheadline: `Elimine a estagnação e implemente um ecossistema comprovado para atrair clientes de alto valor em ${city}.`,
       mediaType: isVideoModel ? "video" : "image",
-      videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoUrl: isVideoModel ? "https://www.youtube.com/embed/dQw4w9WgXcQ" : "",
       videoThumbnail: "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
       imageUrl: "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
       ctaText: "QUERO MEU DIAGNÓSTICO GRATUITO AGORA",

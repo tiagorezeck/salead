@@ -998,7 +998,7 @@ class CloudStorageService {
         if (typeof window === "undefined") return null;
         try {
           const controller = new AbortController();
-          const t = setTimeout(() => controller.abort(), 4500);
+          const t = setTimeout(() => controller.abort(), 9000);
           const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
             cache: "no-store",
             signal: controller.signal,
@@ -1036,8 +1036,8 @@ class CloudStorageService {
       if (cloudLp && apiLp) {
         const cTs = getLpTimestampMs(cloudLp);
         const aTs = getLpTimestampMs(apiLp);
-        const cModel = cloudLp.hero?.model || cloudLp.heroModel || "split_image";
-        const aModel = apiLp.hero?.model || apiLp.heroModel || "split_image";
+        const cModel = (cloudLp as any).hero?.model || (cloudLp as any).heroModel || "split_image";
+        const aModel = (apiLp as any).hero?.model || (apiLp as any).heroModel || "split_image";
         if (aTs > cTs || (aTs === cTs && aModel !== "split_image" && cModel === "split_image")) {
           chosen = apiLp;
         } else {
@@ -1050,8 +1050,8 @@ class CloudStorageService {
       if (chosen) {
         const ramTime = getLpTimestampMs(fromRam);
         const chosenTime = getLpTimestampMs(chosen);
-        const ramModel = fromRam?.hero?.model || fromRam?.heroModel || "split_image";
-        const chosenModel = chosen.hero?.model || chosen.heroModel || "split_image";
+        const ramModel = (fromRam as any)?.hero?.model || (fromRam as any)?.heroModel || "split_image";
+        const chosenModel = (chosen as any).hero?.model || (chosen as any).heroModel || "split_image";
 
         if (
           !fromRam ||

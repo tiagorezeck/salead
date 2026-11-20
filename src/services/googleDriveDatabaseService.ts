@@ -272,7 +272,7 @@ export const executeDriveRequest = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     proxyRes = await fetch("/api/drive-proxy", {
       method: "POST",
       headers: {
@@ -327,7 +327,7 @@ export const executeDriveRequest = async (
     try {
       const action = String(payload.action || "").trim();
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       if (GET_ACTIONS.has(action)) {
         const directUrl = new URL(cleanUrl);
         directUrl.searchParams.set("action", action);

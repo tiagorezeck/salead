@@ -161,7 +161,7 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
 
   const fetchEndpoint = async (url: string): Promise<LandingPage | null> => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2800);
+    const timeoutId = setTimeout(() => controller.abort(), 9000);
     try {
       const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
       clearTimeout(timeoutId);

@@ -476,7 +476,22 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
   ) => {
     const { type, itemId } = imagePickerConfig;
 
-    if (type === "hero" && (!itemId || !page.floatingImages?.some((f) => f.id === itemId))) {
+    if (type === "hero" && itemId === "slideshow_add") {
+      updatePage((p) => {
+        const existingSlides = Array.isArray(p.hero.slideshowImages) && p.hero.slideshowImages.length > 0
+          ? p.hero.slideshowImages
+          : (p.hero.imageUrl ? [p.hero.imageUrl] : []);
+        return {
+          ...p,
+          hero: {
+            ...p.hero,
+            slideshowImages: [...existingSlides, newUrl],
+            imageUrl: newUrl,
+            videoThumbnail: newUrl,
+          },
+        };
+      });
+    } else if (type === "hero" && (!itemId || !page.floatingImages?.some((f) => f.id === itemId))) {
       updatePage((p) => ({
         ...p,
         hero: {
@@ -632,9 +647,12 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
         {/* Left: Back & Title */}
         <div className="flex items-center gap-3">
           <button
-            onClick={onBackToDashboard}
+            onClick={async () => {
+              await handleSave();
+              onBackToDashboard();
+            }}
             className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 font-bold text-xs transition-colors cursor-pointer"
-            title="Voltar ao Painel de Landing Pages"
+            title="Salvar e Voltar ao Painel de Landing Pages"
           >
             <ArrowLeft className="w-4 h-4 text-primary" />
             <span className="hidden sm:inline">Voltar para Landing Pages</span>
@@ -802,8 +820,11 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
               };
               pageRef.current = updatedPageWithTimestamp;
               setPage(updatedPageWithTimestamp);
+              await Promise.allSettled([
+                cloudStore.saveLandingPageOnly(updatedPageWithTimestamp as any, { immediate: true }),
+                Promise.resolve(onSave(updatedPageWithTimestamp)),
+              ]);
               setIsNetworkPreviewOpen(true);
-              await Promise.resolve(onSave(updatedPageWithTimestamp)).catch(() => {});
             }}
             className="px-3 py-2 rounded-xl bg-purple-950/60 border border-purple-500/40 hover:bg-purple-900/80 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-purple-950/40"
             title="Link de Teste (Visualizar em outro navegador ou celular via QR Code / URL)"
@@ -821,19 +842,19 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                 const current = pageRef.current;
                 const activeHeroModel = current.hero?.model || current.heroModel || current.hero_model || "split_image";
                 const nowIso = new Date().toISOString();
+                const flushedPage: LandingPage = {
+                  ...current,
+                  heroModel: activeHeroModel,
+                  hero_model: activeHeroModel,
+                  hero: { ...current.hero, model: activeHeroModel },
+                  updatedAt: nowIso,
+                  updated_at: nowIso,
+                };
+                pageRef.current = flushedPage;
                 cloudStore
-                  .saveLandingPageOnly(
-                    {
-                      ...current,
-                      heroModel: activeHeroModel,
-                      hero_model: activeHeroModel,
-                      hero: { ...current.hero, model: activeHeroModel },
-                      updatedAt: nowIso,
-                      updated_at: nowIso,
-                    } as any,
-                    { immediate: true }
-                  )
+                  .saveLandingPageOnly(flushedPage as any, { immediate: true })
                   .catch(() => {});
+                Promise.resolve(onSave(flushedPage)).catch(() => {});
               }
             }}
             className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${

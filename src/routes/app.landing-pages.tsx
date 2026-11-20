@@ -19,6 +19,7 @@ import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates
 import { HERO_MODELS } from "@/components/marketing/comet-lp/components/HeroModelSelector";
 import { cn } from "@/lib/utils";
 import { uid } from "@/lib/lp-store";
+import { cloudStore } from "@/services/cloudStorageService";
 
 export const Route = createFileRoute("/app/landing-pages")({
   component: LPPage,
@@ -253,8 +254,13 @@ function LPPage() {
       `Nova Landing Page ${landingPages.length + 1}`,
       company?.name || "COMET CRM"
     );
+    const stableUuid =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : blankPage.id;
     const dbItem = {
       ...blankPage,
+      id: stableUuid,
       name: blankPage.title,
       type: "COMET CRO",
       template: "COMET",
@@ -275,12 +281,20 @@ function LPPage() {
 
   // Selecionar Template Pré-Configurado
   const handleSelectPresetTemplate = async (tpl: any) => {
+    const stableUuid =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `lp_${uid()}`;
+    const tplModel = tpl?.hero?.model || tpl?.heroModel || tpl?.hero_model || "split_image";
     const newPage = {
       ...tpl,
-      id: `lp_${uid()}`,
+      id: stableUuid,
       title: `${tpl.title} (Cópia)`,
       name: `${tpl.title} (Cópia)`,
-      slug: `lp-${uid()}`,
+      slug: `${tpl.slug || "lp"}-${uid().slice(0, 6)}`,
+      heroModel: tplModel,
+      hero_model: tplModel,
+      hero: tpl.hero ? { ...tpl.hero, model: tplModel } : { model: tplModel },
       type: "COMET CRO",
       template: "COMET",
       status: "Ativa",
@@ -337,7 +351,7 @@ function LPPage() {
     if (savedLP) {
       setSmartLinkLP({ id: savedLP.id, name: savedLP.name, slug: (savedLP as any).slug, lp: savedLP });
     } else {
-      setSmartLinkLP({ id: newExternalLP.id, name: newExternalLP.name, slug: newExternalLP.slug, lp: newExternalLP });
+      setSmartLinkLP({ id: newExternalLP.id, name: newExternalLP.name, slug: (newExternalLP as any).slug, lp: newExternalLP });
     }
   };
 
@@ -641,7 +655,13 @@ function LPPage() {
                   if (!heroDisplay.isExternal) {
                     setEditingLP(selectedLP);
                   } else if (selectedLP.externalUrl) {
-                    window.open(selectedLP.externalUrl, "_blank");
+                    const a = document.createElement("a");
+                    a.href = selectedLP.externalUrl;
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
                   }
                 }}
                 className={`relative w-full aspect-video rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border flex flex-col justify-between p-3 sm:p-4 group select-none cursor-pointer transition-colors ${containerBg}`}
@@ -977,7 +997,17 @@ function LPPage() {
                         to="/lp/$id"
                         params={{ id: selectedLP.id }}
                         target="_blank"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          try {
+                            const dbState = cloudStore.getState();
+                            const freshest =
+                              (dbState.activePreviewPage?.id === selectedLP.id ? dbState.activePreviewPage : null) ||
+                              (dbState.landingPages || []).find((p: any) => p.id === selectedLP.id) ||
+                              selectedLP;
+                            cloudStore.saveLandingPageOnly(freshest as any, { immediate: true }).catch(() => {});
+                          } catch {}
+                        }}
                         className="px-3.5 py-2 rounded-xl bg-zinc-900/90 border border-zinc-700 text-white font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-800 transition-colors cursor-pointer"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -1405,7 +1435,17 @@ function LPPage() {
                       to="/lp/$id" 
                       params={{ id: lp.id }} 
                       target="_blank" 
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        try {
+                          const dbState = cloudStore.getState();
+                          const freshest =
+                            (dbState.activePreviewPage?.id === lp.id ? dbState.activePreviewPage : null) ||
+                            (dbState.landingPages || []).find((p: any) => p.id === lp.id) ||
+                            lp;
+                          cloudStore.saveLandingPageOnly(freshest as any, { immediate: true }).catch(() => {});
+                        } catch {}
+                      }}
                       className="flex-1 text-[11px] font-bold py-2 rounded-xl border border-border bg-background hover:bg-muted inline-flex items-center justify-center gap-1.5 text-foreground transition-colors shadow-sm"
                     >
                       <ExternalLink className="h-3 w-3 text-primary" /> 
@@ -1463,9 +1503,17 @@ function LPPage() {
           isOpen={showAIGenerator}
           onClose={() => setShowAIGenerator(false)}
           onPageGenerated={async (generatedPage) => {
+            const genHeroModel = generatedPage.hero?.model || generatedPage.heroModel || (generatedPage as any).hero_model || "split_image";
+            const stableId =
+              generatedPage.id && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(generatedPage.id)
+                ? generatedPage.id
+                : (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `lp_${uid()}`);
             const newLP = {
               ...generatedPage,
-              id: `lp_${uid()}`,
+              id: stableId,
+              heroModel: genHeroModel,
+              hero_model: genHeroModel,
+              hero: generatedPage.hero ? { ...generatedPage.hero, model: genHeroModel } : { model: genHeroModel },
               name: generatedPage.title,
               title: generatedPage.title,
               status: "Ativa",

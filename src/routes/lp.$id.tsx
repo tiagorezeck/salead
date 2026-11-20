@@ -325,7 +325,7 @@ function PublicLPPage() {
                 .then((cloudPage) => applyRemoteIfNewer(cloudPage))
                 .catch(() => {}),
             ]),
-            new Promise((resolve) => setTimeout(resolve, 4500)),
+            new Promise((resolve) => setTimeout(resolve, 9000)),
           ]);
         } catch (srvErr) {
           console.error("Step 2 (Cloud/Sheets Fetch) error:", srvErr);
@@ -340,7 +340,7 @@ function PublicLPPage() {
           try {
             const booted: any = await Promise.race([
               cloudStore.bootstrap(),
-              new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+              new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
             ]);
             const liveMatch = booted
               ? (booted.activePreviewPage && matchesTarget(booted.activePreviewPage) ? booted.activePreviewPage : null) ||
@@ -433,7 +433,12 @@ function PublicLPPage() {
           if (!prev) return liveMatch;
           const prevTime = getLpTs(prev);
           const nextTime = getLpTs(liveMatch);
-          return nextTime > prevTime ? liveMatch : prev;
+          const prevModel = prev.hero?.model || prev.heroModel || prev.hero_model || "split_image";
+          const nextModel = liveMatch.hero?.model || liveMatch.heroModel || liveMatch.hero_model || "split_image";
+          const isUpgrade =
+            nextTime > prevTime ||
+            (nextTime === prevTime && nextModel !== "split_image" && prevModel === "split_image");
+          return isUpgrade ? liveMatch : prev;
         });
         setLoading(false);
       }

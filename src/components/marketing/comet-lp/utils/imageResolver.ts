@@ -199,6 +199,58 @@ export function getThematicImagesForNiche(niche?: string, prompt?: string, headl
   return DOMAIN_IMAGE_COLLECTIONS[key] || DOMAIN_IMAGE_COLLECTIONS.consultoria;
 }
 
+export function detectHeroModelFromPrompt(text?: string): string | null {
+  if (!text) return null;
+  const p = String(text)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (/\bmodelo\s*14\b|\bmodo\s*14\b|survey_hero_dark|pesquisa.*escur|diagnostico.*escur/.test(p)) {
+    return "survey_hero_dark";
+  }
+  if (/\bmodelo\s*13\b|\bmodo\s*13\b|survey_hero_light|pesquisa.*clar|diagnostico.*clar/.test(p)) {
+    return "survey_hero_light";
+  }
+  if (/\bmodelo\s*12\b|\bmodo\s*12\b|portfolio_dark_neon|portf[oó]lio|curriculo|resume/.test(p)) {
+    return "portfolio_dark_neon";
+  }
+  if (/\bmodelo\s*11\b|\bmodo\s*11\b|kids_school_doodle|escola\s+infantil|doodle/.test(p)) {
+    return "kids_school_doodle";
+  }
+  if (/\bmodelo\s*10\b|\bmodo\s*10\b|fullscreen_slideshow|slideshow|tela\s*cheia|slides\b|em\s+slide/.test(p)) {
+    return "fullscreen_slideshow";
+  }
+  if (/\bmodelo\s*9\b|\bmodo\s*9\b|white_pro|white\s+pro/.test(p)) {
+    return "white_pro";
+  }
+  if (/\bmodelo\s*8\b|\bmodo\s*8\b|urgency_counter|urgencia|escassez|cronometro/.test(p)) {
+    return "urgency_counter";
+  }
+  if (/\bmodelo\s*7\b|\bmodo\s*7\b|minimal_glow|minimalista/.test(p)) {
+    return "minimal_glow";
+  }
+  if (/\bmodelo\s*6\b|\bmodo\s*6\b|editorial_ebook|editorial|e-?book/.test(p)) {
+    return "editorial_ebook";
+  }
+  if (/\bmodelo\s*5\b|\bmodo\s*5\b|b2b_metrics|consultoria.*metric/.test(p)) {
+    return "b2b_metrics";
+  }
+  if (/\bmodelo\s*4\b|\bmodo\s*4\b|split_lead_form|captura\s+direta/.test(p)) {
+    return "split_lead_form";
+  }
+  if (/\bmodelo\s*3\b|\bmodo\s*3\b|centered_showcase|vitrine\s+centralizada/.test(p)) {
+    return "centered_showcase";
+  }
+  if (/\bmodelo\s*2\b|\bmodo\s*2\b|split_video|\bvsl\b/.test(p)) {
+    return "split_video";
+  }
+  if (/\bmodelo\s*1\b|\bmodo\s*1\b|split_image/.test(p)) {
+    return "split_image";
+  }
+  return null;
+}
+
 /**
  * Enhances a generated Landing Page object by injecting relevant, non-duplicate
  * Unsplash images tailored to the niche, headline, and Bento Grid item titles.
@@ -213,14 +265,32 @@ export function applyThematicImagesToPage<T extends Record<string, any>>(pageDat
   );
 
   const updated: any = { ...pageData };
+  const resolvedModel = updated.hero?.model || updated.heroModel || updated.hero_model || "split_image";
+  updated.heroModel = resolvedModel;
+  updated.hero_model = resolvedModel;
 
-  // 1. Hero Image & Thumbnail
+  // 1. Hero Image, Slideshow & Thumbnail
   if (updated.hero) {
     updated.hero = {
       ...updated.hero,
+      model: resolvedModel,
       imageUrl: updated.hero.imageUrl || bundle.heroImage,
       videoThumbnail: updated.hero.videoThumbnail || bundle.videoThumbnail,
     };
+
+    if (
+      resolvedModel === "fullscreen_slideshow" &&
+      (!Array.isArray(updated.hero.slideshowImages) || updated.hero.slideshowImages.length === 0)
+    ) {
+      updated.hero.slideshowImages = [
+        updated.hero.imageUrl || bundle.heroImage,
+        bundle.videoThumbnail,
+        bundle.bentoImages[0],
+        bundle.bentoImages[1],
+      ].filter(Boolean);
+      updated.hero.slideshowIntervalSeconds = updated.hero.slideshowIntervalSeconds || 3;
+      updated.hero.slideshowOverlayOpacity = updated.hero.slideshowOverlayOpacity ?? 50;
+    }
 
     // Social Proof Avatars in Hero
     if (updated.hero.socialProofAvatars && Array.isArray(updated.hero.socialProofAvatars)) {
@@ -236,12 +306,10 @@ export function applyThematicImagesToPage<T extends Record<string, any>>(pageDat
     const availableBentoImages = [...bundle.bentoImages];
 
     updated.bentoGrid.items = updated.bentoGrid.items.map((item: any, idx: number) => {
-      // Pick image by keywords in item title or fall back to unique index in pool
       let chosenImage = availableBentoImages[idx % availableBentoImages.length];
 
       const itemText = `${item.title || ""} ${item.description || ""}`.toLowerCase();
 
-      // Keyword matchers for finer image context
       if (/gráfico|metric|analytics|crescimento|resultado|conversão/i.test(itemText)) {
         chosenImage = bundle.bentoImages[0];
       } else if (/time|reunião|processo|estratégia|suporte|atendimento/i.test(itemText)) {

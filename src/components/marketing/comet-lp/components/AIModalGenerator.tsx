@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { LandingPage, AccentColor, HeroModel } from "../types/landingPage";
 import { THEME_CONFIGS } from "../utils/theme";
-import { applyThematicImagesToPage } from "../utils/imageResolver";
+import { applyThematicImagesToPage, detectHeroModelFromPrompt } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
 import { cloudStore } from "@/services/cloudStorageService";
 import { motion, AnimatePresence } from "motion/react";
@@ -514,25 +514,41 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
       clearInterval(stepInterval);
 
       // Smart theme fallback if not set
-      const resolvedTheme = generatedData.theme || (selectedTheme !== "auto" ? selectedTheme : "dark");
-      const resolvedColor = generatedData.accentColor || (accentColor !== "auto" ? accentColor : "purple");
-      const resolvedHeroModel = generatedData.hero?.model || (selectedHeroModel !== "auto" ? selectedHeroModel : "split_image");
+      const promptHeroModel = detectHeroModelFromPrompt(`${prompt} ${niche}`);
+      const resolvedTheme = (selectedTheme !== "auto" ? selectedTheme : generatedData.theme) || "dark";
+      const resolvedColor = (accentColor !== "auto" ? accentColor : generatedData.accentColor) || "purple";
+      const resolvedHeroModel: HeroModel =
+        selectedHeroModel !== "auto"
+          ? selectedHeroModel
+          : ((generatedData.hero?.model || (generatedData as any).heroModel || promptHeroModel || "split_image") as HeroModel);
       const resolvedSectionOrder = generatedData.sectionOrder && Array.isArray(generatedData.sectionOrder) && generatedData.sectionOrder.length > 0
         ? generatedData.sectionOrder
         : ["hero", "socialProof", "quiz", "bentoGrid", "testimonials", "formSection", "faq"];
 
-      const newPage: LandingPage = {
-        id: `lp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        title: generatedData.title || `Landing Page ${niche}`,
-        slug: (generatedData.title || "nova-pagina")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, ""),
+      const generatedUuid =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `lp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+      const rawTitle = generatedData.title || `Landing Page ${niche}`;
+      const normalizedSlug = rawTitle
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `lp-${Date.now().toString(36)}`;
+
+      const baseNewPage: LandingPage = {
+        id: generatedUuid,
+        title: rawTitle,
+        slug: normalizedSlug,
         niche: generatedData.niche || niche,
         cityOrRegion: generatedData.cityOrRegion || cityOrRegion,
         targetAudience: generatedData.targetAudience || targetAudience,
         accentColor: resolvedColor,
         theme: resolvedTheme,
+        heroModel: resolvedHeroModel,
+        hero_model: resolvedHeroModel,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         webhookUrl: "",
@@ -557,9 +573,18 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
           headline: generatedData.hero?.headline || "Acelere Seus Resultados com o Método Definitivo",
           subheadline: generatedData.hero?.subheadline || "A solução completa para transformar seus resultados com segurança e rapidez.",
           mediaType: generatedData.hero?.mediaType || (resolvedHeroModel === "split_video" ? "video" : "image"),
-          videoUrl: generatedData.hero?.videoUrl || "https://www.youtube.com/embed/dQw4w9WgXcQ",
-          videoThumbnail: "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
+          videoUrl: resolvedHeroModel === "split_video" ? (generatedData.hero?.videoUrl || "https://www.youtube.com/embed/dQw4w9WgXcQ") : (generatedData.hero?.videoUrl || ""),
+          videoThumbnail: generatedData.hero?.videoThumbnail || "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
           imageUrl: generatedData.hero?.imageUrl || "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80",
+          ...(Array.isArray(generatedData.hero?.slideshowImages) && generatedData.hero.slideshowImages.length > 0
+            ? { slideshowImages: generatedData.hero.slideshowImages }
+            : {}),
+          ...(generatedData.hero?.slideshowIntervalSeconds
+            ? { slideshowIntervalSeconds: generatedData.hero.slideshowIntervalSeconds }
+            : {}),
+          ...(generatedData.hero?.slideshowOverlayOpacity !== undefined
+            ? { slideshowOverlayOpacity: generatedData.hero.slideshowOverlayOpacity }
+            : {}),
           ctaText: generatedData.hero?.ctaText || "QUERO FAZER O DIAGNÓSTICO GRATUITO",
           ctaSubtext: generatedData.hero?.ctaSubtext || "⚡ Vagas limitadas para a turma atual",
           countdownMinutes: generatedData.hero?.countdownMinutes || 15,
@@ -692,9 +717,9 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
         ],
       };
 
-      const finalPage = applyThematicImagesToPage(newPage);
+      const newPage = applyThematicImagesToPage(baseNewPage) as LandingPage;
 
-      onPageGenerated(finalPage);
+      onPageGenerated(newPage);
       onClose();
     } catch (err: any) {
       console.error("AI Generation Error:", err);
@@ -1181,16 +1206,21 @@ export const AIModalGenerator: React.FC<AIModalGeneratorProps> = ({
                       onChange={(e) => setSelectedHeroModel(e.target.value as any)}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-purple-500 cursor-pointer"
                     >
-                      <option value="auto">✨ Auto (LANAI escolhe o melhor modelo para o nicho)</option>
-                      <option value="split_image">🖼️ Split com Foto / Mockup Lateral (Produtos & Serviços)</option>
-                      <option value="split_video">🎥 Split com Vídeo VSL (Lançamentos & Mentorias)</option>
-                      <option value="centered_showcase">💻 Centered Showcase (SaaS & Aplicativos)</option>
-                      <option value="white_pro">🩺 White Pro Clean (Médicos, Estética & Alto Padrão)</option>
-                      <option value="b2b_metrics">📊 B2B com Métricas de Autoridade (Consultorias & Gestão)</option>
-                      <option value="editorial_ebook">📚 Editorial / E-book / Metodologia de Autor</option>
-                      <option value="urgency_counter">⏱️ Urgência & Escassez com Contador ao Vivo</option>
-                      <option value="split_lead_form">📝 Split com Captura Direta no Topo</option>
-                      <option value="minimal_glow">✨ Minimal Glow Tecnológico</option>
+                      <option value="auto">✨ Auto (LANAI escolhe o melhor entre os 14 modelos)</option>
+                      <option value="split_image">1. Split com Foto / Mockup Lateral (Produtos & Serviços)</option>
+                      <option value="split_video">2. Split com Vídeo VSL (Lançamentos & Mentorias)</option>
+                      <option value="centered_showcase">3. Centered Showcase (SaaS & Aplicativos)</option>
+                      <option value="split_lead_form">4. Split com Captura Direta no Topo</option>
+                      <option value="b2b_metrics">5. B2B com Métricas de Autoridade (Consultorias & Gestão)</option>
+                      <option value="editorial_ebook">6. Editorial / E-book / Metodologia de Autor</option>
+                      <option value="minimal_glow">7. Minimal Glow Tecnológico</option>
+                      <option value="urgency_counter">8. Urgência & Escassez com Contador ao Vivo</option>
+                      <option value="white_pro">9. White Pro Clean (Médicos, Estética & Alto Padrão)</option>
+                      <option value="fullscreen_slideshow">10. Tela Cheia com Slideshow Automático (Eventos & Alto Impacto)</option>
+                      <option value="kids_school_doodle">11. Escolar & Criativo Doodle (Cursos, Escolas & Infantil)</option>
+                      <option value="portfolio_dark_neon">12. Portfólio Dark & Neon (Autoridade & Especialistas)</option>
+                      <option value="survey_hero_light">13. Pesquisa & Diagnóstico no Hero (Tema Claro)</option>
+                      <option value="survey_hero_dark">14. Pesquisa & Diagnóstico no Hero (Tema Escuro)</option>
                     </select>
                   </div>
 

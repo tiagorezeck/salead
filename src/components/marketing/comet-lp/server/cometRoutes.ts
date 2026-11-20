@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import path from "path";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
-import { applyThematicImagesToPage } from "../utils/imageResolver";
+import { applyThematicImagesToPage, detectHeroModelFromPrompt } from "../utils/imageResolver";
 import { generateAdaptiveLandingPage } from "../utils/adaptiveGenerator";
 import { SURVEY_PRESETS } from "../../../../lib/survey-templates";
 import { GLOBAL_GAS_CONFIG, normalizeGasUrl } from "../../../../config/gasConfig";
@@ -338,12 +338,23 @@ function normalizeLpServer(raw: any): any {
     try { parsedConfig = JSON.parse(rawConfigSource); } catch {}
   }
   const merged = { ...parsedConfig, ...raw };
-  const model = merged.hero?.model || merged.heroModel || merged.hero_model || parsedConfig.hero?.model || parsedConfig.heroModel || "split_image";
+  const mergedHero =
+    parsedConfig.hero || raw.hero
+      ? { ...(parsedConfig.hero || {}), ...(raw.hero || {}) }
+      : undefined;
+  const model =
+    mergedHero?.model ||
+    merged.heroModel ||
+    merged.hero_model ||
+    parsedConfig.hero?.model ||
+    parsedConfig.heroModel ||
+    "split_image";
   const ts = merged.updatedAt || merged.updated_at || "";
   return {
     ...merged,
     heroModel: model,
-    hero: merged.hero ? { ...merged.hero, model } : { model },
+    hero_model: model,
+    hero: mergedHero ? { ...mergedHero, model } : { model },
     ...(ts ? { updatedAt: ts, updated_at: ts } : {}),
   };
 }
@@ -363,12 +374,12 @@ function readStoredLandingPages(): any[] {
         return memoryLps;
       }
     }
-    memoryLps = DEFAULT_INITIAL_LANDING_PAGES;
+    memoryLps = [];
     return memoryLps;
   } catch (e) {
     console.error("Failed to read stored landing pages:", e);
   }
-  memoryLps = DEFAULT_INITIAL_LANDING_PAGES;
+  memoryLps = [];
   return memoryLps;
 }
 
@@ -725,12 +736,12 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
   const matches = (p: any) => {
     if (!p || isCorruptedLeadRowAsLp(p)) return false;
     if (p.id === rawId || String(p.id || "").toLowerCase() === normId || p.id === slugId) return true;
-    if (p.slug === rawId || String(p.slug || "").toLowerCase() === normId || p.slug === slugId) return true;
+    if (p.slug === rawId || String(p.slug || "").toLowerCase() === normId || normalizeSlugServer(p.slug) === slugId) return true;
     if (p.previewToken === rawId || String(p.previewToken || "").toLowerCase() === normId || p.previewToken === slugId) return true;
     if (p.config && (p.config.slug === rawId || p.config.slug === normId || p.config.slug === slugId || p.config.client_id === rawId)) return true;
 
     const pNameNorm = normalizeSlugServer(p.name || p.title);
-    if (pNameNorm && slugId && (pNameNorm === slugId || pNameNorm.includes(slugId) || slugId.includes(pNameNorm))) return true;
+    if (pNameNorm && slugId && pNameNorm === slugId) return true;
 
     return false;
   };
@@ -742,12 +753,12 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
     previewPagesStore.get(slugId) ||
     Array.from(previewPagesStore.values()).find(matches);
 
-  // Se foi salvo recentemente em RAM (< 30s), retorna instantaneamente (< 5ms) sem travar em rede
-  if (memPage && Date.now() - Number(memPage._previewSavedAt || 0) < 30000) {
+  // Se foi salvo recentemente em RAM (< 15s), retorna instantaneamente (< 5ms)
+  if (memPage && Date.now() - Number(memPage._previewSavedAt || 0) < 15000) {
     return normalizeLpServer(memPage);
   }
 
-  // 2. Disco persistente do servidor (rápido e já sincronizado)
+  // 2. Disco persistente do servidor
   const diskPages = readStoredLandingPages();
   const fromDisk = diskPages.find(matches);
 
@@ -755,27 +766,40 @@ export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | 
     ? memPage
     : fromDisk;
 
-  if (localBest) {
-    return normalizeLpServer(localBest);
-  }
-
-  // 3. Fonte mestre em nuvem Google Apps Script (funciona em Vercel cold start ou LP nunca aberta neste servidor)
+  // 3. Fonte mestre em nuvem Google Apps Script (sempre compara timestamp com localBest se não for recém-salvo em RAM)
   const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
+  let fromCloud: any = null;
   if (cloudDb) {
     const deletedSet = new Set(Array.isArray(cloudDb.deletedLpIds) ? cloudDb.deletedLpIds.map(String) : []);
     const cloudCandidates: any[] = [];
     if (cloudDb.activePreviewPage) cloudCandidates.push(cloudDb.activePreviewPage);
     if (Array.isArray(cloudDb.landingPages)) cloudCandidates.push(...cloudDb.landingPages);
     if (Array.isArray(cloudDb.landing_pages)) cloudCandidates.push(...cloudDb.landing_pages);
-    const fromCloud = cloudCandidates.find(
+    const matchedCloud = cloudCandidates.find(
       (p) => p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug))) && matches(p)
     );
-    if (fromCloud) {
-      const normalizedCloud = normalizeLpServer(fromCloud);
-      previewPagesStore.set(normalizedCloud.id, normalizedCloud);
-      if (normalizedCloud.slug) previewPagesStore.set(normalizedCloud.slug, normalizedCloud);
-      return normalizedCloud;
+    if (matchedCloud) {
+      fromCloud = normalizeLpServer(matchedCloud);
     }
+  }
+
+  if (localBest && fromCloud) {
+    const localTime = getLpTimestampMs(localBest);
+    const cloudTime = getLpTimestampMs(fromCloud);
+    const winner = localTime > cloudTime ? normalizeLpServer(localBest) : fromCloud;
+    previewPagesStore.set(winner.id, winner);
+    if (winner.slug) previewPagesStore.set(winner.slug, winner);
+    return winner;
+  }
+
+  if (fromCloud) {
+    previewPagesStore.set(fromCloud.id, fromCloud);
+    if (fromCloud.slug) previewPagesStore.set(fromCloud.slug, fromCloud);
+    return fromCloud;
+  }
+
+  if (localBest) {
+    return normalizeLpServer(localBest);
   }
 
   // 4. Presets e templates locais (apenas fallback final, sem poluir previewPagesStore)
@@ -1063,12 +1087,12 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
       console.warn("Notice: server disk write failed in preview sync:", diskErr);
     }
 
-    // 3. Em ambiente serverless (Vercel), persiste no GAS antes de encerrar a invocação
+    // 3. Persiste atomicamente no Google Apps Script / Sheets sempre que configurado
     const webappUrl = getDriveWebAppUrlServer();
-    if (webappUrl && process.env.VERCEL) {
+    if (webappUrl) {
       try {
         const controller = new AbortController();
-        const tId = setTimeout(() => controller.abort(), 3500);
+        const tId = setTimeout(() => controller.abort(), 9000);
         await fetch(webappUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -1132,14 +1156,14 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
     return res.status(400).json({ error: "Missing tokenOrId" });
   }
 
-  // 0. Memória recente (recém salva via Editor / Preview nos últimos 20s) retorna em < 5ms sem travar no GAS
+  // 0. Memória recente (recém salva via Editor / Preview nos últimos 15s) retorna em < 5ms
   const fastLocal =
     previewPagesStore.get(tokenOrId) ||
     previewPagesStore.get(tokenOrId.trim().toLowerCase()) ||
     Array.from(previewPagesStore.values()).find(
       (p) => p && (p.id === tokenOrId || p.slug === tokenOrId || p.previewToken === tokenOrId)
     );
-  if (fastLocal && Date.now() - Number(fastLocal._previewSavedAt || 0) < 20000) {
+  if (fastLocal && Date.now() - Number(fastLocal._previewSavedAt || 0) < 15000) {
     const normalizedFast = normalizeLpServer(fastLocal);
     return res.json({ success: true, page: normalizedFast, landingPage: normalizedFast, source: "preview-memory" });
   }
@@ -1155,7 +1179,7 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
       urlObj.searchParams.set("lpId", tokenOrId);
       urlObj.searchParams.set("t", Date.now().toString());
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 9000);
       const gasRes = await fetch(urlObj.toString(), { method: "GET", redirect: "follow", signal: controller.signal });
       clearTimeout(timeout);
       const text = await gasRes.text();
@@ -1172,7 +1196,7 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
                 String(p.previewToken || "").toLowerCase() === qLow)
           );
         }
-        if (cloudLp && cloudLp.id) {
+        if (cloudLp && (cloudLp.id || cloudLp.slug || cloudLp.hero)) {
           const normalizedCloud = normalizeLpServer(cloudLp);
           const localTime = getLpTimestampMs(fastLocal);
           const cloudTime = getLpTimestampMs(normalizedCloud);
@@ -2152,7 +2176,18 @@ Regras de Copy e Estrutura:
           "Waterfall Total"
         );
 
-        const enhancedData = applyThematicImagesToPage(result.data);
+        const explicitModel =
+          heroModel && heroModel !== "auto"
+            ? heroModel
+            : detectHeroModelFromPrompt(`${prompt || ""} ${niche || ""}`);
+
+        const rawGenerated = { ...(result.data || {}) };
+        if (explicitModel) {
+          rawGenerated.heroModel = explicitModel;
+          rawGenerated.hero_model = explicitModel;
+          rawGenerated.hero = { ...(rawGenerated.hero || {}), model: explicitModel };
+        }
+        const enhancedData = applyThematicImagesToPage(rawGenerated);
 
         return res.json({
           success: true,
@@ -2231,11 +2266,14 @@ Seu objetivo é alterar a Landing Page fornecida no JSON com base na instrução
 Instrução do Usuário: "${prompt}"
 
 Instruções de edição:
-1. Modifique os campos do JSON que correspondem à solicitação (ex: se pediu para alterar a headline/título, mude 'title', 'headline', 'hero.headline'; se pediu para alterar o subtítulo, mude 'subheadline', 'hero.subheadline'; se pediu para alterar a cor, mude 'accentColor' ou 'theme'; se pediu para mudar o botão, mude 'hero.ctaText' e 'formSection.ctaButtonText').
-2. Se pediu para adicionar ou reescrever depoimentos, FAQs ou perguntas no quiz, atualize esses objetos.
+1. Modifique os campos do JSON que correspondem à solicitação (headline/título -> 'title', 'headline', 'hero.headline'; subtítulo -> 'subheadline', 'hero.subheadline'; cor -> 'accentColor'; tema -> 'theme' [light, dark, midnight, hybrid]; botão -> 'hero.ctaText' e 'formSection.ctaButtonText').
+2. Se o usuário pedir alteração do modelo de Hero (Modelo 1 a 14), atualize 'hero.model', 'heroModel' e 'hero_model' para um dos IDs exatos:
+   split_image (Modelo 1), split_video (Modelo 2), centered_showcase (Modelo 3), split_lead_form (Modelo 4), b2b_metrics (Modelo 5), editorial_ebook (Modelo 6), minimal_glow (Modelo 7), urgency_counter (Modelo 8), white_pro (Modelo 9), fullscreen_slideshow (Modelo 10 - inclua hero.slideshowImages com 3+ URLs), kids_school_doodle (Modelo 11), portfolio_dark_neon (Modelo 12), survey_hero_light (Modelo 13), survey_hero_dark (Modelo 14).
 3. Se pediu para alterar imagens ou vídeos, atualize 'hero.imageUrl', 'hero.mediaType' e as imagens das seções.
 4. Mantenha os outros campos intactos e garanta copy altamente persuasiva.
 5. Retorne o JSON atualizado completo da Landing Page.`;
+
+    const detectedPromptModel = detectHeroModelFromPrompt(prompt);
 
     if (ai) {
       try {
@@ -2245,7 +2283,12 @@ Instruções de edição:
         });
 
         if (result && result.data) {
-          const updatedPage = applyThematicImagesToPage({ ...page, ...result.data });
+          const mergedAi = { ...page, ...result.data };
+          const effectiveModel = detectedPromptModel || mergedAi.hero?.model || mergedAi.heroModel || mergedAi.hero_model || "split_image";
+          mergedAi.heroModel = effectiveModel;
+          mergedAi.hero_model = effectiveModel;
+          mergedAi.hero = { ...(mergedAi.hero || {}), model: effectiveModel };
+          const updatedPage = applyThematicImagesToPage(mergedAi);
           return res.json({
             success: true,
             page: updatedPage,
@@ -2258,7 +2301,7 @@ Instruções de edição:
     }
 
     // Heuristic Fallback
-    const updated = JSON.parse(JSON.stringify(page || {}));
+    let updated = JSON.parse(JSON.stringify(page || {}));
     const lowerPrompt = prompt.toLowerCase();
     updated.hero = updated.hero || {};
     updated.sections = Array.isArray(updated.sections) ? updated.sections : [];
@@ -2323,9 +2366,15 @@ Instruções de edição:
     if (lowerPrompt.includes("laranja") || lowerPrompt.includes("orange")) updated.accentColor = "orange";
     if (lowerPrompt.includes("ciano") || lowerPrompt.includes("cyan")) updated.accentColor = "cyan";
 
-    if (lowerPrompt.includes("vídeo") || lowerPrompt.includes("video")) updated.hero.model = "split_video";
-    if (lowerPrompt.includes("formulário") || lowerPrompt.includes("captura")) updated.hero.model = "split_lead_form";
-    if (lowerPrompt.includes("contador") || lowerPrompt.includes("urgência") || lowerPrompt.includes("escassez")) updated.hero.model = "urgency_counter";
+    if (detectedPromptModel) {
+      updated.hero.model = detectedPromptModel;
+      updated.heroModel = detectedPromptModel;
+      updated.hero_model = detectedPromptModel;
+      if (detectedPromptModel === "split_video") {
+        updated.hero.mediaType = "video";
+      }
+      updated = applyThematicImagesToPage(updated);
+    }
 
     return res.json({
       success: true,
@@ -2563,7 +2612,29 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
     if (newPage.previewToken) previewPagesStore.set(newPage.previewToken, newPage);
     lastSavedPreviewPage = newPage;
 
-    res.json({ success: true, landingPage: newPage });
+    // 3. Persiste no GAS sempre que configurado
+    let synced = false;
+    const webappUrl = getDriveWebAppUrlServer();
+    if (webappUrl) {
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), 9000);
+        const gasRes = await fetch(webappUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "SAVE_LANDING_PAGE",
+            landingPage: newPage,
+          }),
+          redirect: "follow",
+          signal: controller.signal,
+        });
+        clearTimeout(tId);
+        if (gasRes.ok) synced = true;
+      } catch {}
+    }
+
+    res.json({ success: true, synced, landingPage: newPage });
   } catch (err: any) {
     console.error("Error creating landing page:", err);
     res.status(500).json({ error: err?.message || "Internal server error" });
@@ -2646,13 +2717,13 @@ const handleUpdateLandingPage = async (req: Request, res: Response) => {
     if (updatedPage.previewToken) previewPagesStore.set(updatedPage.previewToken, updatedPage);
     lastSavedPreviewPage = updatedPage;
 
-    // Em ambiente serverless (Vercel), persiste no GAS antes de encerrar a invocação
+    // Persiste atomicamente no GAS sempre que configurado
     let synced = false;
     const webappUrl = getDriveWebAppUrlServer();
-    if (webappUrl && process.env.VERCEL) {
+    if (webappUrl) {
       try {
         const controller = new AbortController();
-        const tId = setTimeout(() => controller.abort(), 5000);
+        const tId = setTimeout(() => controller.abort(), 9000);
         const gasRes = await fetch(webappUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
