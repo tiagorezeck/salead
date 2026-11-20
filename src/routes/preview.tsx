@@ -1,8 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { createFileRoute, useSearch, useNavigate } from "@tanstack/react-router";
-import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/LandingPageRenderer";
+const LandingPageRenderer = lazy(() =>
+  import("@/components/marketing/comet-lp/components/LandingPageRenderer").then((m) => ({
+    default: m.LandingPageRenderer,
+  }))
+);
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
 import { ensureCometLP } from "@/components/marketing/comet-lp/utils/cometAdapter";
 import { getInitialAILandingPages } from "@/hooks/use-data";
@@ -61,6 +65,15 @@ function getLpTs(p: any): number {
   const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
   const t3 = p.createdAt ? new Date(p.createdAt).getTime() : 0;
   return Math.max(Number.isFinite(t1) ? t1 : 0, Number.isFinite(t2) ? t2 : 0, Number.isFinite(t3) ? t3 : 0);
+}
+
+function hasFullLpContentPreview(p: any): boolean {
+  if (!p || typeof p !== "object") return false;
+  if (p.externalUrl || p.external_url || p.type === "URL Externa" || p.template === "External") return true;
+  if (p.hero && typeof p.hero === "object" && (p.hero.headline || p.hero.ctaText || p.hero.model)) return true;
+  if (Array.isArray(p.bentoGrid?.items) && p.bentoGrid.items.length > 0) return true;
+  if (typeof p["Config JSON"] === "string" && p["Config JSON"].trim().startsWith("{")) return true;
+  return false;
 }
 
 export function PreviewPage() {
@@ -145,7 +158,8 @@ export function PreviewPage() {
         ramFound = findMatchingPage(db.landingPages, targetId);
       }
 
-      if (ramFound && isMounted) {
+      const ramComplete = Boolean(ramFound && hasFullLpContentPreview(ramFound));
+      if (ramFound && ramComplete && isMounted) {
         setPage(ramFound);
         setLoading(false);
         if (cloudStore.getStatus().pendingWrite) {
@@ -154,17 +168,23 @@ export function PreviewPage() {
       }
 
       // PASSO 2: Busca paralela rápida no servidor Express/Vercel E Google Sheets/Apps Script (exibe o primeiro válido imediatamente!)
-      let bestFound: any = ramFound || null;
-      let bestTime = getLpTs(ramFound);
+      let bestFound: any = ramComplete ? ramFound : null;
+      let bestTime = ramComplete ? getLpTs(ramFound) : 0;
 
       const acceptIfNewer = (candidate: any) => {
         if (!candidate || !isMounted) return false;
+        const candFull = hasFullLpContentPreview(candidate);
+        const bestFull = hasFullLpContentPreview(bestFound);
+        if (bestFound && bestFull && !candFull) return false;
+
         const candTime = getLpTs(candidate);
         const candModel = candidate.hero?.model || candidate.heroModel || candidate.hero_model || "split_image";
         const bestModel = bestFound?.hero?.model || bestFound?.heroModel || bestFound?.hero_model || "split_image";
         const isTieBreakUpgrade =
           candTime === bestTime && candModel !== "split_image" && bestModel === "split_image";
-        if (!bestFound || (!cloudStore.getStatus().pendingWrite && (candTime > bestTime || isTieBreakUpgrade))) {
+        const isCompletenessUpgrade = Boolean(candFull && !bestFull);
+
+        if (!bestFound || isCompletenessUpgrade || (!cloudStore.getStatus().pendingWrite && (candTime > bestTime || isTieBreakUpgrade))) {
           bestFound = candidate;
           bestTime = candTime;
           setPage(candidate);
@@ -177,13 +197,13 @@ export function PreviewPage() {
       try {
         await Promise.race([
           Promise.allSettled([
-            fetchPageFromServerPreview(targetId)
+            fetchPageFromServerPreview(targetId, { bypassCache: true })
               .then((srv) => {
                 acceptIfNewer(srv);
               })
               .catch(() => {}),
             cloudStore
-              .fetchPublicLP(targetId, { preferSheets: false })
+              .fetchPublicLP(targetId, { preferSheets: !ramComplete, bypassCache: true })
               .then((cld) => {
                 acceptIfNewer(cld);
               })
@@ -193,7 +213,7 @@ export function PreviewPage() {
         ]);
       } catch {}
 
-      if (bestFound && isMounted) {
+      if (bestFound && hasFullLpContentPreview(bestFound) && isMounted) {
         setLoading(false);
         return;
       }
@@ -252,6 +272,52 @@ export function PreviewPage() {
 
     resolvePage();
 
+    const pollLatestUpdates = async () => {
+      if (!isMounted || !targetId || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+      if (cloudStore.getStatus().pendingWrite) return;
+      try {
+        const [srvRes, cldRes] = await Promise.allSettled([
+          fetchPageFromServerPreview(targetId, { bypassCache: true }),
+          cloudStore.fetchPublicLP(targetId, { bypassCache: true }),
+        ]);
+        const candidates = [
+          srvRes.status === "fulfilled" ? srvRes.value : null,
+          cldRes.status === "fulfilled" ? cldRes.value : null,
+        ].filter(Boolean);
+        if (!isMounted || candidates.length === 0) return;
+        setPage((prev: any) => {
+          let next = prev;
+          for (const cand of candidates) {
+            const candFull = hasFullLpContentPreview(cand);
+            const nextFull = hasFullLpContentPreview(next);
+            if (next && nextFull && !candFull) continue;
+            const prevTime = getLpTs(next);
+            const candTime = getLpTs(cand);
+            const prevModel = next?.hero?.model || next?.heroModel || next?.hero_model || "split_image";
+            const candModel = cand?.hero?.model || cand?.heroModel || cand?.hero_model || "split_image";
+            const isUpgrade =
+              !next ||
+              Boolean(candFull && !nextFull) ||
+              candTime > prevTime ||
+              (candTime === prevTime && candModel !== "split_image" && prevModel === "split_image");
+            if (isUpgrade) next = cand;
+          }
+          return next;
+        });
+      } catch {}
+    };
+
+    const pollTimer = typeof window !== "undefined" ? window.setInterval(pollLatestUpdates, 12000) : null;
+    const handleVisibilityOrFocus = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        pollLatestUpdates();
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleVisibilityOrFocus);
+      document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    }
+
     const unsubscribe = cloudStore.subscribe(() => {
       if (!isMounted) return;
       const db = cloudStore.getState();
@@ -264,9 +330,12 @@ export function PreviewPage() {
         findMatchingPage(db.landingPages || [], targetId);
       if (match) {
         setPage((prev: any) => {
+          const candFull = hasFullLpContentPreview(match);
+          const prevFull = hasFullLpContentPreview(prev);
+          if (prev && prevFull && !candFull) return prev;
           const prevTime = getLpTs(prev);
           const nextTime = getLpTs(match);
-          return !prev || nextTime >= prevTime ? match : prev;
+          return !prev || (candFull && !prevFull) || nextTime >= prevTime ? match : prev;
         });
         setLoading(false);
       }
@@ -275,6 +344,11 @@ export function PreviewPage() {
     return () => {
       isMounted = false;
       unsubscribe();
+      if (pollTimer !== null) window.clearInterval(pollTimer);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleVisibilityOrFocus);
+        document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      }
     };
   }, [targetId]);
 
@@ -574,12 +648,20 @@ export function PreviewPage() {
             device === "desktop" && "max-w-full"
           )}
         >
-          <LandingPageRenderer
-            page={ensureCometLP(page)}
-            deviceView={device}
-            isEditorPreview={false}
-            onLeadSubmit={handleLeadSubmit}
-          />
+          <Suspense
+            fallback={
+              <div className="py-20 flex items-center justify-center">
+                <Loader2 className="w-7 h-7 animate-spin text-purple-500" />
+              </div>
+            }
+          >
+            <LandingPageRenderer
+              page={ensureCometLP(page)}
+              deviceView={device}
+              isEditorPreview={false}
+              onLeadSubmit={handleLeadSubmit}
+            />
+          </Suspense>
         </div>
       </main>
     </div>

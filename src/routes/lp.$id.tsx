@@ -2,7 +2,7 @@
 
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { getDeletedLandingPageIds, getInitialAILandingPages } from "@/hooks/use-data";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { 
   X, 
   MessageCircle, 
@@ -27,8 +27,16 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-import { LandingPageRenderer } from "@/components/marketing/comet-lp/components/LandingPageRenderer";
-import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-viewer";
+const LandingPageRenderer = lazy(() =>
+  import("@/components/marketing/comet-lp/components/LandingPageRenderer").then((m) => ({
+    default: m.LandingPageRenderer,
+  }))
+);
+const DeepFindSurveyViewer = lazy(() =>
+  import("@/components/marketing/deepfind-survey-viewer").then((m) => ({
+    default: m.DeepFindSurveyViewer,
+  }))
+);
 import { ensureCometLP } from "@/components/marketing/comet-lp/utils/cometAdapter";
 import { fetchPageFromServerPreview } from "@/components/marketing/comet-lp/utils/storage";
 import { LPTrackingCapture, getStoredTracking } from "@/components/marketing/lp-tracking-capture";
@@ -115,6 +123,15 @@ function getLpTs(p: any): number {
   const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
   const t3 = p.createdAt ? new Date(p.createdAt).getTime() : 0;
   return Math.max(Number.isFinite(t1) ? t1 : 0, Number.isFinite(t2) ? t2 : 0, Number.isFinite(t3) ? t3 : 0);
+}
+
+function hasFullLpContent(p: any): boolean {
+  if (!p || typeof p !== "object") return false;
+  if (p.externalUrl || p.external_url || p.type === "URL Externa" || p.template === "External") return true;
+  if (p.hero && typeof p.hero === "object" && (p.hero.headline || p.hero.ctaText || p.hero.model)) return true;
+  if (Array.isArray(p.bentoGrid?.items) && p.bentoGrid.items.length > 0) return true;
+  if (typeof p["Config JSON"] === "string" && p["Config JSON"].trim().startsWith("{")) return true;
+  return false;
 }
 
 function PublicLPPage() {
@@ -278,31 +295,38 @@ function PublicLPPage() {
           foundInRam = db.landingPages.find(matchesTarget) || null;
         }
 
-        if (foundInRam && isMounted) {
+        const ramIsComplete = Boolean(foundInRam && hasFullLpContent(foundInRam));
+        if (foundInRam && ramIsComplete && isMounted) {
           setLp(foundInRam);
           setLoading(false);
           recordVisitForLP(foundInRam).catch(() => {});
-          if (cloudStore.getStatus().loadedFromCloud || cloudStore.getStatus().pendingWrite) {
+          if (cloudStore.getStatus().pendingWrite) {
             return;
           }
         }
 
         // =====================================================================
         // PASSO 2: BUSCA PARALELA RÁPIDA (SERVIDOR + APPS SCRIPT CACHE/SHEETS)
-        // Renderiza imediatamente assim que a primeira fonte responder, sem esperar 10s
+        // Renderiza imediatamente assim que a primeira fonte completa responder
         // =====================================================================
-        let bestPage: any = foundInRam || null;
-        let bestTime = getLpTs(foundInRam);
-        let visitRecorded = Boolean(foundInRam);
+        let bestPage: any = ramIsComplete ? foundInRam : null;
+        let bestTime = ramIsComplete ? getLpTs(foundInRam) : 0;
+        let visitRecorded = ramIsComplete;
 
         const applyRemoteIfNewer = (candidate: any) => {
           if (!candidate || deletedIds.has(candidate.id) || !isMounted) return;
+          const candFull = hasFullLpContent(candidate);
+          const bestFull = hasFullLpContent(bestPage);
+          if (bestPage && bestFull && !candFull) return;
+
           const candTime = getLpTs(candidate);
           const candModel = candidate.hero?.model || candidate.heroModel || candidate.hero_model || "split_image";
           const bestModel = bestPage?.hero?.model || bestPage?.heroModel || bestPage?.hero_model || "split_image";
           const isTieBreakUpgrade =
             candTime === bestTime && candModel !== "split_image" && bestModel === "split_image";
-          if (!bestPage || (!cloudStore.getStatus().pendingWrite && (candTime > bestTime || isTieBreakUpgrade))) {
+          const isCompletenessUpgrade = Boolean(candFull && !bestFull);
+
+          if (!bestPage || isCompletenessUpgrade || (!cloudStore.getStatus().pendingWrite && (candTime > bestTime || isTieBreakUpgrade))) {
             bestPage = candidate;
             bestTime = candTime;
             setLp(candidate);
@@ -317,11 +341,11 @@ function PublicLPPage() {
         try {
           await Promise.race([
             Promise.allSettled([
-              fetchPageFromServerPreview(id)
+              fetchPageFromServerPreview(id, { bypassCache: true })
                 .then((srvPage) => applyRemoteIfNewer(srvPage))
                 .catch(() => {}),
               cloudStore
-                .fetchPublicLP(id, { preferSheets: false })
+                .fetchPublicLP(id, { preferSheets: !ramIsComplete, bypassCache: true })
                 .then((cloudPage) => applyRemoteIfNewer(cloudPage))
                 .catch(() => {}),
             ]),
@@ -331,12 +355,12 @@ function PublicLPPage() {
           console.error("Step 2 (Cloud/Sheets Fetch) error:", srvErr);
         }
 
-        if (bestPage) return;
+        if (bestPage && hasFullLpContent(bestPage)) return;
 
         // =====================================================================
-        // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE APENAS SE PASSO 2 NÃO ACHOU NADA E CLOUD AINDA NÃO FOI LIDO
+        // PASSO 3: BOOTSTRAP COMPLETO DO GOOGLE SHEETS / DRIVE SE PASSO 2 NÃO ACHOU COMPLETO
         // =====================================================================
-        if (!cloudStore.getStatus().loadedFromCloud) {
+        if (!cloudStore.getStatus().loadedFromCloud || !bestPage || !hasFullLpContent(bestPage)) {
           try {
             const booted: any = await Promise.race([
               cloudStore.bootstrap(),
@@ -348,14 +372,24 @@ function PublicLPPage() {
               : null;
 
             if (liveMatch && isMounted) {
-              setLp(liveMatch);
-              setLoading(false);
-              recordVisitForLP(liveMatch).catch(() => {});
-              return;
+              applyRemoteIfNewer(liveMatch);
+              if (!bestPage) {
+                setLp(liveMatch);
+                setLoading(false);
+                recordVisitForLP(liveMatch).catch(() => {});
+              }
+              if (hasFullLpContent(liveMatch)) return;
             }
           } catch (liveErr) {
             console.error("Step 3 (Bootstrap Cloud) error:", liveErr);
           }
+        }
+
+        if (bestPage && isMounted) {
+          setLp(bestPage);
+          setLoading(false);
+          if (!visitRecorded) recordVisitForLP(bestPage).catch(() => {});
+          return;
         }
 
         // =====================================================================
@@ -412,6 +446,52 @@ function PublicLPPage() {
 
     loadContent();
 
+    const pollLatestUpdates = async () => {
+      if (!isMounted || !id || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+      if (cloudStore.getStatus().pendingWrite) return;
+      try {
+        const [srvRes, cldRes] = await Promise.allSettled([
+          fetchPageFromServerPreview(id, { bypassCache: true }),
+          cloudStore.fetchPublicLP(id, { bypassCache: true }),
+        ]);
+        const candidates = [
+          srvRes.status === "fulfilled" ? srvRes.value : null,
+          cldRes.status === "fulfilled" ? cldRes.value : null,
+        ].filter(Boolean);
+        if (!isMounted || candidates.length === 0) return;
+        setLp((prev: any) => {
+          let next = prev;
+          for (const cand of candidates) {
+            const candFull = hasFullLpContent(cand);
+            const nextFull = hasFullLpContent(next);
+            if (next && nextFull && !candFull) continue;
+            const prevTime = getLpTs(next);
+            const candTime = getLpTs(cand);
+            const prevModel = next?.hero?.model || next?.heroModel || next?.hero_model || "split_image";
+            const candModel = cand?.hero?.model || cand?.heroModel || cand?.hero_model || "split_image";
+            const isUpgrade =
+              !next ||
+              Boolean(candFull && !nextFull) ||
+              candTime > prevTime ||
+              (candTime === prevTime && candModel !== "split_image" && prevModel === "split_image");
+            if (isUpgrade) next = cand;
+          }
+          return next;
+        });
+      } catch {}
+    };
+
+    const pollTimer = typeof window !== "undefined" ? window.setInterval(pollLatestUpdates, 12000) : null;
+    const handleVisibilityOrFocus = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        pollLatestUpdates();
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleVisibilityOrFocus);
+      document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    }
+
     const unsubscribe = cloudStore.subscribe(() => {
       if (!isMounted || !id) return;
       const deletedSet = new Set(getDeletedLandingPageIds());
@@ -431,11 +511,15 @@ function PublicLPPage() {
       if (liveMatch) {
         setLp((prev: any) => {
           if (!prev) return liveMatch;
+          const candFull = hasFullLpContent(liveMatch);
+          const prevFull = hasFullLpContent(prev);
+          if (prevFull && !candFull) return prev;
           const prevTime = getLpTs(prev);
           const nextTime = getLpTs(liveMatch);
           const prevModel = prev.hero?.model || prev.heroModel || prev.hero_model || "split_image";
           const nextModel = liveMatch.hero?.model || liveMatch.heroModel || liveMatch.hero_model || "split_image";
           const isUpgrade =
+            Boolean(candFull && !prevFull) ||
             nextTime > prevTime ||
             (nextTime === prevTime && nextModel !== "split_image" && prevModel === "split_image");
           return isUpgrade ? liveMatch : prev;
@@ -447,6 +531,11 @@ function PublicLPPage() {
     return () => {
       isMounted = false;
       unsubscribe();
+      if (pollTimer !== null) window.clearInterval(pollTimer);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleVisibilityOrFocus);
+        document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      }
     };
   }, [id]);
 
@@ -751,8 +840,15 @@ function PublicLPPage() {
             </div>
 
             <div className="rounded-2xl overflow-hidden bg-zinc-950/40 border border-zinc-800/80 p-1">
-              <DeepFindSurveyViewer
-                survey={assignedSurvey}
+              <Suspense
+                fallback={
+                  <div className="py-12 flex items-center justify-center text-zinc-400">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                }
+              >
+                <DeepFindSurveyViewer
+                  survey={assignedSurvey}
                 onComplete={async (answers, score, contactInfo) => {
                   const tracking = getStoredTracking();
                   const { source, utm } = parseUtm(typeof window !== "undefined" ? window.location.search : "");
@@ -884,6 +980,7 @@ function PublicLPPage() {
                   toast.success("✅ Cadastro e respostas enviadas com sucesso!");
                 }}
               />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -900,9 +997,16 @@ function PublicLPPage() {
     <div className={cn("min-h-screen w-full relative", cometPage.theme === "dark" ? "bg-zinc-950 text-white" : "bg-white text-zinc-900")}>
       <LPTrackingCapture />
 
-      <LandingPageRenderer
-        page={cometPage}
-        assignedSurvey={assignedSurvey}
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center">
+            <Loader2 className="h-7 w-7 animate-spin text-purple-500" />
+          </div>
+        }
+      >
+        <LandingPageRenderer
+          page={cometPage}
+          assignedSurvey={assignedSurvey}
         onLeadSubmit={async (lead) => {
           const tracking = getStoredTracking();
           const { source, utm } = parseUtm(typeof window !== "undefined" ? window.location.search : "");
@@ -1073,6 +1177,7 @@ function PublicLPPage() {
           toast.success("✅ Dados enviados com sucesso! Entraremos em contato em breve.");
         }}
       />
+      </Suspense>
     </div>
   );
 }

@@ -12,8 +12,6 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { type Playbook, type Lead } from "@/data/mock";
 import { calculateMinQualification, getMinClassificationBadge } from "@/lib/min-qualification";
 import { toast } from "sonner";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 
 export const Route = createFileRoute("/playbook/view")({ 
   component: PlaybookCopilotPage,
@@ -118,6 +116,10 @@ ${notes || 'Sem observações.'}
     toast.loading("Gerando documento PDF...");
     
     try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
       const canvas = await html2canvas(reportRef.current);
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');

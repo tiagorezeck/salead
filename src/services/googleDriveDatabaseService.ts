@@ -583,6 +583,12 @@ export const saveLandingPageToDrive = async (
   );
   if (!cleanUrl) return { supported: false };
 
+  // Se já sabemos nesta sessão que o GAS implantado é legado (< v3.2), não envia SAVE_LANDING_PAGE
+  // pois scripts antigos caem no branch "save" padrão e gravam chaves soltas na raiz do JSON.
+  if (detectedGasVersion === "legacy") {
+    return { supported: false };
+  }
+
   const activeModel =
     landingPage.hero?.model ||
     landingPage.heroModel ||
@@ -594,6 +600,7 @@ export const saveLandingPageToDrive = async (
   const normalizedLp = {
     ...landingPage,
     heroModel: activeModel,
+    hero_model: activeModel,
     hero: landingPage.hero
       ? { ...landingPage.hero, model: activeModel }
       : { model: activeModel },
@@ -609,7 +616,12 @@ export const saveLandingPageToDrive = async (
     });
 
     const returnedLp = res?.landingPage || res?.lp || res?.page;
-    if (res && (res.status === "success" || res.success) && returnedLp) {
+    const isMatchReturned =
+      returnedLp &&
+      ((normalizedLp.id && returnedLp.id === normalizedLp.id) ||
+        (normalizedLp.slug && returnedLp.slug === normalizedLp.slug));
+
+    if (res && (res.status === "success" || res.success) && isMatchReturned) {
       detectedGasVersion = "3.2-FastSheets";
       saveDriveConfig(
         { lastSyncTimestamp: Date.now(), syncStatus: "synced" },
@@ -618,18 +630,88 @@ export const saveLandingPageToDrive = async (
       return { supported: true, landingPage: returnedLp };
     }
 
-    // Old Code.gs without SAVE_LANDING_PAGE returns ping or data without landingPage
-    if (res && !returnedLp) {
-      detectedGasVersion = detectedGasVersion || "legacy";
-      return { supported: false };
-    }
-
-    return { supported: true, landingPage: normalizedLp };
+    // Old Code.gs without SAVE_LANDING_PAGE returns dump/save ack without matching landingPage
+    detectedGasVersion = "legacy";
+    return { supported: false };
   } catch (err: any) {
     if (err?.isBusy) throw err;
     return { supported: false };
   }
 };
+
+function parseMultiColumnConfigJsonDrive(raw: any): any {
+  if (!raw || typeof raw !== "object") return {};
+  const col1 = raw["Config JSON"] ?? raw.configJson ?? raw.config;
+  if (typeof col1 === "object" && col1 !== null) return col1;
+  const col2 = raw["Config JSON (Cont.)"] ?? "";
+  const col3 = raw["Config JSON (Cont. 2)"] ?? "";
+  const combined =
+    (typeof col1 === "string" ? col1 : "") +
+    (typeof col2 === "string" ? col2 : "") +
+    (typeof col3 === "string" ? col3 : "");
+  if (combined.trim().startsWith("{")) {
+    try {
+      return JSON.parse(combined);
+    } catch {}
+  }
+  return {};
+}
+
+function normalizeSlugDrive(str: string): string {
+  return String(str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function lpMatchesTargetDrive(p: any, idOrSlug: string): boolean {
+  if (!p || typeof p !== "object") return false;
+  const targetLow = decodeURIComponent(idOrSlug).trim().toLowerCase();
+  const targetNorm = normalizeSlugDrive(targetLow);
+  if (
+    String(p.id || "").toLowerCase() === targetLow ||
+    String(p.originalId || "").toLowerCase() === targetLow ||
+    String(p.previewToken || "").toLowerCase() === targetLow ||
+    String(p.slug || "").toLowerCase() === targetLow
+  ) {
+    return true;
+  }
+  if (targetNorm) {
+    if (p.slug && normalizeSlugDrive(p.slug) === targetNorm) return true;
+    if (p.name && normalizeSlugDrive(p.name) === targetNorm) return true;
+    if (p.title && normalizeSlugDrive(p.title) === targetNorm) return true;
+  }
+  return false;
+}
+
+function getLpTsDrive(p: any): number {
+  if (!p || typeof p !== "object") return 0;
+  const t1 = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+  const t2 = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+  const t3 =
+    !t1 && !t2 && (p.createdAt || p.created_at)
+      ? new Date(p.createdAt || p.created_at).getTime()
+      : 0;
+  return Math.max(
+    Number.isFinite(t1) ? t1 : 0,
+    Number.isFinite(t2) ? t2 : 0,
+    Number.isFinite(t3) ? t3 : 0
+  );
+}
+
+function hasFullLpContentDrive(p: any): boolean {
+  if (!p || typeof p !== "object") return false;
+  if (p.externalUrl && (p.type === "URL Externa" || p.template === "External" || p.isExternal)) {
+    return true;
+  }
+  return Boolean(
+    p.hero &&
+      typeof p.hero === "object" &&
+      (p.hero.headline || p.hero.subheadline || Object.keys(p.hero).length > 1)
+  );
+}
 
 // LEITURA DIRETA DE LANDING PAGE PÚBLICA DIRETO DO GOOGLE SHEETS / DRIVE (Zero-LocalStorage)
 export const fetchPublicLpFromDrive = async (
@@ -644,18 +726,14 @@ export const fetchPublicLpFromDrive = async (
 
   const normalizeFetchedLp = (raw: any) => {
     if (!raw || typeof raw !== "object") return raw;
-    let parsedConfig: any = {};
-    const jsonRaw = raw["Config JSON"] || raw.configJson || raw.config;
-    if (typeof jsonRaw === "object" && jsonRaw !== null) {
-      parsedConfig = jsonRaw;
-    } else if (typeof jsonRaw === "string") {
-      try {
-        parsedConfig = JSON.parse(jsonRaw);
-      } catch {}
-    }
+    const parsedConfig = parseMultiColumnConfigJsonDrive(raw);
     const merged = { ...parsedConfig, ...raw };
+    const mergedHero =
+      parsedConfig.hero || raw.hero
+        ? { ...(parsedConfig.hero || {}), ...(raw.hero || {}) }
+        : undefined;
     const model =
-      merged.hero?.model ||
+      mergedHero?.model ||
       merged.heroModel ||
       merged.hero_model ||
       parsedConfig.hero?.model ||
@@ -665,34 +743,59 @@ export const fetchPublicLpFromDrive = async (
     return {
       ...merged,
       heroModel: model,
-      hero: merged.hero ? { ...merged.hero, model } : { model },
+      hero_model: model,
+      hero: mergedHero ? { ...mergedHero, model } : { model },
       ...(ts ? { updatedAt: ts, updated_at: ts } : {}),
     };
   };
 
-  const targetLow = decodeURIComponent(idOrSlug).trim().toLowerCase();
-  const findInDb = (db: any) => {
+  const extractBestFromPayload = (db: any): any | null => {
+    if (!db || typeof db !== "object") return null;
     const sourceObj = db?.data && typeof db.data === "object" ? db.data : db;
-    const list = Array.isArray(sourceObj?.landingPages)
-      ? sourceObj.landingPages
-      : Array.isArray(sourceObj?.landing_pages)
-      ? sourceObj.landing_pages
-      : [];
-    const found = list.find(
-      (p: any) =>
-        p &&
-        (String(p.id || "").toLowerCase() === targetLow ||
-          String(p.originalId || "").toLowerCase() === targetLow ||
-          String(p.previewToken || "").toLowerCase() === targetLow ||
-          String(p.slug || "").toLowerCase() === targetLow)
-    );
-    return found ? normalizeFetchedLp(found) : null;
+    const pool: any[] = [];
+
+    if (db.landingPage) pool.push(db.landingPage);
+    if (db.lp) pool.push(db.lp);
+    if (db.page) pool.push(db.page);
+    if (sourceObj !== db && sourceObj.landingPage) pool.push(sourceObj.landingPage);
+    if (sourceObj.activePreviewPage) pool.push(sourceObj.activePreviewPage);
+    if (Array.isArray(sourceObj.landingPages)) pool.push(...sourceObj.landingPages);
+    if (Array.isArray(sourceObj.landing_pages)) pool.push(...sourceObj.landing_pages);
+
+    const matching = pool
+      .filter((p) => lpMatchesTargetDrive(p, idOrSlug))
+      .map(normalizeFetchedLp);
+
+    if (matching.length === 0) return null;
+
+    matching.sort((a, b) => {
+      const aFull = hasFullLpContentDrive(a) ? 1 : 0;
+      const bFull = hasFullLpContentDrive(b) ? 1 : 0;
+      if (bFull !== aFull) return bFull - aFull;
+      const diff = getLpTsDrive(b) - getLpTsDrive(a);
+      if (diff !== 0) return diff;
+      const aModel = a.hero?.model || a.heroModel || "split_image";
+      const bModel = b.hero?.model || b.heroModel || "split_image";
+      if (bModel !== "split_image" && aModel === "split_image") return 1;
+      if (aModel !== "split_image" && bModel === "split_image") return -1;
+      return 0;
+    });
+
+    const winner = matching[0];
+    const maxVisits = Math.max(...matching.map((m) => Number(m.visits || m.viewsCount || 0)));
+    const maxLeads = Math.max(...matching.map((m) => Number(m.leads || m.leads_count || 0)));
+    return {
+      ...winner,
+      ...(maxVisits > Number(winner.visits || 0) ? { visits: maxVisits, viewsCount: maxVisits } : {}),
+      ...(maxLeads > Number(winner.leads || 0) ? { leads: maxLeads, leads_count: maxLeads } : {}),
+    };
   };
 
   let gotLegacyDump = false;
   let gasConfirmedNotFound = false;
 
   try {
+    const useNoCache = options.nocache !== false;
     const res = await executeDriveRequest({
       targetUrl: cleanUrl,
       action: "GET_PUBLIC_LP",
@@ -700,53 +803,46 @@ export const fetchPublicLpFromDrive = async (
       slug: idOrSlug,
       lpId: idOrSlug,
       ...(options.directSheets ? { source: "sheets" } : {}),
-      ...(options.nocache ? { nocache: "1" } : {}),
+      ...(useNoCache ? { nocache: "1" } : {}),
     });
 
-    const lpData = res?.landingPage || res?.lp || res?.page;
-    if (res && (res.status === "success" || res.success) && lpData) {
-      return normalizeFetchedLp(lpData);
-    }
-
-    if (res && (res.statusCode === 404 || res.notFound === true)) {
-      gasConfirmedNotFound = true;
-    }
-
-    // Se o Code.gs ainda não foi atualizado para v3.2, ele devolve o banco completo (landingPages/data) em resposta ao GET_PUBLIC_LP:
     const dumpObj = res?.data && typeof res.data === "object" ? res.data : res;
     if (dumpObj && (Array.isArray(dumpObj.landingPages) || Array.isArray(dumpObj.landing_pages))) {
       detectedGasVersion = detectedGasVersion || "legacy";
       gotLegacyDump = true;
       saveLocalDatabaseRoot(dumpObj);
-      const fromLegacyDump = findInDb(dumpObj);
-      if (fromLegacyDump) return fromLegacyDump;
+    }
+
+    const bestFromRes = extractBestFromPayload(res);
+    if (bestFromRes) {
+      return bestFromRes;
+    }
+
+    if (res && (res.statusCode === 404 || res.notFound === true)) {
+      gasConfirmedNotFound = true;
     }
   } catch (err: any) {
-    // Se GAS respondeu explicitamente 404 via erro, não perde 8s repetindo dumps
     if (String(err?.message || "").includes("não encontrada")) {
       gasConfirmedNotFound = true;
     }
   }
 
-  // Se v3.2 confirmou 404 (já procurou no Sheets, Drive root e LP_{id}.json) e não é forced directSheets, encerra rápido!
   if (gasConfirmedNotFound && !options.directSheets) {
     return null;
   }
 
-  // Fallback para leitura do JSON apenas se GET_PUBLIC_LP falhou por rede (sem dump)
   if (!gotLegacyDump && !gasConfirmedNotFound) {
     try {
-      const db: any = await fetchFromGoogleDrive(cleanUrl, false);
-      const fromCachedDb = findInDb(db);
+      const db: any = await fetchFromGoogleDrive(cleanUrl, options.nocache !== false);
+      const fromCachedDb = extractBestFromPayload(db);
       if (fromCachedDb) return fromCachedDb;
     } catch {}
   }
 
-  // Leitura direta pesada de planilhas só roda quando explicitamente pedida (preferSheets)
   if (options.directSheets && !gasConfirmedNotFound) {
     try {
       const forcedDb: any = await forceReadSpreadsheetFromDrive(cleanUrl);
-      const fromSheet = findInDb(forcedDb);
+      const fromSheet = extractBestFromPayload(forcedDb);
       if (fromSheet) return fromSheet;
     } catch {}
   }

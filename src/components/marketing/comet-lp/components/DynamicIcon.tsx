@@ -1,5 +1,192 @@
 import React from "react";
-import * as LucideIcons from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  Award,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Bot,
+  Briefcase,
+  Building,
+  Building2,
+  Calendar,
+  Camera,
+  Check,
+  CheckCircle,
+  CheckCircle2,
+  Circle,
+  ClipboardList,
+  Clock,
+  Cloud,
+  Compass,
+  Cpu,
+  CreditCard,
+  Database,
+  DollarSign,
+  Eye,
+  FileText,
+  Filter,
+  Flame,
+  Gift,
+  Globe,
+  GraduationCap,
+  Headphones,
+  Heart,
+  HeartHandshake,
+  HelpCircle,
+  Home,
+  Hourglass,
+  Key,
+  Laptop,
+  Layers,
+  Lightbulb,
+  LineChart,
+  Lock,
+  Mail,
+  MapPin,
+  Megaphone,
+  MessageCircle,
+  MessageSquare,
+  Music,
+  Package,
+  Palette,
+  Percent,
+  Phone,
+  PieChart,
+  PiggyBank,
+  Play,
+  RefreshCw,
+  Rocket,
+  Search,
+  Send,
+  Server,
+  Settings,
+  Share2,
+  Shield,
+  ShieldCheck,
+  Smartphone,
+  Smile,
+  Sparkles,
+  Star,
+  Stethoscope,
+  Sun,
+  Tag,
+  Target,
+  ThumbsUp,
+  Ticket,
+  Timer,
+  Trash2,
+  TrendingUp,
+  Trophy,
+  Upload,
+  User,
+  UserCheck,
+  Users,
+  Video,
+  Wallet,
+  Wrench,
+  X,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  Award,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Bot,
+  Briefcase,
+  Building,
+  Building2,
+  Calendar,
+  Camera,
+  Check,
+  CheckCircle,
+  CheckCircle2,
+  Circle,
+  ClipboardList,
+  Clock,
+  Cloud,
+  Compass,
+  Cpu,
+  CreditCard,
+  Database,
+  DollarSign,
+  Eye,
+  FileText,
+  Filter,
+  Flame,
+  Gift,
+  Globe,
+  GraduationCap,
+  Headphones,
+  Heart,
+  HeartHandshake,
+  HelpCircle,
+  Home,
+  Hourglass,
+  Key,
+  Laptop,
+  Layers,
+  Lightbulb,
+  LineChart,
+  Lock,
+  Mail,
+  MapPin,
+  Megaphone,
+  MessageCircle,
+  MessageSquare,
+  Music,
+  Package,
+  Palette,
+  Percent,
+  Phone,
+  PieChart,
+  PiggyBank,
+  Play,
+  RefreshCw,
+  Rocket,
+  Search,
+  Send,
+  Server,
+  Settings,
+  Share2,
+  Shield,
+  ShieldCheck,
+  Smartphone,
+  Smile,
+  Sparkles,
+  Star,
+  Stethoscope,
+  Sun,
+  Tag,
+  Target,
+  ThumbsUp,
+  Ticket,
+  Timer,
+  Trash2,
+  TrendingUp,
+  Trophy,
+  Upload,
+  User,
+  UserCheck,
+  Users,
+  Video,
+  Wallet,
+  Wrench,
+  X,
+  Zap,
+};
+
+const LOWERCASE_ICON_MAP: Record<string, LucideIcon> = Object.fromEntries(
+  Object.entries(ICON_MAP).map(([key, icon]) => [key.toLowerCase(), icon])
+);
 
 interface DynamicIconProps {
   name?: string;
@@ -12,24 +199,18 @@ export const DynamicIcon: React.FC<DynamicIconProps> = ({
   className = "w-5 h-5",
   size,
 }) => {
-  // Normalize name
   const cleanName = name ? name.trim() : "Zap";
-  
-  // Try direct lookup
-  let IconComponent = (LucideIcons as any)[cleanName];
 
-  // Try PascalCase
+  let IconComponent: LucideIcon | undefined = ICON_MAP[cleanName];
+
   if (!IconComponent) {
     const pascalCase = cleanName
-      .replace(/[-_](\w)/g, (_, c) => c.toUpperCase())
-      .replace(/^\w/, (c) => c.toUpperCase());
-    IconComponent = (LucideIcons as any)[pascalCase];
+      .replace(/[-_\s]+(\w)/g, (_, c: string) => c.toUpperCase())
+      .replace(/^\w/, (c: string) => c.toUpperCase());
+    IconComponent = ICON_MAP[pascalCase] || LOWERCASE_ICON_MAP[cleanName.toLowerCase()];
   }
 
-  // Fallback to Zap
-  if (!IconComponent) {
-    IconComponent = LucideIcons.Zap;
-  }
+  const ResolvedIcon = IconComponent || Zap;
 
-  return <IconComponent className={className} size={size} />;
+  return <ResolvedIcon className={className} size={size} />;
 };

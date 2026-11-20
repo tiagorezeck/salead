@@ -705,10 +705,13 @@ export const mapLPFromDb = (row: any): LandingPage => {
   if (!row || typeof row !== 'object') return { id: '', title: 'Landing Page', name: 'Landing Page' } as any;
   
   let config: any = {};
-  const rawConfigSource = row["Config JSON"] ?? row.configJson ?? row.config ?? row["Config"];
+  const rawConfigSource =
+    typeof row["Config JSON"] === "string"
+      ? `${row["Config JSON"]}${typeof row["Config JSON (Cont.)"] === "string" ? row["Config JSON (Cont.)"] : ""}${typeof row["Config JSON (Cont. 2)"] === "string" ? row["Config JSON (Cont. 2)"] : ""}`
+      : (row["Config JSON"] ?? row.configJson ?? row.config ?? row["Config"]);
   if (typeof rawConfigSource === 'object' && rawConfigSource !== null) {
     config = rawConfigSource;
-  } else if (typeof rawConfigSource === 'string') {
+  } else if (typeof rawConfigSource === 'string' && rawConfigSource.trim()) {
     try { config = JSON.parse(rawConfigSource); } catch {}
   }
 
@@ -2693,7 +2696,7 @@ export function useData() {
           fetch('/api/landing-pages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item),
+            body: JSON.stringify({ ...item, _skipGasSync: true }),
           }),
         ]);
       } catch (netErr) {
@@ -2833,7 +2836,7 @@ export function useData() {
           fetch(`/api/landing-pages/${encodeURIComponent(targetId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updatedItem),
+            body: JSON.stringify({ ...updatedItem, _skipGasSync: true }),
           }).catch(() => null),
         ]);
 

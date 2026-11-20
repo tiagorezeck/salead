@@ -58,7 +58,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
         hero: page.hero ? { ...page.hero, model: activeHeroModel } : page.hero,
       };
       cloudStore.saveLandingPageOnly(normalizedPage, { immediate: true }).catch(() => {});
-      syncPageWithServerPreview(normalizedPage).catch(() => {});
+      syncPageWithServerPreview(normalizedPage, { skipGasSync: true }).catch(() => {});
     }
   }, [isOpen, page?.id, versionParam, activeHeroModel]);
 
@@ -105,7 +105,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
     saveLandingPageToStorage(pageToSync, { immediate: true });
     await Promise.allSettled([
       cloudStore.saveLandingPageOnly(pageToSync, { immediate: true }),
-      syncPageWithServerPreview(pageToSync),
+      syncPageWithServerPreview(pageToSync, { skipGasSync: true }),
     ]);
     const a = document.createElement("a");
     a.href = previewUrl;
@@ -131,7 +131,7 @@ export const NetworkPreviewModal: React.FC<NetworkPreviewModalProps> = ({
     };
 
     saveLandingPageToStorage(updatedPage, { immediate: true });
-    await syncPageWithServerPreview(updatedPage).catch(() => {});
+    await syncPageWithServerPreview(updatedPage, { skipGasSync: true }).catch(() => {});
     if (onUpdatePage) {
       onUpdatePage(updatedPage);
     }

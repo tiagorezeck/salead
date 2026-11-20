@@ -328,13 +328,60 @@ function isCorruptedLeadRowAsLp(sp: any): boolean {
   return false;
 }
 
+function hasFullLpContentServer(p: any): boolean {
+  if (!p || typeof p !== "object") return false;
+  if (p.externalUrl || p.external_url || p.type === "URL Externa" || p.template === "External") return true;
+  if (p.hero && typeof p.hero === "object" && (p.hero.headline || p.hero.ctaText || p.hero.model)) return true;
+  if (Array.isArray(p.bentoGrid?.items) && p.bentoGrid.items.length > 0) return true;
+  if (typeof p["Config JSON"] === "string" && p["Config JSON"].trim().startsWith("{")) return true;
+  return false;
+}
+
+function lpMatchesTargetServer(p: any, rawId: string, normId: string, slugId: string): boolean {
+  if (!p || isCorruptedLeadRowAsLp(p)) return false;
+  if (p.id === rawId || String(p.id || "").toLowerCase() === normId || p.id === slugId) return true;
+  if (p.slug === rawId || String(p.slug || "").toLowerCase() === normId || normalizeSlugServer(p.slug) === slugId) return true;
+  if (p.previewToken === rawId || String(p.previewToken || "").toLowerCase() === normId || p.previewToken === slugId) return true;
+  if (p.originalId === rawId || String(p.originalId || "").toLowerCase() === normId) return true;
+  if (p.config && (p.config.slug === rawId || p.config.slug === normId || p.config.slug === slugId || p.config.client_id === rawId || p.config.id === rawId)) return true;
+
+  const pNameNorm = normalizeSlugServer(p.name || p.title);
+  if (pNameNorm && slugId && pNameNorm === slugId) return true;
+
+  return false;
+}
+
+function pickBestNormalizedLpServer(candidates: any[]): any | null {
+  if (!candidates || candidates.length === 0) return null;
+  const normalized = candidates.map((c) => normalizeLpServer(c)).filter(Boolean);
+  if (normalized.length === 0) return null;
+  normalized.sort((a, b) => {
+    const aFull = hasFullLpContentServer(a) ? 1 : 0;
+    const bFull = hasFullLpContentServer(b) ? 1 : 0;
+    if (aFull !== bFull) return bFull - aFull;
+
+    const diff = getLpTimestampMs(b) - getLpTimestampMs(a);
+    if (diff !== 0) return diff;
+
+    const aModel = a.hero?.model || a.heroModel || a.hero_model || "split_image";
+    const bModel = b.hero?.model || b.heroModel || b.hero_model || "split_image";
+    if (bModel !== "split_image" && aModel === "split_image") return 1;
+    if (aModel !== "split_image" && bModel === "split_image") return -1;
+    return 0;
+  });
+  return normalized[0];
+}
+
 function normalizeLpServer(raw: any): any {
   if (!raw || typeof raw !== "object") return raw;
   let parsedConfig: any = {};
-  const rawConfigSource = raw["Config JSON"] ?? raw.configJson ?? raw.config;
+  const rawConfigSource =
+    typeof raw["Config JSON"] === "string"
+      ? `${raw["Config JSON"]}${typeof raw["Config JSON (Cont.)"] === "string" ? raw["Config JSON (Cont.)"] : ""}${typeof raw["Config JSON (Cont. 2)"] === "string" ? raw["Config JSON (Cont. 2)"] : ""}`
+      : (raw["Config JSON"] ?? raw.configJson ?? raw.config);
   if (typeof rawConfigSource === "object" && rawConfigSource !== null) {
     parsedConfig = rawConfigSource;
-  } else if (typeof rawConfigSource === "string") {
+  } else if (typeof rawConfigSource === "string" && rawConfigSource.trim()) {
     try { parsedConfig = JSON.parse(rawConfigSource); } catch {}
   }
   const merged = { ...parsedConfig, ...raw };
@@ -354,7 +401,7 @@ function normalizeLpServer(raw: any): any {
     ...merged,
     heroModel: model,
     hero_model: model,
-    hero: mergedHero ? { ...mergedHero, model } : { model },
+    hero: mergedHero ? { ...mergedHero, model } : undefined,
     ...(ts ? { updatedAt: ts, updated_at: ts } : {}),
   };
 }
@@ -726,80 +773,59 @@ export async function forwardSurveyResponseToGoogleSheetsServer(responsePayload:
 const previewPagesStore = new Map<string, any>();
 let lastSavedPreviewPage: any = null;
 
-// Unified resolver: busca na memória, disco e nuvem comparando timestamps reais (sub-5ms se recém-salvo)
-export async function findLandingPageAnywhere(tokenOrId: string): Promise<any | null> {
+// Unified resolver: busca na memória, disco e nuvem comparando completude + timestamps reais
+export async function findLandingPageAnywhere(tokenOrId: string, options?: { bypassCache?: boolean }): Promise<any | null> {
   if (!tokenOrId) return null;
   const rawId = tokenOrId.trim();
   const normId = rawId.toLowerCase();
   const slugId = normalizeSlugServer(rawId);
+  const bypassCache = Boolean(options?.bypassCache);
 
-  const matches = (p: any) => {
-    if (!p || isCorruptedLeadRowAsLp(p)) return false;
-    if (p.id === rawId || String(p.id || "").toLowerCase() === normId || p.id === slugId) return true;
-    if (p.slug === rawId || String(p.slug || "").toLowerCase() === normId || normalizeSlugServer(p.slug) === slugId) return true;
-    if (p.previewToken === rawId || String(p.previewToken || "").toLowerCase() === normId || p.previewToken === slugId) return true;
-    if (p.config && (p.config.slug === rawId || p.config.slug === normId || p.config.slug === slugId || p.config.client_id === rawId)) return true;
-
-    const pNameNorm = normalizeSlugServer(p.name || p.title);
-    if (pNameNorm && slugId && pNameNorm === slugId) return true;
-
-    return false;
-  };
+  const matches = (p: any) => lpMatchesTargetServer(p, rawId, normId, slugId);
 
   // 1. Memória ultra-rápida (preview store)
-  const memPage =
+  const memMatches = Array.from(new Set(Array.from(previewPagesStore.values()))).filter(matches);
+  const directMem =
     previewPagesStore.get(rawId) ||
     previewPagesStore.get(normId) ||
-    previewPagesStore.get(slugId) ||
-    Array.from(previewPagesStore.values()).find(matches);
+    previewPagesStore.get(slugId);
+  if (directMem && matches(directMem) && !memMatches.includes(directMem)) {
+    memMatches.push(directMem);
+  }
+  const memPage = pickBestNormalizedLpServer(memMatches);
 
-  // Se foi salvo recentemente em RAM (< 15s), retorna instantaneamente (< 5ms)
-  if (memPage && Date.now() - Number(memPage._previewSavedAt || 0) < 15000) {
-    return normalizeLpServer(memPage);
+  // Se foi salvo recentemente em RAM (< 15s) e completo, retorna instantaneamente (< 5ms)
+  if (!bypassCache && memPage && hasFullLpContentServer(memPage) && Date.now() - Number(memPage._previewSavedAt || 0) < 15000) {
+    return memPage;
   }
 
   // 2. Disco persistente do servidor
-  const diskPages = readStoredLandingPages();
-  const fromDisk = diskPages.find(matches);
+  const diskPages = readStoredLandingPages().filter(matches);
+  const localCandidates = [...memMatches, ...diskPages];
 
-  const localBest = memPage && (!fromDisk || getLpTimestampMs(memPage) >= getLpTimestampMs(fromDisk))
-    ? memPage
-    : fromDisk;
-
-  // 3. Fonte mestre em nuvem Google Apps Script (sempre compara timestamp com localBest se não for recém-salvo em RAM)
-  const cloudDb = await fetchCloudDbFromGasServer().catch(() => null);
-  let fromCloud: any = null;
+  // 3. Fonte mestre em nuvem Google Apps Script
+  const cloudDb = await fetchCloudDbFromGasServer(bypassCache).catch(() => null);
+  const cloudMatched: any[] = [];
   if (cloudDb) {
     const deletedSet = new Set(Array.isArray(cloudDb.deletedLpIds) ? cloudDb.deletedLpIds.map(String) : []);
     const cloudCandidates: any[] = [];
+    if (cloudDb.landingPage) cloudCandidates.push(cloudDb.landingPage);
     if (cloudDb.activePreviewPage) cloudCandidates.push(cloudDb.activePreviewPage);
     if (Array.isArray(cloudDb.landingPages)) cloudCandidates.push(...cloudDb.landingPages);
     if (Array.isArray(cloudDb.landing_pages)) cloudCandidates.push(...cloudDb.landing_pages);
-    const matchedCloud = cloudCandidates.find(
-      (p) => p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug))) && matches(p)
-    );
-    if (matchedCloud) {
-      fromCloud = normalizeLpServer(matchedCloud);
-    }
+    cloudCandidates.forEach((p) => {
+      if (p && !deletedSet.has(String(p.id || "")) && !(p.slug && deletedSet.has(String(p.slug))) && matches(p)) {
+        cloudMatched.push(p);
+      }
+    });
   }
 
-  if (localBest && fromCloud) {
-    const localTime = getLpTimestampMs(localBest);
-    const cloudTime = getLpTimestampMs(fromCloud);
-    const winner = localTime > cloudTime ? normalizeLpServer(localBest) : fromCloud;
+  const winner = pickBestNormalizedLpServer([...localCandidates, ...cloudMatched]);
+  if (winner) {
     previewPagesStore.set(winner.id, winner);
     if (winner.slug) previewPagesStore.set(winner.slug, winner);
+    if (winner.previewToken) previewPagesStore.set(winner.previewToken, winner);
     return winner;
-  }
-
-  if (fromCloud) {
-    previewPagesStore.set(fromCloud.id, fromCloud);
-    if (fromCloud.slug) previewPagesStore.set(fromCloud.slug, fromCloud);
-    return fromCloud;
-  }
-
-  if (localBest) {
-    return normalizeLpServer(localBest);
   }
 
   // 4. Presets e templates locais (apenas fallback final, sem poluir previewPagesStore)
@@ -1087,9 +1113,10 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
       console.warn("Notice: server disk write failed in preview sync:", diskErr);
     }
 
-    // 3. Persiste atomicamente no Google Apps Script / Sheets sempre que configurado
+    // 3. Persiste atomicamente no Google Apps Script / Sheets apenas se não marcado com _skipGasSync
+    const shouldSyncGas = !(rawPage._skipGasSync === true || req.body?._skipGasSync === true);
     const webappUrl = getDriveWebAppUrlServer();
-    if (webappUrl) {
+    if (webappUrl && shouldSyncGas) {
       try {
         const controller = new AbortController();
         const tId = setTimeout(() => controller.abort(), 9000);
@@ -1117,6 +1144,7 @@ cometLpRouter.post("/api/pages/preview", async (req, res) => {
 // Retrieve preview page by Query string (id, pageId, token, slug)
 cometLpRouter.get("/api/pages/preview", async (req, res) => {
   const tokenOrId = (req.query.id || req.query.pageId || req.query.token || req.query.slug) as string;
+  const bypassCache = req.query.nocache === "1" || req.query.nocache === "true";
   if (!tokenOrId) {
     if (lastSavedPreviewPage) {
       return res.json({ success: true, page: lastSavedPreviewPage });
@@ -1124,7 +1152,7 @@ cometLpRouter.get("/api/pages/preview", async (req, res) => {
     return res.status(400).json({ error: "Missing tokenOrId query parameter" });
   }
 
-  const page = (await findLandingPageAnywhere(tokenOrId)) || lastSavedPreviewPage;
+  const page = (await findLandingPageAnywhere(tokenOrId, { bypassCache })) || lastSavedPreviewPage;
 
   if (page) {
     return res.json({ success: true, page });
@@ -1136,11 +1164,12 @@ cometLpRouter.get("/api/pages/preview", async (req, res) => {
 // Retrieve preview page by ID or Token
 cometLpRouter.get("/api/pages/preview/:tokenOrId", async (req, res) => {
   const { tokenOrId } = req.params;
+  const bypassCache = req.query.nocache === "1" || req.query.nocache === "true";
   if (!tokenOrId) {
     return res.status(400).json({ error: "Missing tokenOrId" });
   }
 
-  const page = (await findLandingPageAnywhere(tokenOrId)) || lastSavedPreviewPage;
+  const page = (await findLandingPageAnywhere(tokenOrId, { bypassCache })) || lastSavedPreviewPage;
 
   if (page) {
     return res.json({ success: true, page });
@@ -1156,16 +1185,21 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
     return res.status(400).json({ error: "Missing tokenOrId" });
   }
 
-  // 0. Memória recente (recém salva via Editor / Preview nos últimos 15s) retorna em < 5ms
-  const fastLocal =
-    previewPagesStore.get(tokenOrId) ||
-    previewPagesStore.get(tokenOrId.trim().toLowerCase()) ||
-    Array.from(previewPagesStore.values()).find(
-      (p) => p && (p.id === tokenOrId || p.slug === tokenOrId || p.previewToken === tokenOrId)
-    );
-  if (fastLocal && Date.now() - Number(fastLocal._previewSavedAt || 0) < 15000) {
-    const normalizedFast = normalizeLpServer(fastLocal);
-    return res.json({ success: true, page: normalizedFast, landingPage: normalizedFast, source: "preview-memory" });
+  const rawId = tokenOrId.trim();
+  const normId = rawId.toLowerCase();
+  const slugId = normalizeSlugServer(rawId);
+  const bypassCache = req.query.nocache === "1" || req.query.nocache === "true";
+  const matchesTarget = (p: any) => lpMatchesTargetServer(p, rawId, normId, slugId);
+
+  // 0. Memória recente (recém salva via Editor / Preview nos últimos 15s) retorna em < 5ms quando completa e sem nocache
+  const fastCandidates = Array.from(new Set(Array.from(previewPagesStore.values()))).filter(matchesTarget);
+  const directFast = previewPagesStore.get(rawId) || previewPagesStore.get(normId) || previewPagesStore.get(slugId);
+  if (directFast && matchesTarget(directFast) && !fastCandidates.includes(directFast)) {
+    fastCandidates.push(directFast);
+  }
+  const fastLocal = pickBestNormalizedLpServer(fastCandidates);
+  if (!bypassCache && fastLocal && hasFullLpContentServer(fastLocal) && Date.now() - Number(fastLocal._previewSavedAt || 0) < 15000) {
+    return res.json({ success: true, page: fastLocal, landingPage: fastLocal, source: "preview-memory" });
   }
 
   // 1. Consulta direta ao Google Apps Script (fonte mestre em nuvem) quando configurado
@@ -1174,9 +1208,10 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
     try {
       const urlObj = new URL(webappUrl);
       urlObj.searchParams.set("action", "GET_PUBLIC_LP");
-      urlObj.searchParams.set("id", tokenOrId);
-      urlObj.searchParams.set("slug", tokenOrId);
-      urlObj.searchParams.set("lpId", tokenOrId);
+      urlObj.searchParams.set("id", rawId);
+      urlObj.searchParams.set("slug", rawId);
+      urlObj.searchParams.set("lpId", rawId);
+      urlObj.searchParams.set("nocache", "1");
       urlObj.searchParams.set("t", Date.now().toString());
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 9000);
@@ -1185,22 +1220,34 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
       const text = await gasRes.text();
       if (text && !text.trim().startsWith("<")) {
         const parsed = JSON.parse(text);
-        let cloudLp = parsed?.landingPage || parsed?.lp || parsed?.page;
-        if (!cloudLp && Array.isArray(parsed?.landingPages)) {
-          const qLow = tokenOrId.trim().toLowerCase();
-          cloudLp = parsed.landingPages.find(
-            (p: any) =>
-              p &&
-              (String(p.id || "").toLowerCase() === qLow ||
-                String(p.slug || "").toLowerCase() === qLow ||
-                String(p.previewToken || "").toLowerCase() === qLow)
-          );
+        const rawPool: any[] = [];
+        for (const item of [
+          parsed?.landingPage,
+          parsed?.lp,
+          parsed?.page,
+          parsed?.activePreviewPage,
+          parsed?.data?.landingPage,
+          parsed?.data?.activePreviewPage,
+        ]) {
+          if (item && typeof item === "object") rawPool.push(item);
         }
-        if (cloudLp && (cloudLp.id || cloudLp.slug || cloudLp.hero)) {
-          const normalizedCloud = normalizeLpServer(cloudLp);
-          const localTime = getLpTimestampMs(fastLocal);
-          const cloudTime = getLpTimestampMs(normalizedCloud);
-          const winner = fastLocal && localTime > cloudTime ? normalizeLpServer(fastLocal) : normalizedCloud;
+        for (const arr of [
+          parsed?.landingPages,
+          parsed?.landing_pages,
+          parsed?.data?.landingPages,
+          parsed?.data?.landing_pages,
+        ]) {
+          if (Array.isArray(arr)) rawPool.push(...arr);
+        }
+        const matchedCloudList = rawPool.filter(matchesTarget);
+        const diskMatched = readStoredLandingPages().filter(matchesTarget);
+        const winner = pickBestNormalizedLpServer([
+          ...(fastLocal ? [fastLocal] : []),
+          ...diskMatched,
+          ...matchedCloudList,
+        ]);
+
+        if (winner && (winner.id || winner.slug || winner.hero || winner.externalUrl)) {
           previewPagesStore.set(winner.id, winner);
           if (winner.slug) previewPagesStore.set(winner.slug, winner);
           if (winner.previewToken) previewPagesStore.set(winner.previewToken, winner);
@@ -1209,14 +1256,14 @@ cometLpRouter.get("/api/public/lp/:tokenOrId", async (req, res) => {
             page: winner,
             landingPage: winner,
             survey: parsed?.survey || null,
-            source: winner === normalizedCloud ? "google-cloud" : "preview-memory",
+            source: matchedCloudList.length > 0 ? "google-cloud" : "preview-memory",
           });
         }
       }
     } catch {}
   }
 
-  const page = await findLandingPageAnywhere(tokenOrId);
+  const page = await findLandingPageAnywhere(rawId, { bypassCache });
   if (page) {
     return res.json({ success: true, page, landingPage: page });
   }
@@ -2612,10 +2659,11 @@ cometLpRouter.post("/api/landing-pages", async (req, res) => {
     if (newPage.previewToken) previewPagesStore.set(newPage.previewToken, newPage);
     lastSavedPreviewPage = newPage;
 
-    // 3. Persiste no GAS sempre que configurado
+    // 3. Persiste no GAS sempre que configurado (salvo se _skipGasSync já está sincronizando via cloudStore)
     let synced = false;
+    const shouldSyncGas = body?._skipGasSync !== true;
     const webappUrl = getDriveWebAppUrlServer();
-    if (webappUrl) {
+    if (webappUrl && shouldSyncGas) {
       try {
         const controller = new AbortController();
         const tId = setTimeout(() => controller.abort(), 9000);
@@ -2717,10 +2765,11 @@ const handleUpdateLandingPage = async (req: Request, res: Response) => {
     if (updatedPage.previewToken) previewPagesStore.set(updatedPage.previewToken, updatedPage);
     lastSavedPreviewPage = updatedPage;
 
-    // Persiste atomicamente no GAS sempre que configurado
+    // Persiste atomicamente no GAS sempre que configurado (salvo se _skipGasSync já está sincronizando via cloudStore)
     let synced = false;
+    const shouldSyncGas = !(rawBody?._skipGasSync === true || body?._skipGasSync === true);
     const webappUrl = getDriveWebAppUrlServer();
-    if (webappUrl) {
+    if (webappUrl && shouldSyncGas) {
       try {
         const controller = new AbortController();
         const tId = setTimeout(() => controller.abort(), 9000);

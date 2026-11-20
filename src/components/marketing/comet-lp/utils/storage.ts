@@ -136,7 +136,10 @@ export function saveSingleLandingPage(page: LandingPage, options: { immediate?: 
   return updated;
 }
 
-export async function syncPageWithServerPreview(page: LandingPage): Promise<boolean> {
+export async function syncPageWithServerPreview(
+  page: LandingPage,
+  options: { skipGasSync?: boolean } = {}
+): Promise<boolean> {
   try {
     const nowIso = new Date().toISOString();
     const payload = normalizePage({
@@ -144,10 +147,11 @@ export async function syncPageWithServerPreview(page: LandingPage): Promise<bool
       updatedAt: (page as any).updatedAt || (page as any).updated_at || nowIso,
       updated_at: (page as any).updated_at || (page as any).updatedAt || nowIso,
     } as any);
+    const bodyPayload = options.skipGasSync ? { ...payload, _skipGasSync: true } : payload;
     const res = await fetch("/api/pages/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(bodyPayload),
     });
     return res.ok;
   } catch {
@@ -155,9 +159,13 @@ export async function syncPageWithServerPreview(page: LandingPage): Promise<bool
   }
 }
 
-export async function fetchPageFromServerPreview(tokenOrId: string): Promise<LandingPage | null> {
+export async function fetchPageFromServerPreview(
+  tokenOrId: string,
+  options: { bypassCache?: boolean } = {}
+): Promise<LandingPage | null> {
   if (!tokenOrId) return null;
   const cleanId = encodeURIComponent(tokenOrId.trim());
+  const qs = options.bypassCache ? `?nocache=1&_ts=${Date.now()}` : "";
 
   const fetchEndpoint = async (url: string): Promise<LandingPage | null> => {
     const controller = new AbortController();
@@ -180,8 +188,8 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
 
   try {
     const apiResults = await Promise.allSettled([
-      fetchEndpoint(`/api/public/lp/${cleanId}`),
-      fetchEndpoint(`/api/pages/preview/${cleanId}`),
+      fetchEndpoint(`/api/public/lp/${cleanId}${qs}`),
+      fetchEndpoint(`/api/pages/preview/${cleanId}${qs}`),
     ]);
 
     const candidates: LandingPage[] = [];
@@ -193,6 +201,10 @@ export async function fetchPageFromServerPreview(tokenOrId: string): Promise<Lan
 
     if (candidates.length > 0) {
       candidates.sort((a, b) => {
+        const aFull = (a.hero && (a.hero.headline || a.hero.ctaText || a.hero.model)) || (a as any).externalUrl ? 1 : 0;
+        const bFull = (b.hero && (b.hero.headline || b.hero.ctaText || b.hero.model)) || (b as any).externalUrl ? 1 : 0;
+        if (aFull !== bFull) return bFull - aFull;
+
         const diff = getLpTs(b) - getLpTs(a);
         if (diff !== 0) return diff;
         const aModel = a.hero?.model || (a as any).heroModel || (a as any).hero_model || "split_image";

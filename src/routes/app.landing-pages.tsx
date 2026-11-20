@@ -7,13 +7,23 @@ import {
   Monitor, ChevronLeft, ChevronRight, ShieldCheck, MoreHorizontal,
   AlertTriangle, X, Copy
 } from "lucide-react";
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { toast } from "sonner";
-import { Editor } from "@/components/marketing/comet-lp/components/Editor";
-import { AIModalGenerator } from "@/components/marketing/comet-lp/components/AIModalGenerator";
-import { TemplatePickerModal } from "@/components/marketing/comet-lp/components/TemplatePickerModal";
-import { ExternalLPModal } from "@/components/marketing/comet-lp/components/ExternalLPModal";
-import { SmartLinkModal } from "@/components/marketing/smart-link-modal";
+const Editor = lazy(() =>
+  import("@/components/marketing/comet-lp/components/Editor").then((m) => ({ default: m.Editor }))
+);
+const AIModalGenerator = lazy(() =>
+  import("@/components/marketing/comet-lp/components/AIModalGenerator").then((m) => ({ default: m.AIModalGenerator }))
+);
+const TemplatePickerModal = lazy(() =>
+  import("@/components/marketing/comet-lp/components/TemplatePickerModal").then((m) => ({ default: m.TemplatePickerModal }))
+);
+const ExternalLPModal = lazy(() =>
+  import("@/components/marketing/comet-lp/components/ExternalLPModal").then((m) => ({ default: m.ExternalLPModal }))
+);
+const SmartLinkModal = lazy(() =>
+  import("@/components/marketing/smart-link-modal").then((m) => ({ default: m.SmartLinkModal }))
+);
 import { ensureCometLP, createBlankCometLP } from "@/components/marketing/comet-lp/utils/cometAdapter";
 import { PRESET_TEMPLATES } from "@/components/marketing/comet-lp/data/templates";
 import { HERO_MODELS } from "@/components/marketing/comet-lp/components/HeroModelSelector";
@@ -376,42 +386,51 @@ function LPPage() {
   if (editingLP) {
     const cometPage = ensureCometLP(editingLP);
     return (
-      <Editor
-        page={cometPage}
-        onSave={async (updatedPage) => {
-          try {
-            const activeModel = updatedPage.hero?.model || updatedPage.heroModel || updatedPage.hero_model || "split_image";
-            const currentStatus = editingLP.status || "Ativa";
-            const newStatus = updatedPage.status === "draft"
-              ? "Pausada"
-              : (currentStatus === "Teste" || currentStatus === "Pausada" ? currentStatus : "Ativa");
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-3 text-zinc-300">
+            <div className="h-8 w-8 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
+            <span className="text-xs font-semibold">Carregando Construtor Visual COMET...</span>
+          </div>
+        }
+      >
+        <Editor
+          page={cometPage}
+          onSave={async (updatedPage) => {
+            try {
+              const activeModel = updatedPage.hero?.model || updatedPage.heroModel || updatedPage.hero_model || "split_image";
+              const currentStatus = editingLP.status || "Ativa";
+              const newStatus = updatedPage.status === "draft"
+                ? "Pausada"
+                : (currentStatus === "Teste" || currentStatus === "Pausada" ? currentStatus : "Ativa");
 
-            const payload = {
-              ...updatedPage,
-              heroModel: activeModel,
-              hero_model: activeModel,
-              hero: {
-                ...updatedPage.hero,
-                model: activeModel,
-              },
-              name: updatedPage.title || editingLP.name,
-              template: "COMET",
-              status: newStatus,
-              visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
-              leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
-              surveyId: updatedPage.surveyId || editingLP.surveyId || undefined,
-            };
+              const payload = {
+                ...updatedPage,
+                heroModel: activeModel,
+                hero_model: activeModel,
+                hero: {
+                  ...updatedPage.hero,
+                  model: activeModel,
+                },
+                name: updatedPage.title || editingLP.name,
+                template: "COMET",
+                status: newStatus,
+                visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
+                leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
+                surveyId: updatedPage.surveyId || editingLP.surveyId || undefined,
+              };
 
-            const saved = await updateLandingPage(editingLP.id || updatedPage.id, payload);
-            setEditingLP(saved || payload);
-            toast.success("Landing Page salva e sincronizada no Google Sheets!");
-          } catch (e) {
-            console.error("Erro ao salvar LP:", e);
-            toast.error("Erro ao salvar alterações da Landing Page.");
-          }
-        }}
-        onBackToDashboard={() => setEditingLP(null)}
-      />
+              const saved = await updateLandingPage(editingLP.id || updatedPage.id, payload);
+              setEditingLP(saved || payload);
+              toast.success("Landing Page salva e sincronizada no Google Sheets!");
+            } catch (e) {
+              console.error("Erro ao salvar LP:", e);
+              toast.error("Erro ao salvar alterações da Landing Page.");
+            }
+          }}
+          onBackToDashboard={() => setEditingLP(null)}
+        />
+      </Suspense>
     );
   }
 
@@ -995,7 +1014,7 @@ function LPPage() {
                       </button>
                       <Link
                         to="/lp/$id"
-                        params={{ id: selectedLP.id }}
+                        params={{ id: selectedLP.slug || selectedLP.id }}
                         target="_blank"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1017,17 +1036,16 @@ function LPPage() {
                   ) : (
                     <>
                       {selectedLP.externalUrl && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            window.open(selectedLP.externalUrl, "_blank");
-                          }}
+                        <a
+                          href={selectedLP.externalUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
                           className="px-3.5 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg hover:scale-105 transition-transform cursor-pointer"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                           <span>Abrir Link Externo</span>
-                        </button>
+                        </a>
                       )}
                       <button
                         type="button"
@@ -1343,15 +1361,15 @@ function LPPage() {
                       {isExternal && lp.externalUrl && (
                         <div className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
                           <LinkIcon className="h-3 w-3 shrink-0 text-blue-600" />
-                          <span 
-                            className="truncate hover:underline cursor-pointer" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(lp.externalUrl, "_blank");
-                            }}
+                          <a
+                            href={lp.externalUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="truncate hover:underline cursor-pointer"
                           >
                             {lp.externalUrl}
-                          </span>
+                          </a>
                         </div>
                       )}
                     </div>
@@ -1433,7 +1451,7 @@ function LPPage() {
 
                     <Link 
                       to="/lp/$id" 
-                      params={{ id: lp.id }} 
+                      params={{ id: lp.slug || lp.id }} 
                       target="_blank" 
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1498,85 +1516,87 @@ function LPPage() {
       {/* (Editor ativo é renderizado no early-return acima quando editingLP !== null) */}
 
       {/* MODAL GERADOR IA COMET ENGINE */}
-      {showAIGenerator && (
-        <AIModalGenerator
-          isOpen={showAIGenerator}
-          onClose={() => setShowAIGenerator(false)}
-          onPageGenerated={async (generatedPage) => {
-            const genHeroModel = generatedPage.hero?.model || generatedPage.heroModel || (generatedPage as any).hero_model || "split_image";
-            const stableId =
-              generatedPage.id && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(generatedPage.id)
-                ? generatedPage.id
-                : (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `lp_${uid()}`);
-            const newLP = {
-              ...generatedPage,
-              id: stableId,
-              heroModel: genHeroModel,
-              hero_model: genHeroModel,
-              hero: generatedPage.hero ? { ...generatedPage.hero, model: genHeroModel } : { model: genHeroModel },
-              name: generatedPage.title,
-              title: generatedPage.title,
-              status: "Ativa",
-              visits: 0,
-              leads: 0,
-              conv: 0,
-              type: "Gerada por IA",
-              template: "COMET",
-            };
-            const savedLP = await addLandingPage(newLP as any);
-            setShowAIGenerator(false);
-            if (savedLP) {
-              setSelectedLPId(savedLP.id);
-              toast.success("Landing Page criada com IA!", {
-                description: `"${savedLP.name}" foi adicionada a 'Suas Landing Pages Ativas' e carregada no Preview 16:9.`,
-                action: {
-                  label: "Abrir no Editor",
-                  onClick: () => setEditingLP(savedLP),
-                },
-              });
-            } else {
-              setSelectedLPId(newLP.id);
-              toast.success("Landing Page criada com IA!", {
-                description: `"${newLP.name}" foi adicionada a 'Suas Landing Pages Ativas' e carregada no Preview 16:9.`,
-                action: {
-                  label: "Abrir no Editor",
-                  onClick: () => setEditingLP(newLP),
-                },
-              });
-            }
-          }}
-        />
-      )}
+      <Suspense fallback={null}>
+        {showAIGenerator && (
+          <AIModalGenerator
+            isOpen={showAIGenerator}
+            onClose={() => setShowAIGenerator(false)}
+            onPageGenerated={async (generatedPage) => {
+              const genHeroModel = generatedPage.hero?.model || generatedPage.heroModel || (generatedPage as any).hero_model || "split_image";
+              const stableId =
+                generatedPage.id && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(generatedPage.id)
+                  ? generatedPage.id
+                  : (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `lp_${uid()}`);
+              const newLP = {
+                ...generatedPage,
+                id: stableId,
+                heroModel: genHeroModel,
+                hero_model: genHeroModel,
+                hero: generatedPage.hero ? { ...generatedPage.hero, model: genHeroModel } : { model: genHeroModel },
+                name: generatedPage.title,
+                title: generatedPage.title,
+                status: "Ativa",
+                visits: 0,
+                leads: 0,
+                conv: 0,
+                type: "Gerada por IA",
+                template: "COMET",
+              };
+              const savedLP = await addLandingPage(newLP as any);
+              setShowAIGenerator(false);
+              if (savedLP) {
+                setSelectedLPId(savedLP.id);
+                toast.success("Landing Page criada com IA!", {
+                  description: `"${savedLP.name}" foi adicionada a 'Suas Landing Pages Ativas' e carregada no Preview 16:9.`,
+                  action: {
+                    label: "Abrir no Editor",
+                    onClick: () => setEditingLP(savedLP),
+                  },
+                });
+              } else {
+                setSelectedLPId(newLP.id);
+                toast.success("Landing Page criada com IA!", {
+                  description: `"${newLP.name}" foi adicionada a 'Suas Landing Pages Ativas' e carregada no Preview 16:9.`,
+                  action: {
+                    label: "Abrir no Editor",
+                    onClick: () => setEditingLP(newLP),
+                  },
+                });
+              }
+            }}
+          />
+        )}
 
-      {/* MODAL SELETOR DE TEMPLATES CRO */}
-      {showTemplatePicker && (
-        <TemplatePickerModal
-          isOpen={showTemplatePicker}
-          onClose={() => setShowTemplatePicker(false)}
-          onSelectTemplate={handleSelectPresetTemplate}
-        />
-      )}
+        {/* MODAL SELETOR DE TEMPLATES CRO */}
+        {showTemplatePicker && (
+          <TemplatePickerModal
+            isOpen={showTemplatePicker}
+            onClose={() => setShowTemplatePicker(false)}
+            onSelectTemplate={handleSelectPresetTemplate}
+          />
+        )}
 
-      {/* MODAL CONECTAR URL EXTERNA (MODELO 1) */}
-      {showExternalModal && (
-        <ExternalLPModal
-          isOpen={showExternalModal}
-          onClose={() => setShowExternalModal(false)}
-          surveys={surveys}
-          onSaveExternalLP={handleSaveExternalLP}
-        />
-      )}
+        {/* MODAL CONECTAR URL EXTERNA (MODELO 1) */}
+        {showExternalModal && (
+          <ExternalLPModal
+            isOpen={showExternalModal}
+            onClose={() => setShowExternalModal(false)}
+            surveys={surveys}
+            onSaveExternalLP={handleSaveExternalLP}
+          />
+        )}
 
-      {/* MODAL SMART LINKS & RASTREAMENTO */}
-      {smartLinkLP && (
-        <SmartLinkModal 
-          lpId={smartLinkLP.id} 
-          lpName={smartLinkLP.name} 
-          slug={smartLinkLP.slug}
-          lp={smartLinkLP.lp}
-          onClose={() => setSmartLinkLP(null)} 
-        />
-      )}
+        {/* MODAL SMART LINKS & RASTREAMENTO */}
+        {smartLinkLP && (
+          <SmartLinkModal 
+            lpId={smartLinkLP.id} 
+            lpName={smartLinkLP.name} 
+            slug={smartLinkLP.slug}
+            lp={smartLinkLP.lp}
+            onClose={() => setSmartLinkLP(null)} 
+          />
+        )}
+      </Suspense>
 
       {/* MODAL CONFIRMAÇÃO DE EXCLUSÃO EM MASSA */}
       {showBulkDeleteConfirm && (

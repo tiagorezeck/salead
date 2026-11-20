@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [
-    TanStackRouterVite(),
+    TanStackRouterVite({ autoCodeSplitting: true }),
     react(),
     tsconfigPaths(),
     tailwindcss(),
@@ -21,7 +21,7 @@ export default defineConfig({
     hmr: false,
   },
   build: {
-    chunkSizeWarningLimit: 4500,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -39,6 +39,7 @@ export default defineConfig({
             if (id.includes('recharts') || id.includes('d3-')) return 'vendor-charts';
             if (id.includes('jspdf') || id.includes('html2canvas')) return 'vendor-pdf';
             if (id.includes('@supabase/')) return 'vendor-supabase';
+            if (id.includes('@google/genai')) return 'vendor-ai';
             if (
               id.includes('@radix-ui/') ||
               id.includes('/motion/') ||

@@ -3,18 +3,28 @@ import { PRESET_TEMPLATES } from "../data/templates";
 import { uid } from "@/lib/lp-store";
 import { createDefaultPhotoGridSection } from "../data/defaultPhotoGrid";
 
+function parseMultiColumnConfigJsonAdapter(rawLP: any): any {
+  const col1 = rawLP["Config JSON"] ?? rawLP.configJson ?? rawLP.config;
+  if (typeof col1 === "object" && col1 !== null) return col1;
+  const col2 = rawLP["Config JSON (Cont.)"] ?? "";
+  const col3 = rawLP["Config JSON (Cont. 2)"] ?? "";
+  const combined =
+    (typeof col1 === "string" ? col1 : "") +
+    (typeof col2 === "string" ? col2 : "") +
+    (typeof col3 === "string" ? col3 : "");
+  if (combined.trim().startsWith("{")) {
+    try {
+      return JSON.parse(combined);
+    } catch {}
+  }
+  return {};
+}
+
 export function ensureCometLP(rawLP: any): LandingPage {
   if (!rawLP) return PRESET_TEMPLATES[0];
 
-  // 1. Unpack nested config if stringified or object
-  let unpackedConfig: any = {};
-  if (rawLP.config) {
-    if (typeof rawLP.config === "object" && rawLP.config !== null) {
-      unpackedConfig = rawLP.config;
-    } else if (typeof rawLP.config === "string") {
-      try { unpackedConfig = JSON.parse(rawLP.config); } catch {}
-    }
-  }
+  // 1. Unpack nested config (including multi-column Config JSON from Sheets) if stringified or object
+  const unpackedConfig: any = parseMultiColumnConfigJsonAdapter(rawLP);
 
   // 1b. Unpack nested content if stringified or object
   let unpackedContent: any = {};
@@ -91,6 +101,9 @@ export function ensureCometLP(rawLP: any): LandingPage {
     source.mediaType ||
     (heroModel === "split_video" ? "video" : isUserCustomLP ? "image" : base.hero.mediaType);
 
+  const neutralHeroImage =
+    "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80";
+
   const heroBase = isUserCustomLP
     ? {
         ...base.hero,
@@ -102,7 +115,9 @@ export function ensureCometLP(rawLP: any): LandingPage {
         ctaText: "QUERO SABER MAIS AGORA",
         ctaSubtext: "",
         mediaType: resolvedMediaType,
-        videoUrl: rawHero.videoUrl || source.videoUrl || "",
+        videoUrl: "",
+        videoThumbnail: neutralHeroImage,
+        imageUrl: neutralHeroImage,
       }
     : base.hero;
 
@@ -115,6 +130,13 @@ export function ensureCometLP(rawLP: any): LandingPage {
           ? unpackedConfig.hero.slideshowImages
           : base.hero.slideshowImages;
 
+  const resolvedVideoUrl =
+    rawHero.videoUrl !== undefined
+      ? rawHero.videoUrl
+      : source.videoUrl !== undefined
+        ? source.videoUrl
+        : heroBase.videoUrl;
+
   const hero = {
     ...heroBase,
     ...rawHero,
@@ -124,9 +146,9 @@ export function ensureCometLP(rawLP: any): LandingPage {
     subheadline: rawHero.subheadline || source.subheadline || rawLP.subheadline || heroBase.subheadline,
     ctaText: rawHero.ctaText || source.ctaText || rawLP.ctaText || heroBase.ctaText,
     ctaSubtext: rawHero.ctaSubtext !== undefined ? rawHero.ctaSubtext : (source.ctaSubtext !== undefined ? source.ctaSubtext : heroBase.ctaSubtext),
-    imageUrl: rawHero.imageUrl || source.imageUrl || rawLP.imageUrl || base.hero.imageUrl,
-    videoUrl: rawHero.videoUrl !== undefined ? rawHero.videoUrl : (source.videoUrl !== undefined ? source.videoUrl : heroBase.videoUrl),
-    videoThumbnail: rawHero.videoThumbnail || source.videoThumbnail || rawLP.videoThumbnail || rawHero.imageUrl || base.hero.videoThumbnail,
+    imageUrl: rawHero.imageUrl || source.imageUrl || rawLP.imageUrl || heroBase.imageUrl,
+    videoUrl: isUserCustomLP && resolvedVideoUrl?.includes("dQw4w9WgXcQ") ? "" : resolvedVideoUrl,
+    videoThumbnail: rawHero.videoThumbnail || source.videoThumbnail || rawLP.videoThumbnail || rawHero.imageUrl || heroBase.videoThumbnail,
     b2bMetrics: rawHero.b2bMetrics || source.b2bMetrics || base.hero.b2bMetrics,
     socialProofAvatars: rawHero.socialProofAvatars || source.socialProofAvatars || base.hero.socialProofAvatars,
     ...(mergedSlideshowImages ? { slideshowImages: mergedSlideshowImages } : {}),
@@ -162,6 +184,13 @@ export function ensureCometLP(rawLP: any): LandingPage {
           .replace(/^-+|-+$/g, "")
       : `lp-${source.id || uid()}`);
 
+  const resolvedSocialProof = isUserCustomLP
+    ? {
+        ...base.socialProof,
+        marqueeTitle: `${defaultBrandWord} • RESULTADOS COMPROVADOS`,
+      }
+    : base.socialProof;
+
   return {
     ...base,
     ...source,
@@ -183,7 +212,7 @@ export function ensureCometLP(rawLP: any): LandingPage {
     heroModel,
     hero_model: heroModel,
     hero,
-    socialProof: source.socialProof ? { ...base.socialProof, ...source.socialProof } : (unpackedConfig.socialProof ? { ...base.socialProof, ...unpackedConfig.socialProof } : base.socialProof),
+    socialProof: source.socialProof ? { ...resolvedSocialProof, ...source.socialProof } : (unpackedConfig.socialProof ? { ...resolvedSocialProof, ...unpackedConfig.socialProof } : resolvedSocialProof),
     quiz: source.quiz ? { ...base.quiz, ...source.quiz } : (unpackedConfig.quiz ? { ...base.quiz, ...unpackedConfig.quiz } : base.quiz),
     bentoGrid: source.bentoGrid ? { ...base.bentoGrid, ...source.bentoGrid } : (unpackedConfig.bentoGrid ? { ...base.bentoGrid, ...unpackedConfig.bentoGrid } : base.bentoGrid),
     testimonials: source.testimonials ? { ...base.testimonials, ...source.testimonials } : (unpackedConfig.testimonials ? { ...base.testimonials, ...unpackedConfig.testimonials } : base.testimonials),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { cn } from "@/lib/utils";
 import { useData } from "@/hooks/use-data";
 import {
@@ -15,21 +15,37 @@ import {
 } from "../types/landingPage";
 import { THEME_CONFIGS } from "../utils/theme";
 import { LandingPageRenderer } from "./LandingPageRenderer";
-import { generateStandaloneHtml } from "../utils/htmlExporter";
 import { cloudStore } from "@/services/cloudStorageService";
 import { DynamicIcon } from "./DynamicIcon";
-import { ImagePickerModal } from "./ImagePickerModal";
-import { LogoManagerModal } from "./LogoManagerModal";
-import { IconPickerModal } from "./IconPickerModal";
 import { HeroModelSelector, HERO_MODELS } from "./HeroModelSelector";
-import { NetworkPreviewModal } from "./NetworkPreviewModal";
-import { VisualElementControlModal } from "./VisualElementControlModal";
-import { FloatingImagesManagerModal } from "./FloatingImagesManagerModal";
 import { FloatingLayersPanel } from "./FloatingLayersPanel";
-import { TalkConfigTab } from "./TalkConfigTab";
-import { LanBotAssistantModal } from "./LanBotAssistantModal";
 import { DEFAULT_TALK_CONFIG } from "../types/landingPage";
 import { motion, AnimatePresence } from "motion/react";
+
+const ImagePickerModal = lazy(() =>
+  import("./ImagePickerModal").then((m) => ({ default: m.ImagePickerModal }))
+);
+const LogoManagerModal = lazy(() =>
+  import("./LogoManagerModal").then((m) => ({ default: m.LogoManagerModal }))
+);
+const IconPickerModal = lazy(() =>
+  import("./IconPickerModal").then((m) => ({ default: m.IconPickerModal }))
+);
+const NetworkPreviewModal = lazy(() =>
+  import("./NetworkPreviewModal").then((m) => ({ default: m.NetworkPreviewModal }))
+);
+const VisualElementControlModal = lazy(() =>
+  import("./VisualElementControlModal").then((m) => ({ default: m.VisualElementControlModal }))
+);
+const FloatingImagesManagerModal = lazy(() =>
+  import("./FloatingImagesManagerModal").then((m) => ({ default: m.FloatingImagesManagerModal }))
+);
+const TalkConfigTab = lazy(() =>
+  import("./TalkConfigTab").then((m) => ({ default: m.TalkConfigTab }))
+);
+const LanBotAssistantModal = lazy(() =>
+  import("./LanBotAssistantModal").then((m) => ({ default: m.LanBotAssistantModal }))
+);
 import {
   ArrowLeft,
   Smartphone,
@@ -324,9 +340,10 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
     }
   };
 
-  const handleExportHtml = () => {
+  const handleExportHtml = async () => {
     const current = pageRef.current;
     onSave(current);
+    const { generateStandaloneHtml } = await import("../utils/htmlExporter");
     const htmlContent = generateStandaloneHtml(current);
     const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -612,35 +629,6 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Interactive Image Picker Modal */}
-      <ImagePickerModal
-        isOpen={imagePickerConfig.isOpen}
-        onClose={() => setImagePickerConfig((prev) => ({ ...prev, isOpen: false }))}
-        currentImageUrl={imagePickerConfig.currentUrl}
-        onSelectImage={handleApplyImage}
-        title={imagePickerConfig.title}
-        targetType={imagePickerConfig.type}
-      />
-
-      {/* Interactive Icon Picker Modal */}
-      <IconPickerModal
-        isOpen={iconPickerConfig.isOpen}
-        onClose={() => setIconPickerConfig((prev) => ({ ...prev, isOpen: false }))}
-        currentIconName={iconPickerConfig.currentIcon}
-        onSelectIcon={(iconName) => {
-          iconPickerConfig.onSelect(iconName);
-          showNotification(`Ícone "${iconName}" aplicado!`);
-        }}
-        title={iconPickerConfig.title}
-      />
-
-      {/* Network & Standalone Preview Modal */}
-      <NetworkPreviewModal
-        isOpen={isNetworkPreviewOpen}
-        onClose={() => setIsNetworkPreviewOpen(false)}
-        page={page}
-      />
 
       {/* Top Navbar */}
       <header className="h-16 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-4 flex items-center justify-between z-30 flex-shrink-0">
@@ -3837,26 +3825,28 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
 
               {/* 5. TALK TAB (WhatsApp Integration & Floating Widget) */}
               {activeTab === "talk" && (
-                <TalkConfigTab
-                  talkConfig={page.talkConfig}
-                  niche={page.niche}
-                  city={page.cityOrRegion}
-                  onUpdateTalkConfig={(updater) => {
-                    updatePage((p) => ({
-                      ...p,
-                      talkConfig: updater(p.talkConfig || DEFAULT_TALK_CONFIG),
-                    }));
-                  }}
-                  onOpenImagePicker={(target) => {
-                    setImagePickerConfig({
-                      isOpen: true,
-                      type: target.type,
-                      currentUrl: target.currentUrl,
-                      itemId: target.itemId,
-                      title: target.title,
-                    });
-                  }}
-                />
+                <Suspense fallback={<div className="py-8 text-center text-xs text-zinc-400">Carregando WhatsApp...</div>}>
+                  <TalkConfigTab
+                    talkConfig={page.talkConfig}
+                    niche={page.niche}
+                    city={page.cityOrRegion}
+                    onUpdateTalkConfig={(updater) => {
+                      updatePage((p) => ({
+                        ...p,
+                        talkConfig: updater(p.talkConfig || DEFAULT_TALK_CONFIG),
+                      }));
+                    }}
+                    onOpenImagePicker={(target) => {
+                      setImagePickerConfig({
+                        isOpen: true,
+                        type: target.type,
+                        currentUrl: target.currentUrl,
+                        itemId: target.itemId,
+                        title: target.title,
+                      });
+                    }}
+                  />
+                </Suspense>
               )}
 
               {/* PRODUCTS / OFFERS TAB */}
@@ -4151,224 +4141,240 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
             : {}),
         };
 
-        return (
-          <VisualElementControlModal
-            isOpen={visualModalConfig.isOpen}
-            onClose={() => setVisualModalConfig((prev) => ({ ...prev, isOpen: false }))}
-            elementId={targetElementId}
-            elementTitle={visualModalConfig.title}
-            currentStyles={combinedStyleRecord}
-            currentStyle={combinedStyleRecord}
-            onUpdateStyles={(newStyle) => {
-              updatePage((p) => {
-                const nextCustomStyles = {
-                  ...(p.customElementStyles || {}),
-                  [targetElementId]: newStyle,
-                };
+        return visualModalConfig.isOpen ? (
+          <Suspense fallback={null}>
+            <VisualElementControlModal
+              isOpen={visualModalConfig.isOpen}
+              onClose={() => setVisualModalConfig((prev) => ({ ...prev, isOpen: false }))}
+              elementId={targetElementId}
+              elementTitle={visualModalConfig.title}
+              currentStyles={combinedStyleRecord}
+              currentStyle={combinedStyleRecord}
+              onUpdateStyles={(newStyle) => {
+                updatePage((p) => {
+                  const nextCustomStyles = {
+                    ...(p.customElementStyles || {}),
+                    [targetElementId]: newStyle,
+                  };
 
-                // If element is in floatingImages, synchronize its direct properties as well
-                const nextFloatingImages = (p.floatingImages || []).map((img) => {
-                  if (img.id !== targetElementId) return img;
+                  // If element is in floatingImages, synchronize its direct properties as well
+                  const nextFloatingImages = (p.floatingImages || []).map((img) => {
+                    if (img.id !== targetElementId) return img;
+                    return {
+                      ...img,
+                      effects: newStyle.imageEffects !== undefined ? newStyle.imageEffects : img.effects,
+                      mask: newStyle.mask !== undefined ? newStyle.mask : img.mask,
+                      transform: {
+                        ...(img.transform || {}),
+                        ...(newStyle.transform || {}),
+                      },
+                      zIndex: newStyle.zIndex !== undefined ? newStyle.zIndex : img.zIndex,
+                      offsetX: newStyle.offset?.x !== undefined ? newStyle.offset.x : img.offsetX,
+                      offsetY: newStyle.offset?.y !== undefined ? newStyle.offset.y : img.offsetY,
+                    };
+                  });
+
                   return {
-                    ...img,
-                    effects: newStyle.imageEffects !== undefined ? newStyle.imageEffects : img.effects,
-                    mask: newStyle.mask !== undefined ? newStyle.mask : img.mask,
-                    transform: {
-                      ...(img.transform || {}),
-                      ...(newStyle.transform || {}),
-                    },
-                    zIndex: newStyle.zIndex !== undefined ? newStyle.zIndex : img.zIndex,
-                    offsetX: newStyle.offset?.x !== undefined ? newStyle.offset.x : img.offsetX,
-                    offsetY: newStyle.offset?.y !== undefined ? newStyle.offset.y : img.offsetY,
+                    ...p,
+                    customElementStyles: nextCustomStyles,
+                    floatingImages: nextFloatingImages,
                   };
                 });
+                showNotification("Estilo visual e efeitos salvos!");
+              }}
+              onUpdateStyle={(newStyle) => {
+                updatePage((p) => {
+                  const nextCustomStyles = {
+                    ...(p.customElementStyles || {}),
+                    [targetElementId]: newStyle,
+                  };
 
-                return {
-                  ...p,
-                  customElementStyles: nextCustomStyles,
-                  floatingImages: nextFloatingImages,
-                };
-              });
-              showNotification("Estilo visual e efeitos salvos!");
-            }}
-            onUpdateStyle={(newStyle) => {
-              updatePage((p) => {
-                const nextCustomStyles = {
-                  ...(p.customElementStyles || {}),
-                  [targetElementId]: newStyle,
-                };
+                  const nextFloatingImages = (p.floatingImages || []).map((img) => {
+                    if (img.id !== targetElementId) return img;
+                    return {
+                      ...img,
+                      effects: newStyle.imageEffects !== undefined ? newStyle.imageEffects : img.effects,
+                      mask: newStyle.mask !== undefined ? newStyle.mask : img.mask,
+                      transform: {
+                        ...(img.transform || {}),
+                        ...(newStyle.transform || {}),
+                      },
+                      zIndex: newStyle.zIndex !== undefined ? newStyle.zIndex : img.zIndex,
+                      offsetX: newStyle.offset?.x !== undefined ? newStyle.offset.x : img.offsetX,
+                      offsetY: newStyle.offset?.y !== undefined ? newStyle.offset.y : img.offsetY,
+                    };
+                  });
 
-                const nextFloatingImages = (p.floatingImages || []).map((img) => {
-                  if (img.id !== targetElementId) return img;
                   return {
-                    ...img,
-                    effects: newStyle.imageEffects !== undefined ? newStyle.imageEffects : img.effects,
-                    mask: newStyle.mask !== undefined ? newStyle.mask : img.mask,
-                    transform: {
-                      ...(img.transform || {}),
-                      ...(newStyle.transform || {}),
-                    },
-                    zIndex: newStyle.zIndex !== undefined ? newStyle.zIndex : img.zIndex,
-                    offsetX: newStyle.offset?.x !== undefined ? newStyle.offset.x : img.offsetX,
-                    offsetY: newStyle.offset?.y !== undefined ? newStyle.offset.y : img.offsetY,
+                    ...p,
+                    customElementStyles: nextCustomStyles,
+                    floatingImages: nextFloatingImages,
                   };
                 });
-
-                return {
-                  ...p,
-                  customElementStyles: nextCustomStyles,
-                  floatingImages: nextFloatingImages,
-                };
-              });
-              showNotification("Estilo visual e efeitos salvos!");
-            }}
-            onResetStyle={() => {
-              updatePage((p) => {
-                const nextStyles = { ...(p.customElementStyles || {}) };
-                delete nextStyles[targetElementId];
-                return {
-                  ...p,
-                  customElementStyles: nextStyles,
-                };
-              });
-              showNotification("Estilos restaurados ao padrão original!");
-            }}
-            isText={visualModalConfig.isText}
-            isImage={visualModalConfig.isImage}
-            onOpenImagePicker={() => {
-              const floatingImg = page.floatingImages?.find((img) => img.id === targetElementId);
-              setImagePickerConfig({
-                isOpen: true,
-                type: "hero",
-                currentUrl: floatingImg?.imageUrl || "",
-                itemId: targetElementId,
-                title: `Trocar Foto de "${floatingImg?.name || "Imagem"}"`,
-              });
-            }}
-          />
-        );
+                showNotification("Estilo visual e efeitos salvos!");
+              }}
+              onResetStyle={() => {
+                updatePage((p) => {
+                  const nextStyles = { ...(p.customElementStyles || {}) };
+                  delete nextStyles[targetElementId];
+                  return {
+                    ...p,
+                    customElementStyles: nextStyles,
+                  };
+                });
+                showNotification("Estilos restaurados ao padrão original!");
+              }}
+              isText={visualModalConfig.isText}
+              isImage={visualModalConfig.isImage}
+              onOpenImagePicker={() => {
+                const floatingImg = page.floatingImages?.find((img) => img.id === targetElementId);
+                setImagePickerConfig({
+                  isOpen: true,
+                  type: "hero",
+                  currentUrl: floatingImg?.imageUrl || "",
+                  itemId: targetElementId,
+                  title: `Trocar Foto de "${floatingImg?.name || "Imagem"}"`,
+                });
+              }}
+            />
+          </Suspense>
+        ) : null;
       })()}
 
       {/* Floating Images & Stickers Free Manager Modal */}
-      <FloatingImagesManagerModal
-        isOpen={isFloatingImagesManagerOpen}
-        onClose={() => setIsFloatingImagesManagerOpen(false)}
-        page={page}
-        onUpdatePage={updatePage}
-        images={page.floatingImages || []}
-        onUpdateImages={(updatedList) => {
-          updatePage((p) => ({
-            ...p,
-            floatingImages: updatedList,
-          }));
-          showNotification("Imagens flutuantes e stickers atualizados!");
-        }}
-        onOpenVisualModalForImage={(imgId) => {
-          handleOpenVisualModalForElement(imgId);
-        }}
-        onOpenImagePicker={(target) => {
-          setImagePickerConfig({
-            isOpen: true,
-            type: target.type,
-            currentUrl: target.currentUrl,
-            itemId: target.itemId,
-            title: target.title,
-          });
-        }}
-      />
-
-      {/* Image Picker Modal */}
-      <ImagePickerModal
-        isOpen={imagePickerConfig.isOpen}
-        onClose={() => setImagePickerConfig((prev) => ({ ...prev, isOpen: false }))}
-        currentImageUrl={imagePickerConfig.currentUrl}
-        title={imagePickerConfig.title}
-        targetType={imagePickerConfig.type}
-        initialPositionX={imagePickerConfig.initialPositionX}
-        initialPositionY={imagePickerConfig.initialPositionY}
-        initialZoom={imagePickerConfig.initialZoom}
-        onSelectImage={(newUrl, framing) => {
-          handleApplyImage(newUrl, framing);
-        }}
-      />
-
-      {/* Logo Manager Modal */}
-      <LogoManagerModal
-        isOpen={isLogoManagerOpen}
-        onClose={() => setIsLogoManagerOpen(false)}
-        logos={page.socialProof?.marqueeLogos || []}
-        logoItems={page.socialProof?.logoItems}
-        colorMode={page.socialProof?.logoColorMode || "original"}
-        logoSize={page.socialProof?.logoSize || "sm"}
-        marqueeSpeed={page.socialProof?.marqueeSpeed || "medium"}
-        accentColorName={page.accentColor}
-        onUpdateLogos={(updatedLogos, mode, updatedItems, size, speed) => {
-          updatePage((p) => ({
-            ...p,
-            socialProof: {
-              ...p.socialProof,
-              marqueeLogos: updatedLogos,
-              logoItems: updatedItems || p.socialProof.logoItems,
-              logoColorMode: mode,
-              logoSize: size || p.socialProof.logoSize || "sm",
-              marqueeSpeed: speed || p.socialProof.marqueeSpeed || "medium",
-            },
-          }));
-          showNotification("Logos, cores, tamanho e velocidade atualizados!");
-        }}
-      />
-
-      {/* Icon Picker Modal */}
-      <IconPickerModal
-        isOpen={iconPickerConfig.isOpen}
-        onClose={() => setIconPickerConfig((prev) => ({ ...prev, isOpen: false }))}
-        currentIconName={iconPickerConfig.currentIcon}
-        title={iconPickerConfig.title}
-        onSelectIcon={(newIcon) => {
-          iconPickerConfig.onSelect(newIcon);
-          setIconPickerConfig((prev) => ({ ...prev, isOpen: false }));
-          showNotification("Ícone atualizado com sucesso!");
-        }}
-      />
-
-      {/* Hero Model Selector Modal */}
-      {isHeroModelModalOpen && (
-        <HeroModelSelector
-          currentModel={page.hero.model || page.heroModel || "split_image"}
-          onSelectModel={(newModel) => {
-            updatePage(
-              (p) => ({
+      <Suspense fallback={null}>
+        {isFloatingImagesManagerOpen && (
+          <FloatingImagesManagerModal
+            isOpen={isFloatingImagesManagerOpen}
+            onClose={() => setIsFloatingImagesManagerOpen(false)}
+            page={page}
+            onUpdatePage={updatePage}
+            images={page.floatingImages || []}
+            onUpdateImages={(updatedList) => {
+              updatePage((p) => ({
                 ...p,
-                heroModel: newModel,
-                hero: {
-                  ...p.hero,
-                  model: newModel,
+                floatingImages: updatedList,
+              }));
+              showNotification("Imagens flutuantes e stickers atualizados!");
+            }}
+            onOpenVisualModalForImage={(imgId) => {
+              handleOpenVisualModalForElement(imgId);
+            }}
+            onOpenImagePicker={(target) => {
+              setImagePickerConfig({
+                isOpen: true,
+                type: target.type,
+                currentUrl: target.currentUrl,
+                itemId: target.itemId,
+                title: target.title,
+              });
+            }}
+          />
+        )}
+
+        {/* Image Picker Modal */}
+        {imagePickerConfig.isOpen && (
+          <ImagePickerModal
+            isOpen={imagePickerConfig.isOpen}
+            onClose={() => setImagePickerConfig((prev) => ({ ...prev, isOpen: false }))}
+            currentImageUrl={imagePickerConfig.currentUrl}
+            title={imagePickerConfig.title}
+            targetType={imagePickerConfig.type}
+            initialPositionX={imagePickerConfig.initialPositionX}
+            initialPositionY={imagePickerConfig.initialPositionY}
+            initialZoom={imagePickerConfig.initialZoom}
+            onSelectImage={(newUrl, framing) => {
+              handleApplyImage(newUrl, framing);
+            }}
+          />
+        )}
+
+        {/* Logo Manager Modal */}
+        {isLogoManagerOpen && (
+          <LogoManagerModal
+            isOpen={isLogoManagerOpen}
+            onClose={() => setIsLogoManagerOpen(false)}
+            logos={page.socialProof?.marqueeLogos || []}
+            logoItems={page.socialProof?.logoItems}
+            colorMode={page.socialProof?.logoColorMode || "original"}
+            logoSize={page.socialProof?.logoSize || "sm"}
+            marqueeSpeed={page.socialProof?.marqueeSpeed || "medium"}
+            accentColorName={page.accentColor}
+            onUpdateLogos={(updatedLogos, mode, updatedItems, size, speed) => {
+              updatePage((p) => ({
+                ...p,
+                socialProof: {
+                  ...p.socialProof,
+                  marqueeLogos: updatedLogos,
+                  logoItems: updatedItems || p.socialProof.logoItems,
+                  logoColorMode: mode,
+                  logoSize: size || p.socialProof.logoSize || "sm",
+                  marqueeSpeed: speed || p.socialProof.marqueeSpeed || "medium",
                 },
-              }),
-              { immediateSave: true }
-            );
-            setIsHeroModelModalOpen(false);
-            showNotification("Modelo da Hero atualizado com sucesso!");
-          }}
-          onClose={() => setIsHeroModelModalOpen(false)}
-        />
-      )}
+              }));
+              showNotification("Logos, cores, tamanho e velocidade atualizados!");
+            }}
+          />
+        )}
 
-      {/* Network Preview Modal */}
-      <NetworkPreviewModal
-        isOpen={isNetworkPreviewOpen}
-        onClose={() => setIsNetworkPreviewOpen(false)}
-        page={page}
-        onUpdatePage={(updatedPage) => updatePage(() => updatedPage, { immediateSave: true })}
-      />
+        {/* Icon Picker Modal */}
+        {iconPickerConfig.isOpen && (
+          <IconPickerModal
+            isOpen={iconPickerConfig.isOpen}
+            onClose={() => setIconPickerConfig((prev) => ({ ...prev, isOpen: false }))}
+            currentIconName={iconPickerConfig.currentIcon}
+            title={iconPickerConfig.title}
+            onSelectIcon={(newIcon) => {
+              iconPickerConfig.onSelect(newIcon);
+              setIconPickerConfig((prev) => ({ ...prev, isOpen: false }));
+              showNotification("Ícone atualizado com sucesso!");
+            }}
+          />
+        )}
 
-      {/* LANAI Assistant Modal */}
-      <LanBotAssistantModal
-        isOpen={isLanBotOpen}
-        onClose={() => setIsLanBotOpen(false)}
-        page={page}
-        onUpdatePage={(updatedPage) => updatePage(() => updatedPage, { immediateSave: true })}
-      />
+        {/* Hero Model Selector Modal */}
+        {isHeroModelModalOpen && (
+          <HeroModelSelector
+            currentModel={page.hero.model || page.heroModel || "split_image"}
+            onSelectModel={(newModel) => {
+              updatePage(
+                (p) => ({
+                  ...p,
+                  heroModel: newModel,
+                  hero: {
+                    ...p.hero,
+                    model: newModel,
+                  },
+                }),
+                { immediateSave: true }
+              );
+              setIsHeroModelModalOpen(false);
+              showNotification("Modelo da Hero atualizado com sucesso!");
+            }}
+            onClose={() => setIsHeroModelModalOpen(false)}
+          />
+        )}
+
+        {/* Network Preview Modal */}
+        {isNetworkPreviewOpen && (
+          <NetworkPreviewModal
+            isOpen={isNetworkPreviewOpen}
+            onClose={() => setIsNetworkPreviewOpen(false)}
+            page={page}
+            onUpdatePage={(updatedPage) => updatePage(() => updatedPage, { immediateSave: true })}
+          />
+        )}
+
+        {/* LANAI Assistant Modal */}
+        {isLanBotOpen && (
+          <LanBotAssistantModal
+            isOpen={isLanBotOpen}
+            onClose={() => setIsLanBotOpen(false)}
+            page={page}
+            onUpdatePage={(updatedPage) => updatePage(() => updatedPage, { immediateSave: true })}
+          />
+        )}
+      </Suspense>
     </div>
   );
 };

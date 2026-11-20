@@ -7,24 +7,37 @@ import {
   Package, ChevronRight, ChevronLeft, Menu, UserCog, UserPlus, Target, ClipboardList, Cloud, CloudOff, RefreshCw, MonitorPlay, Activity,
   Command, Wallet, Maximize2, Minimize2, Sliders, Sun, Moon, FileSpreadsheet, ExternalLink, UserCheck, UserX, Check
 } from "lucide-react";
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 import { useData } from "@/hooks/use-data";
 import { approveUserAccess, getCurrentUser } from "@/lib/auth-service";
 import { useTheme } from "@/hooks/use-theme";
-import { CommandPalette } from "./command-palette";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./brand-logo";
-import { BrandLogoCustomizerModal } from "./brand-logo-customizer-modal";
 import { useBrandStore, LOGO_EDITOR_ENABLED } from "@/lib/brand-store";
-import { NewLeadModal } from "./crm/new-lead-modal";
-import { NewTaskModal } from "./crm/new-task-modal";
-import { LiveTransmitModal } from "./crm/live-transmit-modal";
 import { GlobalDateFilter } from "./date-filter";
 import { useDriveSync } from "@/hooks/use-drive-sync";
-import { GoogleDriveSyncModal } from "./crm/google-drive-sync-modal";
 import { SYSTEM_MODULES, DEFAULT_ROLE_MODULES } from "@/data/mock";
 import { startOfMonth, endOfMonth } from "date-fns";
+
+const CommandPalette = lazy(() =>
+  import("./command-palette").then((m) => ({ default: m.CommandPalette }))
+);
+const BrandLogoCustomizerModal = lazy(() =>
+  import("./brand-logo-customizer-modal").then((m) => ({ default: m.BrandLogoCustomizerModal }))
+);
+const NewLeadModal = lazy(() =>
+  import("./crm/new-lead-modal").then((m) => ({ default: m.NewLeadModal }))
+);
+const NewTaskModal = lazy(() =>
+  import("./crm/new-task-modal").then((m) => ({ default: m.NewTaskModal }))
+);
+const LiveTransmitModal = lazy(() =>
+  import("./crm/live-transmit-modal").then((m) => ({ default: m.LiveTransmitModal }))
+);
+const GoogleDriveSyncModal = lazy(() =>
+  import("./crm/google-drive-sync-modal").then((m) => ({ default: m.GoogleDriveSyncModal }))
+);
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -213,7 +226,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex bg-background text-foreground">
-      <CommandPalette />
+      <Suspense fallback={null}>
+        <CommandPalette />
+      </Suspense>
       
       <aside 
         onMouseEnter={() => setIsHovered(true)}
@@ -667,11 +682,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
 
-      {showNewLeadModal && <NewLeadModal onClose={() => setShowNewLeadModal(false)} onAdd={addLead} />}
-      {showNewTaskModal && <NewTaskModal onClose={() => setShowNewTaskModal(false)} onAdd={addTask} />}
-      {showLiveModal && <LiveTransmitModal onClose={() => setShowLiveModal(false)} />}
-      {isAdmin && <GoogleDriveSyncModal isOpen={showDriveModal} onClose={() => setShowDriveModal(false)} />}
-      {LOGO_EDITOR_ENABLED && <BrandLogoCustomizerModal />}
+      <Suspense fallback={null}>
+        {showNewLeadModal && <NewLeadModal onClose={() => setShowNewLeadModal(false)} onAdd={addLead} />}
+        {showNewTaskModal && <NewTaskModal onClose={() => setShowNewTaskModal(false)} onAdd={addTask} />}
+        {showLiveModal && <LiveTransmitModal onClose={() => setShowLiveModal(false)} />}
+        {isAdmin && showDriveModal && <GoogleDriveSyncModal isOpen={showDriveModal} onClose={() => setShowDriveModal(false)} />}
+        {LOGO_EDITOR_ENABLED && <BrandLogoCustomizerModal />}
+      </Suspense>
 
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
         <AlertDialogContent className="rounded-[2rem]">

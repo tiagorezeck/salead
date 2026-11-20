@@ -46,6 +46,36 @@ function isCorruptedLeadAsLp(lp: any): boolean {
   return st === "novo lead" && !lp.hero && !lp.externalUrl && !lp["Config JSON"] && !lp.config;
 }
 
+function parseMultiColumnConfigJsonCloud(raw: any): any {
+  if (!raw || typeof raw !== "object") return {};
+  const col1 = raw["Config JSON"] ?? raw.configJson ?? raw.config;
+  if (typeof col1 === "object" && col1 !== null) return col1;
+  const col2 = raw["Config JSON (Cont.)"] ?? "";
+  const col3 = raw["Config JSON (Cont. 2)"] ?? "";
+  const combined =
+    (typeof col1 === "string" ? col1 : "") +
+    (typeof col2 === "string" ? col2 : "") +
+    (typeof col3 === "string" ? col3 : "");
+  if (combined.trim().startsWith("{")) {
+    try {
+      return JSON.parse(combined);
+    } catch {}
+  }
+  return {};
+}
+
+function hasFullLpContentCloud(lp: any): boolean {
+  if (!lp || typeof lp !== "object") return false;
+  if (lp.externalUrl && (lp.type === "URL Externa" || lp.template === "External" || lp.isExternal)) {
+    return true;
+  }
+  return Boolean(
+    lp.hero &&
+      typeof lp.hero === "object" &&
+      (lp.hero.headline || lp.hero.subheadline || Object.keys(lp.hero).length > 1)
+  );
+}
+
 export interface CloudDatabase {
   leads: any[];
   leads_landing_pages: any[];
@@ -265,15 +295,7 @@ function mergeLandingPageLists(
 
   for (const rawRemote of remoteList || []) {
     if (!rawRemote || isDeleted(rawRemote)) continue;
-    let parsedConfig: any = {};
-    const configSource = rawRemote["Config JSON"] || rawRemote.configJson || rawRemote.config;
-    if (typeof configSource === "object" && configSource !== null) {
-      parsedConfig = configSource;
-    } else if (typeof configSource === "string") {
-      try {
-        parsedConfig = JSON.parse(configSource);
-      } catch {}
-    }
+    const parsedConfig = parseMultiColumnConfigJsonCloud(rawRemote);
 
     const remoteId =
       rawRemote.id || parsedConfig.id || parsedConfig.client_id || rawRemote.slug;
@@ -283,8 +305,11 @@ function mergeLandingPageLists(
 
     const existing = currentMap.get(key) || (rawRemote.slug ? currentMap.get(String(rawRemote.slug)) : null);
 
+    const assembledRemote = { ...parsedConfig, ...rawRemote };
     const existingTime = getLpTimestampMs(existing);
     const remoteTime = Math.max(getLpTimestampMs(rawRemote), getLpTimestampMs(parsedConfig));
+    const existingHasFullHero = hasFullLpContentCloud(existing);
+    const remoteHasFullHero = hasFullLpContentCloud(assembledRemote);
 
     const remoteHeroModel =
       rawRemote.heroModel ||
@@ -296,9 +321,11 @@ function mergeLandingPageLists(
     const existingHeroModel =
       existing?.heroModel || existing?.hero?.model || existing?.hero_model;
 
+    // Nunca rebaixa uma LP completa em RAM para uma linha resumo sem hero!
     const preferExisting = Boolean(
       existing &&
-        (existingTime > remoteTime ||
+        ((existingHasFullHero && !remoteHasFullHero) ||
+          existingTime > remoteTime ||
           (existingTime === remoteTime &&
             existingHeroModel &&
             existingHeroModel !== "split_image" &&
@@ -319,8 +346,8 @@ function mergeLandingPageLists(
           }
         : undefined;
 
-    const primary = preferExisting ? existing : { ...parsedConfig, ...rawRemote };
-    const secondary = preferExisting ? { ...parsedConfig, ...rawRemote } : (existing || {});
+    const primary = preferExisting ? existing : assembledRemote;
+    const secondary = preferExisting ? assembledRemote : (existing || {});
 
     out.push({
       ...secondary,
@@ -428,11 +455,44 @@ class CloudStorageService {
         : this.db.deletedLpIds.map(String)
     );
 
-    const remoteLps = Array.isArray(payload.landingPages)
+    const rawRemoteLps = Array.isArray(payload.landingPages)
       ? payload.landingPages
       : Array.isArray(payload.landing_pages)
       ? payload.landing_pages
       : [];
+
+    // Reconcilia activePreviewPage e landingPage (comum em GAS legado onde landingPages[i] foi resumido)
+    const extraFullCandidates: any[] = [];
+    if (payload.activePreviewPage && typeof payload.activePreviewPage === "object") {
+      extraFullCandidates.push(payload.activePreviewPage);
+    }
+    if (payload.landingPage && typeof payload.landingPage === "object") {
+      extraFullCandidates.push(payload.landingPage);
+    }
+
+    const remoteLps = rawRemoteLps.map((item: any) => {
+      if (!item || typeof item !== "object") return item;
+      const itemFull = hasFullLpContentCloud(item);
+      const itemTs = getLpTimestampMs(item);
+      let enriched = item;
+      for (const extra of extraFullCandidates) {
+        const sameId =
+          (item.id && extra.id && String(item.id) === String(extra.id)) ||
+          (item.slug && extra.slug && String(item.slug) === String(extra.slug));
+        if (!sameId) continue;
+        const extraFull = hasFullLpContentCloud(extra);
+        const extraTs = getLpTimestampMs(extra);
+        if ((extraFull && !itemFull) || extraTs > itemTs) {
+          enriched = {
+            ...item,
+            ...extra,
+            visits: Math.max(Number(item.visits || 0), Number(extra.visits || 0)),
+            leads: Math.max(Number(item.leads || 0), Number(extra.leads || 0)),
+          };
+        }
+      }
+      return enriched;
+    });
 
     const remoteSurveys = Array.isArray(payload.surveys) ? payload.surveys : null;
     const mergedSurveysMap = new Map<string, Survey>();
@@ -458,18 +518,31 @@ class CloudStorageService {
       }
     }
 
+    const mergedLandingPages =
+      remoteLps.length > 0
+        ? mergeLandingPageLists(remoteLps, this.db.landingPages, deletedSet)
+        : Array.isArray(payload.landingPages)
+        ? []
+        : this.db.landingPages;
+
+    const incomingActive = payload.activePreviewPage;
+    const nextActivePreviewPage =
+      incomingActive &&
+      !deletedSet.has(String(incomingActive.id || "")) &&
+      hasFullLpContentCloud(incomingActive) &&
+      (!this.db.activePreviewPage ||
+        getLpTimestampMs(incomingActive) >= getLpTimestampMs(this.db.activePreviewPage))
+        ? incomingActive
+        : this.db.activePreviewPage;
+
     this.db = {
       ...this.db,
       leads: Array.isArray(payload.leads) ? payload.leads : this.db.leads,
       leads_landing_pages: Array.isArray(payload.leads_landing_pages)
         ? payload.leads_landing_pages
         : this.db.leads_landing_pages,
-      landingPages:
-        remoteLps.length > 0
-          ? mergeLandingPageLists(remoteLps, this.db.landingPages, deletedSet)
-          : Array.isArray(payload.landingPages)
-          ? []
-          : this.db.landingPages,
+      landingPages: mergedLandingPages,
+      activePreviewPage: nextActivePreviewPage,
       surveys: remoteSurveys ? Array.from(mergedSurveysMap.values()) : this.db.surveys,
       surveyResponses: Array.isArray(payload.surveyResponses)
         ? payload.surveyResponses
@@ -882,19 +955,21 @@ class CloudStorageService {
     this.emit(true);
 
     // 2. Persiste instantaneamente no cache de preview do servidor e endpoint REST da LP
+    // (_skipGasSync evita 3 POSTs simultâneos competindo pelo LockService do Google Apps Script!)
+    const serverBody = JSON.stringify({ ...normalized, _skipGasSync: true });
     const serverPreviewSyncPromise =
       typeof window !== "undefined"
         ? Promise.allSettled([
             fetch("/api/pages/preview", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(normalized),
+              body: serverBody,
             }),
             normalized.id
               ? fetch(`/api/landing-pages/${encodeURIComponent(normalized.id)}`, {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(normalized),
+                  body: serverBody,
                 })
               : Promise.resolve(),
           ])
@@ -924,6 +999,25 @@ class CloudStorageService {
         }
 
         // Fallback caso o Code.gs do usuário ainda seja antigo (< v3.2):
+        // Se o banco ainda não foi hidratado da nuvem, hidrata antes de enviar pushNow para não perder outras entidades
+        if (!this.status.loadedFromCloud) {
+          await this.bootstrap().catch(() => {});
+          // Garante que a LP editada continua intacta na RAM após o bootstrap
+          const curList = Array.isArray(this.db.landingPages) ? this.db.landingPages : [];
+          this.db = {
+            ...this.db,
+            landingPages: curList.some(
+              (p: any) => p && (p.id === normalized.id || (normalized.slug && p.slug === normalized.slug))
+            )
+              ? curList.map((p: any) =>
+                  p && (p.id === normalized.id || (normalized.slug && p.slug === normalized.slug))
+                    ? normalized
+                    : p
+                )
+              : [normalized, ...curList],
+            activePreviewPage: normalized,
+          };
+        }
         const pushed = await this.pushNow();
         return pushed;
       } catch (err: any) {
@@ -955,13 +1049,13 @@ class CloudStorageService {
 
   async fetchPublicLP(
     idOrSlug: string,
-    options: { preferSheets?: boolean } = {}
+    options: { preferSheets?: boolean; bypassCache?: boolean } = {}
   ): Promise<LandingPage | null> {
     if (!idOrSlug) return null;
     const cleanTarget = decodeURIComponent(idOrSlug).trim().toLowerCase();
 
-    const findInList = (list: any[]) =>
-      list.find(
+    const findBestInList = (list: any[]) => {
+      const matches = (list || []).filter(
         (p) =>
           p &&
           !isCorruptedLeadAsLp(p) &&
@@ -969,25 +1063,48 @@ class CloudStorageService {
             String(p.originalId || "").toLowerCase() === cleanTarget ||
             String(p.previewToken || "").toLowerCase() === cleanTarget ||
             String(p.slug || "").toLowerCase() === cleanTarget)
-      ) || null;
+      );
+      if (matches.length === 0) return null;
+      matches.sort((a, b) => {
+        const aFull = hasFullLpContentCloud(a) ? 1 : 0;
+        const bFull = hasFullLpContentCloud(b) ? 1 : 0;
+        if (bFull !== aFull) return bFull - aFull;
+        return getLpTimestampMs(b) - getLpTimestampMs(a);
+      });
+      return matches[0];
+    };
 
     const fromPreviewRam =
-      this.db.activePreviewPage && findInList([this.db.activePreviewPage])
+      this.db.activePreviewPage && findBestInList([this.db.activePreviewPage])
         ? this.db.activePreviewPage
         : null;
-    const fromRam = fromPreviewRam || findInList(this.db.landingPages);
+    const fromListRam = findBestInList(this.db.landingPages);
+    const ramCandidates = [fromPreviewRam, fromListRam].filter(Boolean);
+    ramCandidates.sort((a, b) => {
+      const aFull = hasFullLpContentCloud(a) ? 1 : 0;
+      const bFull = hasFullLpContentCloud(b) ? 1 : 0;
+      if (bFull !== aFull) return bFull - aFull;
+      return getLpTimestampMs(b) - getLpTimestampMs(a);
+    });
+    const fromRam = ramCandidates[0] || null;
 
-    // Se houver escrita local pendente neste navegador, prioriza RAM imediata
-    if (fromRam && this.status.pendingWrite) {
+    // Se houver escrita local pendente neste navegador, prioriza RAM imediata (se tiver hero completo)
+    if (fromRam && this.status.pendingWrite && hasFullLpContentCloud(fromRam)) {
       return fromRam;
     }
 
-    if (fromRam && this.status.loadedFromCloud && !options.preferSheets) {
+    if (
+      fromRam &&
+      this.status.loadedFromCloud &&
+      hasFullLpContentCloud(fromRam) &&
+      !options.preferSheets &&
+      !options.bypassCache
+    ) {
       return fromRam;
     }
 
-    // Deduplicação de requisições simultâneas para a mesma LP (evita 2-4 chamadas paralelas!)
-    const inflightKey = `${cleanTarget}:${options.preferSheets ? "s" : "c"}`;
+    // Deduplicação de requisições simultâneas para a mesma LP
+    const inflightKey = `${cleanTarget}:${options.preferSheets ? "s" : "c"}:${options.bypassCache ? "nc" : "ca"}`;
     const existingPromise = this.publicLpInflight.get(inflightKey);
     if (existingPromise) return existingPromise;
 
@@ -999,7 +1116,8 @@ class CloudStorageService {
         try {
           const controller = new AbortController();
           const t = setTimeout(() => controller.abort(), 9000);
-          const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}`, {
+          const qs = options.bypassCache ? `?nocache=1&t=${Date.now()}` : `?t=${Date.now()}`;
+          const res = await fetch(`/api/public/lp/${encodeURIComponent(idOrSlug)}${qs}`, {
             cache: "no-store",
             signal: controller.signal,
           });
@@ -1021,10 +1139,11 @@ class CloudStorageService {
         return null;
       };
 
-      // Executa consulta Drive/Sheets e /api/public/lp em paralelo (máximo 1 ciclo de rede)
+      // Executa consulta Drive/Sheets e /api/public/lp em paralelo (sempre nocache=1 em links públicos)
       const [driveSettled, apiSettled] = await Promise.allSettled([
         fetchPublicLpFromDrive(idOrSlug, {
           directSheets: options.preferSheets === true,
+          nocache: true,
         }),
         fetchServerApi(),
       ]);
@@ -1034,11 +1153,16 @@ class CloudStorageService {
 
       let chosen: LandingPage | null = null;
       if (cloudLp && apiLp) {
+        const cFull = hasFullLpContentCloud(cloudLp) ? 1 : 0;
+        const aFull = hasFullLpContentCloud(apiLp) ? 1 : 0;
         const cTs = getLpTimestampMs(cloudLp);
         const aTs = getLpTimestampMs(apiLp);
         const cModel = (cloudLp as any).hero?.model || (cloudLp as any).heroModel || "split_image";
         const aModel = (apiLp as any).hero?.model || (apiLp as any).heroModel || "split_image";
-        if (aTs > cTs || (aTs === cTs && aModel !== "split_image" && cModel === "split_image")) {
+        if (
+          aFull > cFull ||
+          (aFull === cFull && (aTs > cTs || (aTs === cTs && aModel !== "split_image" && cModel === "split_image")))
+        ) {
           chosen = apiLp;
         } else {
           chosen = cloudLp;
@@ -1048,6 +1172,8 @@ class CloudStorageService {
       }
 
       if (chosen) {
+        const ramFull = hasFullLpContentCloud(fromRam) ? 1 : 0;
+        const chosenFull = hasFullLpContentCloud(chosen) ? 1 : 0;
         const ramTime = getLpTimestampMs(fromRam);
         const chosenTime = getLpTimestampMs(chosen);
         const ramModel = (fromRam as any)?.hero?.model || (fromRam as any)?.heroModel || "split_image";
@@ -1055,9 +1181,11 @@ class CloudStorageService {
 
         if (
           !fromRam ||
-          !this.status.loadedFromCloud ||
-          chosenTime > ramTime ||
-          (chosenTime === ramTime && (chosenModel !== "split_image" || ramModel === chosenModel))
+          chosenFull > ramFull ||
+          (chosenFull === ramFull &&
+            (!this.status.loadedFromCloud ||
+              chosenTime > ramTime ||
+              (chosenTime === ramTime && (chosenModel !== "split_image" || ramModel === chosenModel))))
         ) {
           this.db.landingPages = [
             chosen,
