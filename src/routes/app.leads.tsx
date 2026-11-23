@@ -3,9 +3,11 @@ import {
   Search, Download, Plus, Eye, Timer, Clock, Calendar, Filter, X, 
   ChevronDown, Check, Sparkles, Flame, UserCheck, Trash2, 
   RefreshCw, Ban, CheckSquare, Square, AlertTriangle, Globe, MessageCircle, Mail, DollarSign,
-  FileCheck, ArrowDownToLine, GitFork, Lock, Unlock, ShieldAlert, User as UserIcon
+  FileCheck, ArrowDownToLine, GitFork, Lock, Unlock, ShieldAlert, User as UserIcon, Upload
 } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
+import { convertToCSV, parseCSV, downloadDataFile } from "@/lib/data-portability";
+import { getCurrentUser } from "@/lib/auth-service";
 import { useData } from "@/hooks/use-data";
 import { NewLeadModal } from "@/components/crm/new-lead-modal";
 import { LeadDrawer } from "@/components/crm/lead-drawer";
@@ -156,6 +158,72 @@ function LeadsPage() {
   // Estados de Seleção Múltipla
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const activeUser = currentUser || getCurrentUser();
+  const isAdmin = activeUser?.role === "Admin Geral" || activeUser?.role === "Admin" || activeUser?.role === "Gestor";
+
+  const handleExportLeads = () => {
+    if (!isAdmin) {
+      toast.error("Apenas administradores podem exportar a base de leads.");
+      return;
+    }
+    try {
+      const rowsToExport = filteredRows.length > 0 ? filteredRows : leads;
+      const csv = convertToCSV(rowsToExport);
+      downloadDataFile(csv, `leads-export-${new Date().toISOString().slice(0, 10)}.csv`, "text/csv");
+      toast.success("✅ Base de leads exportada com sucesso!");
+    } catch (err) {
+      toast.error("Erro ao exportar leads.");
+    }
+  };
+
+  const handleImportLeads = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAdmin) {
+      toast.error("Apenas administradores podem importar leads.");
+      return;
+    }
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        let imported: any[] = [];
+        if (file.name.endsWith('.csv')) {
+          imported = parseCSV(content);
+        } else {
+          imported = JSON.parse(content);
+        }
+        if (Array.isArray(imported) && imported.length > 0) {
+          let count = 0;
+          imported.forEach((row) => {
+            if (row.name || row.whatsapp || row.email) {
+              addLead({
+                name: row.name || row.nome || "Lead Importado",
+                whatsapp: row.whatsapp || row.phone || row.telefone || "",
+                email: row.email || row.mail || "",
+                company: row.company || row.empresa || "",
+                source: row.source || row.origem || "Importação Admin",
+                stage: row.stage || row.etapa || "Novo Lead",
+                classification: row.classification || "Lead",
+                temperature: row.temperature || "Morno",
+                value: Number(row.value || row.valor) || 3500,
+              });
+              count++;
+            }
+          });
+          toast.success(`✅ ${count} leads importados com sucesso!`);
+        } else {
+          toast.error("Nenhum lead válido encontrado no arquivo.");
+        }
+      } catch (err) {
+        toast.error("Erro ao processar arquivo de importação.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   // Helper para obter a qualificação MIN de cada lead
   const resolveLeadMin = (lead: any): MinQualification | undefined => {
@@ -352,6 +420,34 @@ function LeadsPage() {
           >
             <ArrowDownToLine className="h-4 w-4" /> Puxar para Meu Pipeline
           </button>
+
+          {isAdmin && (
+            <>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleImportLeads} 
+                accept=".csv,.json" 
+                className="hidden" 
+              />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-border bg-card hover:bg-muted/80 text-foreground font-black uppercase tracking-wider shadow-sm inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Importar lista de leads (Apenas Admin)"
+              >
+                <Upload className="h-4 w-4 text-purple-400" />
+                <span>Importar</span>
+              </button>
+              <button 
+                onClick={handleExportLeads}
+                className="text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-border bg-card hover:bg-muted/80 text-foreground font-black uppercase tracking-wider shadow-sm inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Exportar lista de leads em CSV (Apenas Admin)"
+              >
+                <Download className="h-4 w-4 text-blue-400" />
+                <span>Exportar</span>
+              </button>
+            </>
+          )}
 
           {/* Botão para configurar regras de roteamento e distribuição LDR/SDR/Seller */}
           <button 

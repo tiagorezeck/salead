@@ -16,8 +16,8 @@ export interface LeadRoutingConfig {
 
 export const DEFAULT_LEAD_ROUTING_CONFIG: LeadRoutingConfig = {
   enabled: true,
-  targetRole: 'LDR',
-  targetPipelineId: 'prospection', // LDR — QUALIFICAÇÃO INICIAL
+  targetRole: 'SDR',
+  targetPipelineId: 'sdr', // SDR — QUALIFICAÇÃO & DISCOVERY
   targetStage: 'Novo Lead',
   distributionType: 'role_round_robin',
   updatedAt: new Date().toISOString()

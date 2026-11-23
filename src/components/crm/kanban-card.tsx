@@ -1,5 +1,5 @@
 import { type Lead, SLA_CONFIG, CLASSIFICATION_CONFIG } from "@/data/mock";
-import { MoreVertical, MessageCircle, Phone, Paperclip, Thermometer, Target, UserCheck, Zap, BookOpen, Ban, RefreshCw, CreditCard, Flame, Calendar as CalendarIcon, Video, Sparkles, Globe, ArrowRight } from "lucide-react";
+import { MoreVertical, MessageCircle, Phone, Paperclip, Thermometer, Target, UserCheck, Zap, BookOpen, Ban, RefreshCw, CreditCard, Flame, Calendar as CalendarIcon, Video, Sparkles, Globe, ArrowRight, Layers } from "lucide-react";
 import { formatCurrency, cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { calculateLeadScore, calculateLeadTemperature, getScoreColor } from "@/lib/scoring";

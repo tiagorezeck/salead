@@ -3,7 +3,7 @@ import { useData } from "@/hooks/use-data";
 import { 
   Search, Plus, LayoutGrid, List, Users as UsersIcon, ChevronDown, Eye, Calendar, Lock, Ban, Layers,
   Phone, Mail, MessageCircle, ArrowRight, CheckCircle2, Clock, Sparkles, Settings2, ArrowRightLeft,
-  ArrowDownToLine, GitFork
+  ArrowDownToLine, GitFork, Globe
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -40,8 +40,20 @@ function CRMPage() {
   const [showRoutingModal, setShowRoutingModal] = useState(false);
   const [taskModalLead, setTaskModalLead] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string>("");
+  const [activeEventFilter, setActiveEventFilter] = useState<string>("all");
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+
+  const availableEvents = useMemo(() => {
+    const set = new Set<string>();
+    leads.forEach((l: any) => {
+      const ev = l.landingPage || l.landing_page || l.metadata?.pageTitle || l.source;
+      if (ev && typeof ev === "string" && ev.trim()) {
+        set.add(ev.trim());
+      }
+    });
+    return Array.from(set);
+  }, [leads]);
 
   // Garante que activePipelineId tenha um valor válido assim que pipelines carregar
   useEffect(() => {
@@ -75,8 +87,9 @@ function CRMPage() {
     const toDate = dateFilter.to;
 
     return leads.filter(l => {
-      // SÓ MOSTRA LEADS ATIVOS NO CRM
-      if (l.status !== 'Ativo') return false;
+      // SÓ MOSTRA LEADS ATIVOS NO CRM (robusto para aceitar ativo, Ativo, Ativa ou indefinido)
+      const st = String(l.status || "Ativo").trim().toLowerCase();
+      if (st === "inativo" || st === "desativado" || st === "bloqueado") return false;
 
       // Filtra por pipeline ativa (fallback para prospection se não definido)
       const leadPipe = l.pipelineId || "prospection";
@@ -95,8 +108,9 @@ function CRMPage() {
 
       const matchesSearch = [l.name, l.company, l.source, l.email, l.whatsapp].some(v => v?.toLowerCase().includes(search.toLowerCase()));
       const matchesOwner = selectedOwner === "all" || l.owner === selectedOwner;
+      const matchesEvent = activeEventFilter === "all" || [l.landingPage, l.landing_page, l.metadata?.pageTitle, l.source].some(v => v?.toLowerCase().includes(activeEventFilter.toLowerCase()));
       
-      return matchesSearch && matchesOwner;
+      return matchesSearch && matchesOwner && matchesEvent;
     });
   }, [leads, search, selectedOwner, dateFilter, activePipelineId]);
 
@@ -142,6 +156,22 @@ function CRMPage() {
                 ))}
               </select>
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3 w-3 text-primary pointer-events-none" />
+            </div>
+
+            {/* Seletor de Evento / LP / Campanha para filtrar o Kanban */}
+            <div className="relative group">
+              <Globe className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-primary" />
+              <select 
+                value={activeEventFilter}
+                onChange={(e) => setActiveEventFilter(e.target.value)}
+                className="pl-9 pr-10 py-2.5 bg-card border border-border rounded-xl text-xs font-bold uppercase tracking-wider appearance-none focus:outline-none hover:bg-muted/80 transition-all cursor-pointer shadow-sm"
+              >
+                <option value="all">🌐 Evento / LP (Todos)</option>
+                {availableEvents.map(ev => (
+                  <option key={ev} value={ev}>{ev}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
             </div>
 
             <button

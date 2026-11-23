@@ -164,6 +164,64 @@ function PublicLPPage() {
         return;
       }
 
+      const normId = normalizeSlug(id);
+
+      // =====================================================================
+      // PASSO 0: FAST-PATH INSTANTÂNEO (SESSIONSTORAGE CACHE & PRESETS)
+      // Custo 0ms - Elimina o tempo de espera de rede de 5-8 segundos
+      // =====================================================================
+      if (typeof window !== "undefined") {
+        try {
+          const cachedStr = sessionStorage.getItem(`lp_cache_${id}`) || sessionStorage.getItem(`lp_cache_${normId}`);
+          if (cachedStr) {
+            const cachedLp = JSON.parse(cachedStr);
+            if (cachedLp && hasFullLpContent(cachedLp)) {
+              if (isMounted) {
+                setLp(cachedLp);
+                setLoading(false);
+                // Executa registro de visita e rastreamento em segundo plano sem bloquear o render
+                setTimeout(() => {
+                  if (typeof recordVisitForLP === "function") recordVisitForLP(cachedLp).catch(() => {});
+                }, 10);
+              }
+              return;
+            }
+          }
+        } catch {}
+
+        // Verificação instantânea em Presets e Templates AI
+        const numIdx = parseInt(id, 10);
+        if (!isNaN(numIdx) && numIdx > 0 && numIdx <= PRESET_TEMPLATES.length) {
+          const presetByIndex = PRESET_TEMPLATES[numIdx - 1];
+          if (presetByIndex && isMounted) {
+            setLp(presetByIndex);
+            setLoading(false);
+            try { sessionStorage.setItem(`lp_cache_${id}`, JSON.stringify(presetByIndex)); } catch {}
+            setTimeout(() => recordVisitForLP(presetByIndex).catch(() => {}), 10);
+            return;
+          }
+        }
+
+        const presetMatch = PRESET_TEMPLATES.find((p) => p.id === id || p.slug === id || normalizeSlug(p.id) === normId);
+        if (presetMatch && isMounted) {
+          setLp(presetMatch);
+          setLoading(false);
+          try { sessionStorage.setItem(`lp_cache_${id}`, JSON.stringify(presetMatch)); } catch {}
+          setTimeout(() => recordVisitForLP(presetMatch).catch(() => {}), 10);
+          return;
+        }
+
+        const aiTemplates = getInitialAILandingPages();
+        const aiMatch = aiTemplates.find((p) => p.id === id || p.slug === id || normalizeSlug(p.id) === normId);
+        if (aiMatch && isMounted) {
+          setLp(aiMatch);
+          setLoading(false);
+          try { sessionStorage.setItem(`lp_cache_${id}`, JSON.stringify(aiMatch)); } catch {}
+          setTimeout(() => recordVisitForLP(aiMatch).catch(() => {}), 10);
+          return;
+        }
+      }
+
       const deletedIds = new Set(getDeletedLandingPageIds());
       if (deletedIds.has(id)) {
         if (isMounted) {
@@ -172,8 +230,6 @@ function PublicLPPage() {
         }
         return;
       }
-
-      const normId = normalizeSlug(id);
 
       const recordVisitForLP = async (targetLp: any) => {
         if (visitTracked.current || !targetLp) return;
@@ -299,6 +355,7 @@ function PublicLPPage() {
         if (foundInRam && ramIsComplete && isMounted) {
           setLp(foundInRam);
           setLoading(false);
+          try { sessionStorage.setItem(`lp_cache_${id}`, JSON.stringify(foundInRam)); } catch {}
           recordVisitForLP(foundInRam).catch(() => {});
           if (cloudStore.getStatus().pendingWrite) {
             return;
@@ -331,6 +388,9 @@ function PublicLPPage() {
             bestTime = candTime;
             setLp(candidate);
             setLoading(false);
+            if (candFull) {
+              try { sessionStorage.setItem(`lp_cache_${id}`, JSON.stringify(candidate)); } catch {}
+            }
             if (!visitRecorded) {
               visitRecorded = true;
               recordVisitForLP(candidate).catch(() => {});
@@ -1405,6 +1465,12 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
   };
 
   if (isSubmitted) {
+    const safeName = name ? String(name) : "Visitante";
+    const safePhone = whatsapp ? String(whatsapp) : "";
+    const safeCleanPhone = safePhone.replace(/\D/g, "");
+    const safeEmail = email ? String(email) : "";
+    const safeSource = effectiveSource ? String(effectiveSource) : "Direto";
+
     return (
       <div className="bg-zinc-900/70 backdrop-blur-xl border border-zinc-800 rounded-3xl p-8 md:p-10 shadow-2xl text-center space-y-6 animate-in zoom-in-95 duration-300">
         <div className="w-16 h-16 mx-auto rounded-3xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/10">
@@ -1415,7 +1481,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
           <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
             Inscrição Confirmada
           </span>
-          <h2 className="text-2xl font-black text-zinc-100 tracking-tight">Obrigado, {name.split(" ")[0]}!</h2>
+          <h2 className="text-2xl font-black text-zinc-100 tracking-tight">Obrigado, {safeName.split(" ")[0]}!</h2>
           <p className="text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
             Seus dados foram recebidos com sucesso. Nossa equipe entrará em contato via WhatsApp em breve.
           </p>
@@ -1424,23 +1490,23 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         <div className="p-4 bg-zinc-950/50 border border-zinc-800/80 rounded-2xl text-left space-y-2 text-xs">
           <div className="flex items-center justify-between text-zinc-400">
             <span>WhatsApp Cadastrado:</span>
-            <span className="font-semibold text-zinc-200">{whatsapp}</span>
+            <span className="font-semibold text-zinc-200">{safePhone}</span>
           </div>
-          {email && (
+          {safeEmail && (
             <div className="flex items-center justify-between text-zinc-400">
               <span>E-mail:</span>
-              <span className="font-semibold text-zinc-200 truncate max-w-[200px]">{email}</span>
+              <span className="font-semibold text-zinc-200 truncate max-w-[200px]">{safeEmail}</span>
             </div>
           )}
           <div className="flex items-center justify-between text-zinc-400 pt-1 border-t border-zinc-800/60">
             <span>Origem:</span>
-            <span className="font-bold text-purple-400 capitalize">{effectiveSource}</span>
+            <span className="font-bold text-purple-400 capitalize">{safeSource}</span>
           </div>
         </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <a
-            href={`https://wa.me/55${whatsapp.replace(/\D/g, "")}`}
+            href={`https://wa.me/55${safeCleanPhone}`}
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 cursor-pointer"
@@ -1449,7 +1515,7 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
             <span>Falar no WhatsApp</span>
           </a>
 
-          {lp.externalUrl && (
+          {lp?.externalUrl && (
             <a
               href={lp.externalUrl}
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all border border-zinc-700/50"
