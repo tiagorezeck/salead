@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { useData } from "@/hooks/use-data";
 import { 
   Search, Plus, LayoutGrid, List, Users as UsersIcon, ChevronDown, Eye, Calendar, Lock, Ban, Layers,
@@ -18,20 +18,25 @@ import { PullLeadModal } from "@/components/crm/pull-lead-modal";
 import { LeadRoutingModal } from "@/components/crm/lead-routing-modal";
 import { toast } from "sonner";
 import { isWithinInterval, format } from "date-fns";
+import { isRoleEnabledOnPipeline } from "@/lib/lead-rules";
 import { ptBR } from "date-fns/locale";
 import { type PipelineStage, type Lead, CLASSIFICATION_CONFIG, SLA_CONFIG } from "@/data/mock";
 import { calculateLeadScore, getScoreColor } from "@/lib/scoring";
 
 export const Route = createFileRoute("/app/crm")({
   component: CRMPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    leadId: (search.leadId as string) || undefined,
+  }),
 });
 
 function CRMPage() {
   const { leads, updateLead, deleteLead, addLead, addTask, pipelines, rolePermissions, users, currentUser, initialized, dateFilter, leadRoutingConfig } = useData();
+  const { leadId: paramLeadId } = useSearch({ from: "/app/crm" });
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   const [selectedOwner, setSelectedOwner] = useState<string>("all");
-  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(paramLeadId || null);
   const [scheduleModalLead, setScheduleModalLead] = useState<Lead | null>(null);
   const [transferModalLead, setTransferModalLead] = useState<Lead | null>(null);
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
@@ -55,16 +60,29 @@ function CRMPage() {
     return Array.from(set);
   }, [leads]);
 
+  useEffect(() => {
+    if (paramLeadId) {
+      setSelectedLeadId(paramLeadId);
+    }
+  }, [paramLeadId]);
+
+  const visiblePipelines = useMemo(() => {
+    const activeOnly = pipelines.filter((p) => p.active !== false);
+    if (!currentUser) return activeOnly;
+    const filtered = activeOnly.filter((p) => isRoleEnabledOnPipeline(p, currentUser.role));
+    return filtered.length > 0 ? filtered : activeOnly;
+  }, [pipelines, currentUser]);
+
   // Garante que activePipelineId tenha um valor válido assim que pipelines carregar
   useEffect(() => {
-    if (pipelines.length > 0 && !activePipelineId) {
-      setActivePipelineId(pipelines[0].id);
+    if (visiblePipelines.length > 0 && (!activePipelineId || !visiblePipelines.some(p => p.id === activePipelineId))) {
+      setActivePipelineId(visiblePipelines[0].id);
     }
-  }, [pipelines, activePipelineId]);
+  }, [visiblePipelines, activePipelineId]);
 
   const currentPipeline = useMemo(() => 
-    pipelines.find(p => p.id === activePipelineId) || pipelines[0] || { id: '', name: 'Padrão', stages: [], color: 'primary' },
-    [activePipelineId, pipelines]
+    visiblePipelines.find(p => p.id === activePipelineId) || visiblePipelines[0] || pipelines[0] || { id: '', name: 'Padrão', stages: [], color: 'primary' },
+    [activePipelineId, visiblePipelines, pipelines]
   );
 
   // Lógica de Visibilidade: SDR vê X, Closer vê Y, Full Stack vê tudo
@@ -147,9 +165,9 @@ function CRMPage() {
                 value={activePipelineId}
                 onChange={(e) => setActivePipelineId(e.target.value)}
                 className="pl-9 pr-10 py-2.5 bg-primary/5 border border-primary/20 rounded-xl text-xs font-black uppercase tracking-widest appearance-none focus:outline-none hover:bg-primary/10 transition-all cursor-pointer shadow-sm"
-                disabled={pipelines.length === 0}
+                disabled={visiblePipelines.length === 0}
               >
-                {pipelines.map(p => (
+                {visiblePipelines.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.name} {p.functionRole ? `(${p.functionRole})` : ''}
                   </option>

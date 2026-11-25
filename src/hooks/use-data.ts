@@ -56,8 +56,27 @@ import {
   type LeadRoutingConfig, 
   DEFAULT_LEAD_ROUTING_CONFIG, 
   checkLeadClaimEligibility,
-  isContactMadeStage 
+  isContactMadeStage,
+  resolveLeadRoutingAssignment,
+  enableRoleInPipelinesList
 } from "@/lib/lead-rules";
+import type {
+  AgendaBlock,
+  AgendaBooking,
+  AgendaBookingStatus,
+  AgendaCustomItem,
+  AgendaEvent,
+  AgendaFormField,
+  AgendaFormResponse,
+  AgendaSchedule,
+  AgendaWaitlistEntry,
+} from "@/types/agenda";
+import {
+  applyBookingRescheduleToDraft,
+  applyBookingStatusUpdateToDraft,
+  generateRandomCode,
+  slugifyText,
+} from "@/lib/agenda-engine";
 
 export type { Lead, Product, LandingPage, Survey, SurveyQuestion, SurveyResponse, Pipeline, Objection, Playbook, SLA, Activity };
 
@@ -281,6 +300,13 @@ export const mapLeadFromDb = (row: any): Lead => ({
   wonAt: row.won_at,
   activities: Array.isArray(row.activities) ? row.activities : [],
   completedCheckpoints: Array.isArray(row.completed_checkpoints) ? row.completed_checkpoints : [],
+  copilotDocuments: Array.isArray(row.copilotDocuments)
+    ? row.copilotDocuments
+    : Array.isArray(row.copilot_documents)
+    ? row.copilot_documents
+    : Array.isArray(row.metadata?.copilotDocuments)
+    ? row.metadata.copilotDocuments
+    : [],
   captureType: row.metadata?.captureType || (row.source?.includes("LP") || row.source?.includes("Landing") ? "Inbound" : "Manual"),
   status: row.metadata?.status || "Ativo",
 
@@ -377,25 +403,48 @@ export const mapLeadToDb = (lead: Partial<Lead> & Record<string, any>) => {
     ...(lead.purchaseCount !== undefined ? { purchaseCount: lead.purchaseCount } : {}),
     ...(lead.lastVisitedLp !== undefined ? { lastVisitedLp: lead.lastVisitedLp } : {}),
     ...(lead.lastLpVisitAt !== undefined ? { lastLpVisitAt: lead.lastLpVisitAt } : {}),
+    ...(lead.copilotDocuments !== undefined ? { copilotDocuments: lead.copilotDocuments } : {}),
   };
   payload.metadata = newMeta;
 
   return payload;
 };
 
-export const mapTaskFromDb = (row: any): Task => ({
-  id: row.id,
-  title: row.title || "",
-  lead: row.lead || "",
-  leadId: row.lead_id,
-  owners: Array.isArray(row.owners) ? row.owners : [],
-  due: row.due || "",
-  priority: row.priority || "media",
-  done: !!row.done,
-  subtasks: Array.isArray(row.subtasks) ? row.subtasks : [],
-  createdAt: row.created_at || new Date().toISOString(),
-  completedAt: row.completed_at
-});
+export const mapTaskFromDb = (row: any): Task => {
+  const safeDueRaw =
+    row?.due ||
+    row?.dueDate ||
+    row?.due_date ||
+    row?.createdAt ||
+    row?.created_at ||
+    new Date().toISOString().split("T")[0];
+
+  const rawPriority = String(row?.priority || "media").toLowerCase();
+  const normalizedPriority: Task["priority"] =
+    rawPriority === "baixa" || rawPriority === "media" || rawPriority === "alta" || rawPriority === "urgente"
+      ? (rawPriority as Task["priority"])
+      : "media";
+
+  const resolvedOwners = Array.isArray(row?.owners)
+    ? row.owners.filter(Boolean).map(String)
+    : row?.assignedTo || row?.assigned_to
+    ? [String(row.assignedTo || row.assigned_to)]
+    : [];
+
+  return {
+    id: String(row?.id || `task_${Date.now()}`),
+    title: String(row?.title || "Tarefa"),
+    lead: String(row?.lead || row?.leadName || row?.lead_name || "Geral"),
+    leadId: row?.leadId || row?.lead_id,
+    owners: resolvedOwners,
+    due: String(safeDueRaw),
+    priority: normalizedPriority,
+    done: Boolean(row?.done),
+    subtasks: Array.isArray(row?.subtasks) ? row.subtasks : [],
+    createdAt: String(row?.createdAt || row?.created_at || new Date().toISOString()),
+    completedAt: row?.completedAt || row?.completed_at || undefined,
+  };
+};
 
 export const mapTaskToDb = (task: Partial<Task> & Record<string, any>) => {
   const payload: Record<string, any> = {};
@@ -765,6 +814,18 @@ export const mapLPFromDb = (row: any): LandingPage => {
     conv: conversionRate,
     type: row.type || config.type || "COMET CRO",
     surveyId: row.surveyId || config.surveyId || row.survey_id || undefined,
+    agendaEventId:
+      row.agendaEventId !== undefined
+        ? row.agendaEventId
+        : config.agendaEventId !== undefined
+        ? config.agendaEventId
+        : row.agenda_event_id || undefined,
+    agendaEventSlug:
+      row.agendaEventSlug !== undefined
+        ? row.agendaEventSlug
+        : config.agendaEventSlug !== undefined
+        ? config.agendaEventSlug
+        : row.agenda_event_slug || undefined,
     externalUrl: row.externalUrl || config.externalUrl || row.external_url || undefined,
     heroModel: heroModel || hero?.model,
     hero,
@@ -789,7 +850,9 @@ export const mapLPToDb = (lp: Partial<LandingPage> & Record<string, any>) => {
       heroModel: heroModel,
       client_id: id || (config && config.id) || (config && config.client_id),
       slug: lp.slug || (config && config.slug) || (lp.title || name ? (lp.title || name).toLowerCase().replace(/[^a-z0-9]+/g, "-") : undefined),
-      surveyId: lp.surveyId || (config && config.surveyId),
+      surveyId: lp.surveyId !== undefined ? lp.surveyId : (config && config.surveyId),
+      agendaEventId: lp.agendaEventId !== undefined ? lp.agendaEventId : (config && config.agendaEventId),
+      agendaEventSlug: lp.agendaEventSlug !== undefined ? lp.agendaEventSlug : (config && config.agendaEventSlug),
       externalUrl: lp.externalUrl || (config && config.externalUrl)
     }
   };
@@ -1314,17 +1377,27 @@ export function useData() {
           }
 
           const activitiesMap = new Map<string, Activity>();
+          const copilotDocsMap = new Map<string, any>();
           group.forEach(g => {
             if (Array.isArray(g.activities)) {
               g.activities.forEach(act => {
                 if (act && act.id) activitiesMap.set(act.id, act);
               });
             }
+            const docs = Array.isArray(g.copilotDocuments)
+              ? g.copilotDocuments
+              : Array.isArray(g.metadata?.copilotDocuments)
+              ? g.metadata.copilotDocuments
+              : [];
+            docs.forEach((doc: any) => {
+              if (doc && doc.id) copilotDocsMap.set(doc.id, doc);
+            });
           });
 
           const dates = group.map(x => new Date(x.createdAt || 0).getTime()).filter(d => !isNaN(d) && d > 0);
           const earliestDate = dates.length > 0 ? new Date(Math.min(...dates)).toISOString() : group[0].createdAt;
           const maxValue = Math.max(...group.map(x => Number(x.value) || 0));
+          const mergedCopilotDocs = Array.from(copilotDocsMap.values());
 
           const merged: Lead = {
             ...group[0],
@@ -1343,6 +1416,11 @@ export function useData() {
             type: isTestLead ? "Novo" : (isRec ? "Recorrente" : "Novo"),
             tags: Array.from(mergedTagsSet),
             activities: Array.from(activitiesMap.values()),
+            copilotDocuments: mergedCopilotDocs,
+            metadata: {
+              ...(group[0].metadata || {}),
+              ...(mergedCopilotDocs.length > 0 ? { copilotDocuments: mergedCopilotDocs } : {})
+            },
             createdAt: earliestDate,
             lastInteraction: isTestLead 
               ? `Capturado em Modo Teste (${group.length}x)`
@@ -1885,6 +1963,47 @@ export function useData() {
     queryClient.invalidateQueries({ queryKey: ['lead_routing_config'] });
   };
 
+  // 18. MÓDULO AGENDA & AGENDAMENTOS UNIFICADOS
+  const agendaEvents = asArray(useQuery({
+    queryKey: ['agenda_events'],
+    queryFn: async () => (cloudStore.getState().agendaEvents || []) as AgendaEvent[],
+  }).data);
+
+  const agendaSchedules = asArray(useQuery({
+    queryKey: ['agenda_schedules'],
+    queryFn: async () => (cloudStore.getState().agendaSchedules || []) as AgendaSchedule[],
+  }).data);
+
+  const agendaBlocks = asArray(useQuery({
+    queryKey: ['agenda_blocks'],
+    queryFn: async () => (cloudStore.getState().agendaBlocks || []) as AgendaBlock[],
+  }).data);
+
+  const agendaBookings = asArray(useQuery({
+    queryKey: ['agenda_bookings'],
+    queryFn: async () => (cloudStore.getState().agendaBookings || []) as AgendaBooking[],
+  }).data);
+
+  const agendaFormFields = asArray(useQuery({
+    queryKey: ['agenda_form_fields'],
+    queryFn: async () => (cloudStore.getState().agendaFormFields || []) as AgendaFormField[],
+  }).data);
+
+  const agendaFormResponses = asArray(useQuery({
+    queryKey: ['agenda_form_responses'],
+    queryFn: async () => (cloudStore.getState().agendaFormResponses || []) as AgendaFormResponse[],
+  }).data);
+
+  const agendaWaitlist = asArray(useQuery({
+    queryKey: ['agenda_waitlist'],
+    queryFn: async () => (cloudStore.getState().agendaWaitlist || []) as AgendaWaitlistEntry[],
+  }).data);
+
+  const agendaCustomItems = asArray(useQuery({
+    queryKey: ['agenda_custom_items'],
+    queryFn: async () => (cloudStore.getState().agendaCustomItems || []) as AgendaCustomItem[],
+  }).data);
+
 
 
   const authSessionUser = getCurrentUser();
@@ -1957,6 +2076,14 @@ export function useData() {
     DEFAULT_ROLE_MODULES,
     leadRoutingConfig,
     updateLeadRoutingConfig,
+    agendaEvents,
+    agendaSchedules,
+    agendaBlocks,
+    agendaBookings,
+    agendaFormFields,
+    agendaFormResponses,
+    agendaWaitlist,
+    agendaCustomItems,
     visibility, 
     slaThresholds, 
     dateFilter, 
@@ -2100,43 +2227,36 @@ export function useData() {
       let resolvedOwner = l.owner;
 
       if (leadRoutingConfig?.enabled) {
+        const routingResult = resolveLeadRoutingAssignment({
+          config: leadRoutingConfig,
+          leadData: { temperature: l.temperature || "Frio", name: l.name, stage: l.stage, pipelineId: l.pipelineId },
+          pipelines,
+          users,
+          existingLeads: leads,
+        });
+
         if (!resolvedPipelineId || resolvedPipelineId === "prospection") {
-          resolvedPipelineId = leadRoutingConfig.targetPipelineId || "prospection";
+          resolvedPipelineId = routingResult.targetPipelineId;
         }
         if (!resolvedStage || resolvedStage === "Leads" || resolvedStage === "Novo Lead") {
-          resolvedStage = leadRoutingConfig.targetStage || "Novo Lead";
+          resolvedStage = routingResult.targetStage;
         }
-
         if (!resolvedOwner || resolvedOwner === "Sem dono" || resolvedOwner === "Sem responsável") {
-          if (leadRoutingConfig.distributionType === "specific_user") {
-            resolvedOwner = leadRoutingConfig.specificUserName || "Responsável Comercial";
-          } else if (leadRoutingConfig.distributionType === "unassigned") {
-            resolvedOwner = "Sem responsável";
-          } else if (leadRoutingConfig.distributionType === "role_round_robin") {
-            const tr = (leadRoutingConfig.targetRole || "LDR").toLowerCase();
-            const matchingUsers = users.filter(u => {
-              const r = (u.role || "").toLowerCase();
-              if (r.includes(tr)) return true;
-              if (tr === "seller" && (r.includes("vendedor") || r.includes("comercial") || r.includes("closer"))) return true;
-              if (tr === "ldr" && (r.includes("qualificador") || r.includes("prospector") || r.includes("inbound"))) return true;
-              return false;
-            });
-
-            const candidatePool = matchingUsers.length > 0 ? matchingUsers : (users.length > 0 ? users : []);
-            if (candidatePool.length > 0) {
-              const lastIdx = leadRoutingConfig.lastAssignedIndex ?? -1;
-              const nextIdx = (lastIdx + 1) % candidatePool.length;
-              resolvedOwner = candidatePool[nextIdx].name;
-              updateLeadRoutingConfig({
-                ...leadRoutingConfig,
-                lastAssignedIndex: nextIdx
-              }).catch(() => {});
-            } else {
-              resolvedOwner = "Sem responsável";
-            }
-          }
+          resolvedOwner = routingResult.assignedOwner;
         }
+
+        updateLeadRoutingConfig({
+          ...leadRoutingConfig,
+          lastAssignedIndex: routingResult.nextLastAssignedIndex,
+          roleCursors: routingResult.nextRoleCursors,
+        }).catch(() => {});
       }
+
+      const initialCopilotDocs = Array.isArray(l.copilotDocuments)
+        ? l.copilotDocuments
+        : Array.isArray(l.metadata?.copilotDocuments)
+        ? l.metadata.copilotDocuments
+        : [];
 
       const fullLead: Lead = {
         id: generatedId,
@@ -2164,6 +2284,7 @@ export function useData() {
         createdAt: l.createdAt || new Date().toISOString(),
         activities: Array.isArray(l.activities) ? l.activities : [],
         completedCheckpoints: Array.isArray(l.completedCheckpoints) ? l.completedCheckpoints : [],
+        copilotDocuments: initialCopilotDocs,
         status: l.status || "Ativo",
         personType: l.personType || "PJ",
         role: l.role || "",
@@ -2180,7 +2301,8 @@ export function useData() {
           isTest: isTestLead,
           lpVisits: Number(l.lpVisits) || 1,
           isCustomer,
-          isRecurring
+          isRecurring,
+          ...(initialCopilotDocs.length > 0 ? { copilotDocuments: initialCopilotDocs } : {})
         }
       };
 
@@ -2295,22 +2417,43 @@ export function useData() {
 
     // TASKS
     addTask: async (t: any) => { 
+      const defaultDue = new Date().toISOString().split("T")[0];
+      const resolvedDue = String(t.due || t.dueDate || t.due_date || defaultDue);
+      const resolvedLead = String(t.lead || t.leadName || t.lead_name || "Geral");
+      const resolvedOwners = Array.isArray(t.owners)
+        ? t.owners.filter(Boolean).map(String)
+        : t.assignedTo || t.assigned_to
+        ? [String(t.assignedTo || t.assigned_to)]
+        : currentUser?.name
+        ? [currentUser.name]
+        : [];
+      const nowIso = new Date().toISOString();
+
       const newTask = {
         id: t.id || `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        title: t.title || "Nova Tarefa",
+        title: String(t.title || "Nova Tarefa"),
+        lead: resolvedLead,
         done: Boolean(t.done),
-        dueDate: t.dueDate || t.due_date || new Date().toISOString(),
-        due_date: t.dueDate || t.due_date || new Date().toISOString(),
-        assignedTo: t.assignedTo || t.assigned_to || "",
-        assigned_to: t.assignedTo || t.assigned_to || "",
+        due: resolvedDue,
+        dueDate: resolvedDue,
+        due_date: resolvedDue,
+        owners: resolvedOwners,
+        assignedTo: resolvedOwners[0] || "",
+        assigned_to: resolvedOwners[0] || "",
         priority: t.priority || "media",
+        subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
         leadId: t.leadId || t.lead_id,
         lead_id: t.leadId || t.lead_id,
-        leadName: t.leadName || t.lead_name,
-        lead_name: t.leadName || t.lead_name,
-        createdAt: new Date().toISOString(),
-        created_at: new Date().toISOString()
+        leadName: resolvedLead,
+        lead_name: resolvedLead,
+        createdAt: nowIso,
+        created_at: nowIso
       };
+
+      queryClient.setQueryData(['tasks'], (old: any) => {
+        const list = Array.isArray(old) ? old : [];
+        return [mapTaskFromDb(newTask), ...list.filter((x: any) => x.id !== newTask.id)];
+      });
 
       try {
         cloudStore.mutate((draft) => {
@@ -2382,6 +2525,239 @@ export function useData() {
       }
     },
 
+    // AGENDA & AGENDAMENTOS
+    saveAgendaEvent: async (
+      evento: AgendaEvent,
+      horarios: AgendaSchedule[],
+      campos: AgendaFormField[]
+    ) => {
+      const nowIso = new Date().toISOString();
+      const savedEvento: AgendaEvent = {
+        ...evento,
+        slug: evento.slug ? slugifyText(evento.slug) : slugifyText(evento.nome),
+        atualizado_em: nowIso,
+        criado_em: evento.criado_em || nowIso,
+      };
+      cloudStore.mutate((draft) => {
+        const list = Array.isArray(draft.agendaEvents) ? draft.agendaEvents : [];
+        const idx = list.findIndex((e: any) => e.id_evento === savedEvento.id_evento);
+        if (idx >= 0) list[idx] = savedEvento;
+        else list.unshift(savedEvento);
+        draft.agendaEvents = list;
+
+        const otherSchedules = (Array.isArray(draft.agendaSchedules) ? draft.agendaSchedules : []).filter(
+          (s: any) => s.id_evento !== savedEvento.id_evento
+        );
+        draft.agendaSchedules = [
+          ...otherSchedules,
+          ...horarios.map((h) => ({ ...h, id_evento: savedEvento.id_evento })),
+        ];
+
+        const otherFields = (Array.isArray(draft.agendaFormFields) ? draft.agendaFormFields : []).filter(
+          (f: any) => f.id_evento !== savedEvento.id_evento
+        );
+        draft.agendaFormFields = [
+          ...otherFields,
+          ...campos.map((c) => ({ ...c, id_evento: savedEvento.id_evento })),
+        ];
+      }, { immediate: true });
+
+      queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_form_fields'] });
+      return savedEvento;
+    },
+
+    deleteAgendaEvent: async (idEvento: string) => {
+      cloudStore.mutate((draft) => {
+        draft.agendaEvents = (draft.agendaEvents || []).filter((e: any) => e.id_evento !== idEvento);
+        draft.agendaSchedules = (draft.agendaSchedules || []).filter((s: any) => s.id_evento !== idEvento);
+        draft.agendaBlocks = (draft.agendaBlocks || []).filter((b: any) => b.id_evento !== idEvento);
+        draft.agendaFormFields = (draft.agendaFormFields || []).filter((f: any) => f.id_evento !== idEvento);
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_blocks'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_form_fields'] });
+      toast.success("Evento excluído da agenda!");
+    },
+
+    duplicateAgendaEvent: async (idEvento: string) => {
+      const state = cloudStore.getState();
+      const orig = (state.agendaEvents || []).find((e: any) => e.id_evento === idEvento);
+      if (!orig) return null;
+      const nowIso = new Date().toISOString();
+      const newId = `EVT-${generateRandomCode(5)}`;
+      const cloned: AgendaEvent = {
+        ...orig,
+        id_evento: newId,
+        nome: `${orig.nome} (Cópia)`,
+        slug: `${orig.slug}-${generateRandomCode(3).toLowerCase()}`,
+        visitas: 0,
+        criado_em: nowIso,
+        atualizado_em: nowIso,
+      };
+      const origSchedules = (state.agendaSchedules || [])
+        .filter((s: any) => s.id_evento === idEvento)
+        .map((s: any) => ({ ...s, id_horario: `SCH-${generateRandomCode(5)}`, id_evento: newId }));
+      const origFields = (state.agendaFormFields || [])
+        .filter((f: any) => f.id_evento === idEvento)
+        .map((f: any) => ({ ...f, id_campo: `FLD-${generateRandomCode(5)}`, id_evento: newId }));
+
+      cloudStore.mutate((draft) => {
+        draft.agendaEvents = [cloned, ...(draft.agendaEvents || [])];
+        draft.agendaSchedules = [...(draft.agendaSchedules || []), ...origSchedules];
+        draft.agendaFormFields = [...(draft.agendaFormFields || []), ...origFields];
+      }, { immediate: true });
+
+      queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['agenda_form_fields'] });
+      toast.success("Evento duplicado com sucesso!");
+      return cloned;
+    },
+
+    updateAgendaEventPublicConfig: async (idEvento: string, patch: Partial<AgendaEvent>) => {
+      cloudStore.mutate((draft) => {
+        draft.agendaEvents = (draft.agendaEvents || []).map((e: any) =>
+          e.id_evento === idEvento ? { ...e, ...patch, atualizado_em: new Date().toISOString() } : e
+        );
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
+      toast.success("Configurações públicas do evento atualizadas!");
+    },
+
+    updateAgendaSchedule: async (idHorario: string, updates: Partial<AgendaSchedule>) => {
+      const nowIso = new Date().toISOString();
+      cloudStore.mutate((draft) => {
+        draft.agendaSchedules = (Array.isArray(draft.agendaSchedules) ? draft.agendaSchedules : []).map((s: any) =>
+          s.id_horario === idHorario
+            ? {
+                ...s,
+                ...updates,
+                capacidade:
+                  updates.capacidade !== undefined
+                    ? Math.max(1, Number(updates.capacidade) || 1)
+                    : s.capacidade,
+                atualizado_em: nowIso,
+              }
+            : s
+        );
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
+    },
+
+    toggleAgendaBlock: async (idEvento: string, data: string, horaInicio: string, motivo?: string) => {
+      const actor = currentUser?.name || "Admin";
+      cloudStore.mutate((draft) => {
+        const blocks: AgendaBlock[] = Array.isArray(draft.agendaBlocks) ? draft.agendaBlocks : [];
+        const existingIdx = blocks.findIndex(
+          (b) => b.id_evento === idEvento && b.data === data && b.hora_inicio === horaInicio
+        );
+        if (existingIdx >= 0) {
+          blocks.splice(existingIdx, 1);
+        } else {
+          blocks.push({
+            id_bloqueio: `BLK-${generateRandomCode(5)}`,
+            id_evento: idEvento,
+            data,
+            hora_inicio: horaInicio,
+            hora_fim: horaInicio === "ALL_DAY" ? "23:59" : horaInicio,
+            motivo: motivo || "Bloqueio administrativo",
+            criado_por: actor,
+            criado_em: new Date().toISOString(),
+          });
+        }
+        draft.agendaBlocks = [...blocks];
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_blocks'] });
+    },
+
+    updateAgendaBookingStatus: async (
+      idAgendamento: string,
+      novoStatus: AgendaBookingStatus,
+      motivo?: string
+    ) => {
+      cloudStore.mutate((draft) => {
+        applyBookingStatusUpdateToDraft(draft, idAgendamento, novoStatus, motivo);
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+    },
+
+    rescheduleAgendaBooking: async (
+      idAgendamento: string,
+      novaData: string,
+      novaHoraInicio: string,
+      novaHoraFim: string
+    ) => {
+      cloudStore.mutate((draft) => {
+        applyBookingRescheduleToDraft(draft, idAgendamento, novaData, novaHoraInicio, novaHoraFim);
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      toast.success("Agendamento remarcado com sucesso!");
+    },
+
+    addAgendaCustomItem: async (item: Omit<AgendaCustomItem, "id" | "criado_em" | "concluido"> & { concluido?: boolean }) => {
+      const nowIso = new Date().toISOString();
+      const created: AgendaCustomItem = {
+        id: `OUT-${generateRandomCode(6)}`,
+        titulo: item.titulo.trim(),
+        categoria: item.categoria || "OUTRO",
+        data: item.data,
+        hora_inicio: item.hora_inicio || "",
+        hora_fim: item.hora_fim || "",
+        local: item.local || "",
+        lead_id: item.lead_id || "",
+        lead_nome: item.lead_nome || "",
+        responsavel_nome: item.responsavel_nome || currentUser?.name || "Equipe",
+        descricao: item.descricao || "",
+        concluido: Boolean(item.concluido),
+        criado_em: nowIso,
+        atualizado_em: nowIso,
+      };
+      cloudStore.mutate((draft) => {
+        const list = Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : [];
+        draft.agendaCustomItems = [created, ...list];
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
+      toast.success("Compromisso adicionado na agenda!");
+      return created;
+    },
+
+    updateAgendaCustomItem: async (id: string, updates: Partial<AgendaCustomItem>) => {
+      const nowIso = new Date().toISOString();
+      cloudStore.mutate((draft) => {
+        draft.agendaCustomItems = (Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : []).map((it: any) =>
+          it.id === id ? { ...it, ...updates, atualizado_em: nowIso } : it
+        );
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
+    },
+
+    toggleAgendaCustomItem: async (id: string) => {
+      const nowIso = new Date().toISOString();
+      cloudStore.mutate((draft) => {
+        draft.agendaCustomItems = (Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : []).map((it: any) =>
+          it.id === id ? { ...it, concluido: !it.concluido, atualizado_em: nowIso } : it
+        );
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
+    },
+
+    deleteAgendaCustomItem: async (id: string) => {
+      cloudStore.mutate((draft) => {
+        draft.agendaCustomItems = (Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : []).filter(
+          (it: any) => it.id !== id
+        );
+      }, { immediate: true });
+      queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
+      toast.success("Compromisso removido.");
+    },
+
     // PROFILES / USERS
     addUser: async (u: any) => {
       const id = u.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `user_${Date.now()}`);
@@ -2401,8 +2777,8 @@ export function useData() {
       };
 
       try {
-        if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
-          cloudStore.mutate((draft) => {
+        cloudStore.mutate((draft) => {
+          if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
             const nextMap = { ...(draft.userModulePermissions || {}) };
             const permEntry = {
               enabled: Boolean(u.customPermissionsEnabled),
@@ -2411,20 +2787,23 @@ export function useData() {
             nextMap[id] = permEntry;
             if (u.email) nextMap[u.email.toLowerCase()] = permEntry;
             draft.userModulePermissions = nextMap;
-          });
-        }
+          }
+          // Ao cadastrar usuário com cargo, habilita automaticamente o cargo na pipeline correspondente
+          draft.pipelines = enableRoleInPipelinesList(draft.pipelines || [], fullUser.role);
+        }, { immediate: true });
         saveRegisteredUser(fullUser);
       } catch (e) {
         console.warn("Aviso ao cadastrar usuário:", e);
       }
       invalidate('users');
+      invalidate('pipelines');
       return fullUser;
     },
 
     updateUser: async (id: string, u: any) => { 
       try {
-        if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
-          cloudStore.mutate((draft) => {
+        cloudStore.mutate((draft) => {
+          if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
             const nextMap = { ...(draft.userModulePermissions || {}) };
             const permEntry = {
               enabled: Boolean(u.customPermissionsEnabled),
@@ -2433,8 +2812,11 @@ export function useData() {
             nextMap[id] = permEntry;
             if (u.email) nextMap[u.email.toLowerCase()] = permEntry;
             draft.userModulePermissions = nextMap;
-          });
-        }
+          }
+          if (u.role) {
+            draft.pipelines = enableRoleInPipelinesList(draft.pipelines || [], u.role);
+          }
+        }, { immediate: true });
 
         const localUsers = getRegisteredUsers();
         const updated = localUsers.map(user => user.id === id ? { ...user, ...u } : user);
@@ -2443,6 +2825,7 @@ export function useData() {
         console.warn("Erro ao atualizar usuário:", err);
       }
       invalidate('users');
+      if (u.role) invalidate('pipelines');
     },
 
     deleteUser: async (id: string) => { 
@@ -3079,6 +3462,80 @@ export function useData() {
       return newResponse;
     },
 
+    clearSurveyResponses: async (surveyId: string) => {
+      queryClient.setQueryData(['survey_responses'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((r: any) => r.surveyId !== surveyId && r.survey_id !== surveyId);
+      });
+
+      queryClient.setQueryData(['surveys'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((s: any) => (s.id === surveyId ? { ...s, completions: 0 } : s));
+      });
+
+      cloudStore.mutate((draft) => {
+        draft.surveyResponses = (draft.surveyResponses || []).filter(
+          (r: any) => r.surveyId !== surveyId && r.survey_id !== surveyId
+        );
+        const existingSurveys = Array.isArray(draft.surveys) ? draft.surveys : [];
+        const hasSurvey = existingSurveys.some((s: any) => s.id === surveyId);
+        if (hasSurvey) {
+          draft.surveys = existingSurveys.map((s: any) =>
+            s.id === surveyId ? { ...s, completions: 0, updated_at: new Date().toISOString() } : s
+          );
+        } else {
+          const preset = DEFAULT_SURVEYS.find((s) => s.id === surveyId);
+          if (preset) {
+            draft.surveys = [{ ...preset, completions: 0, updated_at: new Date().toISOString() }, ...existingSurveys];
+          }
+        }
+      }, { immediate: true });
+
+      invalidate('survey_responses');
+      invalidate('surveys');
+      toast.success("Respostas de teste zeradas com sucesso!");
+    },
+
+    deleteSurveyResponse: async (responseId: string) => {
+      const targetResp = (cloudStore.getState().surveyResponses || []).find((r: any) => r.id === responseId);
+      const surveyId = targetResp?.surveyId || targetResp?.survey_id;
+
+      queryClient.setQueryData(['survey_responses'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((r: any) => r.id !== responseId);
+      });
+
+      cloudStore.mutate((draft) => {
+        const remaining = (draft.surveyResponses || []).filter((r: any) => r.id !== responseId);
+        draft.surveyResponses = remaining;
+
+        if (surveyId) {
+          const remainingForSurvey = remaining.filter(
+            (r: any) => r.surveyId === surveyId || r.survey_id === surveyId
+          ).length;
+          const existingSurveys = Array.isArray(draft.surveys) ? draft.surveys : [];
+          const hasSurvey = existingSurveys.some((s: any) => s.id === surveyId);
+          if (hasSurvey) {
+            draft.surveys = existingSurveys.map((s: any) =>
+              s.id === surveyId ? { ...s, completions: remainingForSurvey, updated_at: new Date().toISOString() } : s
+            );
+          } else {
+            const preset = DEFAULT_SURVEYS.find((s) => s.id === surveyId);
+            if (preset) {
+              draft.surveys = [
+                { ...preset, completions: remainingForSurvey, updated_at: new Date().toISOString() },
+                ...existingSurveys,
+              ];
+            }
+          }
+        }
+      }, { immediate: true });
+
+      invalidate('survey_responses');
+      invalidate('surveys');
+      toast.success("Resposta excluída com sucesso!");
+    },
+
     // PIPELINES & GESTÃO KANBAN
     addPipeline: async (nameOrData: string | Partial<Pipeline>) => { 
       const pipeData = typeof nameOrData === "string" ? { name: nameOrData } : nameOrData;
@@ -3495,13 +3952,13 @@ export function useData() {
       targetLeadIds?: string[],
       customConfig?: Partial<LeadRoutingConfig>
     ) => {
-      const activeConfig: LeadRoutingConfig = {
+      let workingConfig: LeadRoutingConfig = {
         ...leadRoutingConfig,
         ...(customConfig || {})
       };
 
       if (customConfig) {
-        await updateLeadRoutingConfig(activeConfig);
+        await updateLeadRoutingConfig(workingConfig);
       }
 
       let leadsToProcess: Lead[] = [];
@@ -3521,46 +3978,56 @@ export function useData() {
         return { count: 0 };
       }
 
-      const targetRole = activeConfig.targetRole || "LDR";
-      const tr = targetRole.toLowerCase();
-      let candidates = users.filter(u => {
-        const r = (u.role || "").toLowerCase();
-        if (r.includes(tr)) return true;
-        if (tr === "seller" && (r.includes("vendedor") || r.includes("comercial") || r.includes("closer"))) return true;
-        if (tr === "ldr" && (r.includes("qualificador") || r.includes("prospector") || r.includes("inbound"))) return true;
-        return false;
-      });
-
-      if (candidates.length === 0) {
-        candidates = users.filter(u => !u.role?.toLowerCase().includes("desenvolvedor")) || users;
-        if (candidates.length === 0 && currentUser) {
-          candidates = [currentUser];
-        }
-      }
-
-      const destPipe = pipelines.find(p => p.id === activeConfig.targetPipelineId) || pipelines[0];
-      const destStage = activeConfig.targetStage || (destPipe.stages[0]?.name || "Novo Lead");
-      const distType = activeConfig.distributionType || "role_round_robin";
-
       const nowIso = new Date().toISOString();
       const historyEntries: PipelineMovementHistory[] = [];
-      const toastId = toast.loading(`Distribuindo ${leadsToProcess.length} leads (${targetRole})...`);
+      const toastId = toast.loading(`Distribuindo ${leadsToProcess.length} leads conforme regras...`);
 
-      const leadIdToAssignedOwner: Record<string, string> = {};
+      const leadAssignmentMap: Record<string, {
+        pipelineId: string;
+        pipelineName: string;
+        stage: string;
+        owner: string;
+        targetRole: string;
+        reason: string;
+      }> = {};
 
-      leadsToProcess.forEach((l, idx) => {
-        let assignedOwner = "Sem responsável";
-        if (distType === "specific_user") {
-          const spec = users.find(u => u.id === activeConfig.specificUserId);
-          assignedOwner = spec?.name || activeConfig.specificUserName || currentUser?.name || "Vendedor";
-        } else if (distType === "role_round_robin") {
-          const c = candidates[idx % candidates.length];
-          assignedOwner = c?.name || currentUser?.name || "Vendedor";
-        } else if (distType === "unassigned") {
-          assignedOwner = "Sem responsável";
-        }
-        leadIdToAssignedOwner[l.id] = assignedOwner;
+      // Simula estado progressivo para balancear least_loaded/quotas corretamente no lote
+      let rollingLeadsSnapshot = [...leads];
+
+      leadsToProcess.forEach((l) => {
+        const resolved = resolveLeadRoutingAssignment({
+          config: workingConfig,
+          leadData: { temperature: l.temperature, name: l.name, stage: l.stage, pipelineId: l.pipelineId },
+          pipelines,
+          users,
+          existingLeads: rollingLeadsSnapshot,
+        });
+
+        workingConfig = {
+          ...workingConfig,
+          lastAssignedIndex: resolved.nextLastAssignedIndex,
+          roleCursors: resolved.nextRoleCursors,
+        };
+
+        const destPipe = pipelines.find(p => p.id === resolved.targetPipelineId) || pipelines[0];
+
+        leadAssignmentMap[l.id] = {
+          pipelineId: resolved.targetPipelineId,
+          pipelineName: destPipe?.name || resolved.targetPipelineId,
+          stage: resolved.targetStage,
+          owner: resolved.assignedOwner,
+          targetRole: resolved.targetRole,
+          reason: resolved.routingReason,
+        };
+
+        rollingLeadsSnapshot = rollingLeadsSnapshot.map(item =>
+          item.id === l.id
+            ? { ...item, owner: resolved.assignedOwner, pipelineId: resolved.targetPipelineId, stage: resolved.targetStage }
+            : item
+        );
       });
+
+      await updateLeadRoutingConfig(workingConfig).catch(() => {});
 
       const updatedLeadIds = new Set(leadsToProcess.map(l => l.id));
 
@@ -3568,7 +4035,9 @@ export function useData() {
         list.map((lead: any) => {
           if (!updatedLeadIds.has(lead.id)) return lead;
 
-          const assignedOwner = leadIdToAssignedOwner[lead.id] || "Sem responsável";
+          const assignment = leadAssignmentMap[lead.id];
+          if (!assignment) return lead;
+
           const sourcePipe = pipelines.find(p => p.id === (lead.pipelineId || "prospection")) || pipelines[0];
           const prevOwner = lead.owner || "Sem responsável";
           const prevStage = lead.stage;
@@ -3578,40 +4047,40 @@ export function useData() {
               id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
               leadId: lead.id,
               leadName: lead.name || "Lead",
-              previousPipelineId: sourcePipe.id,
-              previousPipelineName: sourcePipe.name,
+              previousPipelineId: sourcePipe?.id,
+              previousPipelineName: sourcePipe?.name,
               previousStage: prevStage,
-              newPipelineId: destPipe.id,
-              newPipelineName: destPipe.name,
-              newStage: destStage,
+              newPipelineId: assignment.pipelineId,
+              newPipelineName: assignment.pipelineName,
+              newStage: assignment.stage,
               previousOwner: prevOwner,
-              newOwner: assignedOwner,
+              newOwner: assignment.owner,
               movementType: 'PIPELINE_TRANSFER',
               user: currentUser?.name || "Distribuição Automática",
               timestamp: nowIso,
-              note: `Distribuído para ${assignedOwner} no funil ${destPipe.name} (${destStage})`
+              note: `Distribuído (${assignment.reason}) para ${assignment.owner} no funil ${assignment.pipelineName} (${assignment.stage})`
             });
           }
 
           const act: Activity = {
             id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
             type: 'pipeline_transfer',
-            description: `Distribuído via regra de ${targetRole} para [${destPipe.name}] (${destStage}). Responsável: ${assignedOwner}.`,
+            description: `Distribuído (${assignment.reason}) para [${assignment.pipelineName}] (${assignment.stage}). Responsável: ${assignment.owner}.`,
             timestamp: nowIso,
             user: currentUser?.name || "Distribuição Automática",
             metadata: {
-              targetRole,
-              distributionType: distType,
-              assignedOwner
+              targetRole: assignment.targetRole,
+              distributionType: workingConfig.distributionType,
+              assignedOwner: assignment.owner
             }
           };
 
           return {
             ...lead,
-            pipelineId: destPipe.id,
-            stage: destStage,
-            owner: assignedOwner,
-            previousPipelineId: sourcePipe.id,
+            pipelineId: assignment.pipelineId,
+            stage: assignment.stage,
+            owner: assignment.owner,
+            previousPipelineId: sourcePipe?.id,
             previousStage: prevStage,
             previousOwner: prevOwner,
             dataMovimentacao: nowIso,

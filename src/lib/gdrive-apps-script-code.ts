@@ -1777,6 +1777,50 @@ function syncDataToGoogleSheets(ss, data) {
     });
     writeRowsToSheet(sheetHist, rowsHist);
   }
+
+  if (Array.isArray(data.agendaEvents)) {
+    var sheetAgEvents = getOrCreateSheet(ss, "Agenda_Eventos", [
+      "ID Evento", "Nome", "Slug", "Tipo", "Local", "Duração (min)", "Capacidade", "Status", "Agenda Pública", "Visitas", "Produto ID", "Criado Em"
+    ]);
+    var rowsAgEvents = data.agendaEvents.map(function(ev) {
+      return [
+        ev.id_evento || "", ev.nome || "", ev.slug || "", ev.tipo_evento || "ONLINE",
+        ev.local_evento || "", Number(ev.duracao_minutos || 30), Number(ev.capacidade_padrao || 1),
+        ev.status || "PUBLICADO", ev.agenda_publica_ativa !== false ? "Sim" : "Não",
+        Number(ev.visitas || 0), ev.product_id || "", ev.criado_em || ""
+      ];
+    });
+    writeRowsToSheet(sheetAgEvents, rowsAgEvents);
+  }
+
+  if (Array.isArray(data.agendaBookings)) {
+    var sheetAgBookings = getOrCreateSheet(ss, "Agenda_Agendamentos", [
+      "ID", "Protocolo", "Evento", "Participante", "WhatsApp", "Email", "Data", "Início", "Fim", "Status", "Origem", "Responsável", "ID Lead", "Criado Em"
+    ]);
+    var rowsAgBookings = data.agendaBookings.map(function(b) {
+      return [
+        b.id_agendamento || "", b.protocolo || "", b.evento_nome || b.id_evento || "",
+        b.lead_nome || "", b.lead_whatsapp || "", b.lead_email || "",
+        b.data_agendamento || "", b.hora_inicio || "", b.hora_fim || "",
+        b.status || "CONFIRMADO", b.origem || "PUBLICO", b.responsavel_nome || "",
+        b.id_lead || "", b.criado_em || ""
+      ];
+    });
+    writeRowsToSheet(sheetAgBookings, rowsAgBookings);
+  }
+
+  if (Array.isArray(data.agendaWaitlist) && data.agendaWaitlist.length > 0) {
+    var sheetAgWait = getOrCreateSheet(ss, "Agenda_Lista_Espera", [
+      "ID Espera", "Evento", "Nome", "WhatsApp", "Email", "Local", "Observações", "ID Lead", "Criado Em"
+    ]);
+    var rowsAgWait = data.agendaWaitlist.map(function(w) {
+      return [
+        w.id_espera || "", w.evento_nome || w.id_evento || "", w.nome || "",
+        w.whatsapp || "", w.email || "", w.local || "", w.observacoes || "", w.id_lead || "", w.criado_em || ""
+      ];
+    });
+    writeRowsToSheet(sheetAgWait, rowsAgWait);
+  }
 }
 
 // =========================================================================

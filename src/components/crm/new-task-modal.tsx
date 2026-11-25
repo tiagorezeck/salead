@@ -9,17 +9,18 @@ interface NewTaskModalProps {
   onClose: () => void;
   onAdd: (t: any) => void;
   initialLead?: string;
+  initialDate?: string;
   taskToEdit?: Task;
 }
 
-export function NewTaskModal({ onClose, onAdd, initialLead = "", taskToEdit }: NewTaskModalProps) {
+export function NewTaskModal({ onClose, onAdd, initialLead = "", initialDate, taskToEdit }: NewTaskModalProps) {
   const { users, currentUser, leads, updateTask } = useData();
   
   const [form, setForm] = useState({
     title: taskToEdit?.title || "",
     lead: taskToEdit?.lead || initialLead,
     owners: taskToEdit?.owners || [currentUser?.name || (users[0]?.name || "")],
-    due: taskToEdit?.due || format(new Date(), 'yyyy-MM-dd'),
+    due: taskToEdit?.due || initialDate || format(new Date(), 'yyyy-MM-dd'),
     priority: taskToEdit?.priority || "media" as const,
     done: taskToEdit?.done || false,
     subtasks: taskToEdit?.subtasks || [] as Subtask[]
@@ -41,12 +42,18 @@ export function NewTaskModal({ onClose, onAdd, initialLead = "", taskToEdit }: N
   }, []);
 
   const filteredLeads = useMemo(() => {
-    const sorted = [...leads].sort((a, b) => a.company.localeCompare(b.company));
+    const sorted = [...leads].sort((a, b) =>
+      String(a.company || a.name || "").localeCompare(String(b.company || b.name || ""))
+    );
     if (!leadSearch) return sorted.slice(0, 10);
-    return sorted.filter(l => 
-      l.company.toLowerCase().includes(leadSearch.toLowerCase()) ||
-      l.name.toLowerCase().includes(leadSearch.toLowerCase())
-    ).slice(0, 10);
+    const q = leadSearch.toLowerCase();
+    return sorted
+      .filter(
+        (l) =>
+          String(l.company || "").toLowerCase().includes(q) ||
+          String(l.name || "").toLowerCase().includes(q)
+      )
+      .slice(0, 10);
   }, [leads, leadSearch]);
 
   const addSubtask = (text: string) => {

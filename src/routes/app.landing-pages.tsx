@@ -5,7 +5,7 @@ import {
   Trash2, Play, Pause, FlaskConical, Layout, CheckCircle2, ClipboardList, 
   Link as LinkIcon, Layers, Share2, Bot, Globe, ArrowRight, Zap, Target,
   Monitor, ChevronLeft, ChevronRight, ShieldCheck, MoreHorizontal,
-  AlertTriangle, X, Copy
+  AlertTriangle, X, Copy, Calendar
 } from "lucide-react";
 import { useState, lazy, Suspense } from "react";
 import { toast } from "sonner";
@@ -45,8 +45,9 @@ function LPPage() {
     deleteMultipleLandingPages,
     cleanDatabaseKeepOne,
     surveys,
-    company, 
-    initialized, 
+    agendaEvents,
+    company,
+    initialized,
   } = useData();
   
   const [editingLP, setEditingLP] = useState<any | null>(null);
@@ -418,6 +419,14 @@ function LPPage() {
                 visits: updatedPage.viewsCount ?? editingLP.visits ?? 0,
                 leads: updatedPage.leadsCount ?? editingLP.leads ?? 0,
                 surveyId: updatedPage.surveyId || editingLP.surveyId || undefined,
+                agendaEventId:
+                  updatedPage.formSection?.postSubmitAction === "booking_event"
+                    ? updatedPage.formSection?.postSubmitEventId || updatedPage.agendaEventId || editingLP.agendaEventId || null
+                    : updatedPage.agendaEventId ?? editingLP.agendaEventId ?? null,
+                agendaEventSlug:
+                  updatedPage.formSection?.postSubmitAction === "booking_event"
+                    ? updatedPage.formSection?.postSubmitEventSlug || updatedPage.agendaEventSlug || editingLP.agendaEventSlug || null
+                    : updatedPage.agendaEventSlug ?? editingLP.agendaEventSlug ?? null,
               };
 
               const saved = await updateLandingPage(editingLP.id || updatedPage.id, payload);
@@ -1215,6 +1224,9 @@ function LPPage() {
             {landingPages.map((lp) => {
               const isExternal = Boolean(lp.externalUrl || lp.template === "External" || lp.type === "URL Externa");
               const linkedSurvey = surveys.find((s) => s.id === lp.surveyId);
+              const linkedAgenda = (agendaEvents || []).find(
+                (ev) => ev.id_evento === lp.agendaEventId || (lp.agendaEventSlug && ev.slug === lp.agendaEventSlug)
+              );
               const isSelected = selectedLP?.id === lp.id;
               const isChecked = selectedLpIds.includes(lp.id);
 
@@ -1352,6 +1364,12 @@ function LPPage() {
                             <CheckCircle2 className="h-2.5 w-2.5" /> Pesquisa Ativa
                           </span>
                         )}
+
+                        {lp.agendaEventId && (
+                          <span className="text-[8px] uppercase tracking-widest text-orange-700 font-bold border border-orange-200 bg-orange-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Calendar className="h-2.5 w-2.5" /> Agendamento Ativo
+                          </span>
+                        )}
                       </div>
 
                       <h3 className="font-display text-base font-bold truncate text-foreground">
@@ -1425,6 +1443,61 @@ function LPPage() {
                           </option>
                         ))}
                       </select>
+
+                      {/* ATRIBUIÇÃO DE AGENDAMENTO PARA USO EM LPs */}
+                      <div className="pt-2 space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-muted-foreground font-semibold flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 text-orange-600" /> Agendamento:
+                          </span>
+                          {lp.agendaEventId ? (
+                            <span className="text-[9px] font-bold text-orange-700 bg-orange-50 px-2 py-0.5 rounded border border-orange-200 truncate max-w-[140px]">
+                              {linkedAgenda?.nome || "Atribuído"}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-muted-foreground italic">
+                              Nenhum
+                            </span>
+                          )}
+                        </div>
+
+                        <select
+                          value={lp.agendaEventId || ""}
+                          onChange={(e) => {
+                            const selectedId = e.target.value || null;
+                            const chosen = (agendaEvents || []).find((ev) => ev.id_evento === selectedId) || null;
+                            const baseForm = lp.formSection || lp.cometData?.formSection;
+                            const updatedFormSection = baseForm
+                              ? {
+                                  ...baseForm,
+                                  postSubmitAction: chosen ? ("booking_event" as const) : ("thank_you" as const),
+                                  postSubmitEventId: chosen ? chosen.id_evento : undefined,
+                                  postSubmitEventSlug: chosen ? chosen.slug : undefined,
+                                }
+                              : undefined;
+                            updateLandingPage(lp.id, {
+                              agendaEventId: chosen ? chosen.id_evento : null,
+                              agendaEventSlug: chosen ? chosen.slug : null,
+                              ...(updatedFormSection ? { formSection: updatedFormSection } : {}),
+                            });
+                            toast.success(
+                              chosen
+                                ? `Agendamento "${chosen.nome}" vinculado à Landing Page!`
+                                : "Agendamento desvinculado da Landing Page."
+                            );
+                          }}
+                          className="w-full bg-background hover:bg-muted/40 border border-border focus:border-primary rounded-xl px-2.5 py-1.5 text-xs text-foreground font-medium outline-none cursor-pointer transition-colors shadow-sm"
+                        >
+                          <option value="">Nenhum agendamento (Padrão)</option>
+                          {(agendaEvents || [])
+                            .filter((ev) => ev.status !== "RASCUNHO")
+                            .map((ev) => (
+                              <option key={ev.id_evento} value={ev.id_evento}>
+                                📅 {ev.nome} ({ev.duracao_minutos} min)
+                              </option>
+                            ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
 

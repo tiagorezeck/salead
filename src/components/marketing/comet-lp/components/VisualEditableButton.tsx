@@ -28,10 +28,13 @@ import {
   ChevronsLeftRight,
   ChevronsUpDown,
   Scaling,
+  Calendar,
 } from "lucide-react";
 import { ButtonCustomStyle, CardRadius, ElementOffset, AccentColor, TalkWhatsAppConfig } from "../types/landingPage";
 import { THEME_CONFIGS } from "../utils/theme";
 import { InlineEditableText, WORD_FONT_SIZES } from "./InlineEditableText";
+import { cloudStore } from "@/services/cloudStorageService";
+import { buildPublicAgendaPath } from "@/lib/agenda-engine";
 
 interface VisualEditableButtonProps {
   buttonId: string;
@@ -445,6 +448,27 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
       return;
     }
 
+    if (actionType === "booking_event") {
+      const agendaEvents = cloudStore.getState().agendaEvents || [];
+      const matched = agendaEvents.find(
+        (ev) => ev.id_evento === buttonStyle.bookingEventId || ev.slug === buttonStyle.bookingEventSlug
+      );
+      const targetSlug = matched?.slug || buttonStyle.bookingEventSlug || "";
+      const sp = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+      const agendaPath = buildPublicAgendaPath(targetSlug || undefined, {
+        utm_source: sp?.get("utm_source") || undefined,
+        utm_medium: sp?.get("utm_medium") || undefined,
+        utm_campaign: sp?.get("utm_campaign") || undefined,
+        src: sp?.get("src") || undefined,
+      });
+      if (buttonStyle.openInNewTab) {
+        window.open(agendaPath, "_blank");
+      } else {
+        window.location.assign(agendaPath);
+      }
+      return;
+    }
+
     if (onClick) {
       onClick();
     }
@@ -489,9 +513,11 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                 ? "bg-pink-950/90 text-pink-300 border-pink-500/60 hover:bg-pink-900"
                 : buttonStyle.actionType === "custom_url"
                 ? "bg-sky-950/90 text-sky-300 border-sky-500/60 hover:bg-sky-900"
+                : buttonStyle.actionType === "booking_event"
+                ? "bg-indigo-950/90 text-indigo-300 border-indigo-500/60 hover:bg-indigo-900"
                 : "bg-purple-950/90 text-purple-300 border-purple-500/60 hover:bg-purple-900"
             }`}
-            title="Clique para configurar o destino (WhatsApp, Instagram ou Link)"
+            title="Clique para configurar o destino (Formulário, WhatsApp, Agenda, Instagram ou Link)"
           >
             {buttonStyle.actionType === "whatsapp" ? (
               <>
@@ -507,6 +533,11 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
               <>
                 <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
                 <span>Destino: Link Externo</span>
+              </>
+            ) : buttonStyle.actionType === "booking_event" ? (
+              <>
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Destino: Agenda {buttonStyle.bookingEventSlug ? `(${buttonStyle.bookingEventSlug})` : "(Portal)"}</span>
               </>
             ) : (
               <>
@@ -632,9 +663,11 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                   ? "bg-emerald-950/80 border-emerald-500/70 text-emerald-300"
                   : buttonStyle.actionType === "custom_url"
                   ? "bg-sky-950/80 border-sky-500/70 text-sky-300"
+                  : buttonStyle.actionType === "booking_event"
+                  ? "bg-indigo-950/80 border-indigo-500/70 text-indigo-300"
                   : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white"
               }`}
-              title="Configurar Link, WhatsApp ou Destino do Botão"
+              title="Configurar Link, WhatsApp, Agenda ou Destino do Botão"
             >
               {buttonStyle.actionType === "whatsapp" ? (
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
@@ -642,6 +675,8 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                 <Instagram className="w-3.5 h-3.5 text-pink-400" />
               ) : buttonStyle.actionType === "custom_url" ? (
                 <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+              ) : buttonStyle.actionType === "booking_event" ? (
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
               ) : (
                 <Link2 className="w-3.5 h-3.5 text-purple-400" />
               )}
@@ -652,6 +687,8 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                   ? "Instagram"
                   : buttonStyle.actionType === "custom_url"
                   ? "Link"
+                  : buttonStyle.actionType === "booking_event"
+                  ? "Agendar"
                   : "Ação & Link"}
               </span>
               <ChevronDown className="w-3 h-3 text-zinc-400" />
@@ -679,7 +716,7 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                 </div>
 
                 {/* Action Type Selector */}
-                <div className="grid grid-cols-4 gap-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800 text-[10px] font-bold">
+                <div className="grid grid-cols-5 gap-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800 text-[10px] font-bold">
                   <button
                     type="button"
                     onClick={() => updateStyle({ actionType: "scroll_form" })}
@@ -689,24 +726,36 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                         : "text-zinc-400 hover:text-white"
                     }`}
                   >
-                    Formulário
+                    Form
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateStyle({ actionType: "booking_event" })}
+                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-0.5 ${
+                      buttonStyle.actionType === "booking_event"
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    <Calendar className="w-2.5 h-2.5" />
+                    Agenda
                   </button>
                   <button
                     type="button"
                     onClick={() => updateStyle({ actionType: "whatsapp" })}
-                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-0.5 ${
                       buttonStyle.actionType === "whatsapp"
                         ? "bg-emerald-600 text-white shadow"
                         : "text-zinc-400 hover:text-white"
                     }`}
                   >
                     <MessageCircle className="w-2.5 h-2.5" />
-                    WhatsApp
+                    Zap
                   </button>
                   <button
                     type="button"
                     onClick={() => updateStyle({ actionType: "instagram" })}
-                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-0.5 ${
                       buttonStyle.actionType === "instagram"
                         ? "bg-pink-600 text-white shadow"
                         : "text-zinc-400 hover:text-white"
@@ -718,7 +767,7 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                   <button
                     type="button"
                     onClick={() => updateStyle({ actionType: "custom_url" })}
-                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-0.5 ${
                       buttonStyle.actionType === "custom_url"
                         ? "bg-sky-600 text-white shadow"
                         : "text-zinc-400 hover:text-white"
@@ -882,6 +931,63 @@ export const VisualEditableButton: React.FC<VisualEditableButtonProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* Sub-form for booking_event */}
+                {buttonStyle.actionType === "booking_event" && (() => {
+                  const events = cloudStore.getState().agendaEvents || [];
+                  const targetSlug = buttonStyle.bookingEventSlug || "";
+                  return (
+                    <div className="space-y-2 text-left">
+                      <div>
+                        <label className="block text-[10px] font-bold text-zinc-300 mb-1">
+                          Evento da Agenda Ativa
+                        </label>
+                        <select
+                          value={buttonStyle.bookingEventId || ""}
+                          onChange={(e) => {
+                            const selected = events.find((ev) => ev.id_evento === e.target.value);
+                            updateStyle({
+                              bookingEventId: selected?.id_evento || undefined,
+                              bookingEventSlug: selected?.slug || undefined,
+                            });
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Portal Geral (/agendar)</option>
+                          {events.map((ev) => (
+                            <option key={ev.id_evento} value={ev.id_evento}>
+                              {ev.nome} ({ev.status})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[9px] text-zinc-400 mt-1">
+                          {events.length === 0
+                            ? "Crie eventos em Minha Agenda > Eventos para selecionar aqui."
+                            : "Direciona o visitante direto para escolher dia e horário."}
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-[10px] text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(buttonStyle.openInNewTab)}
+                          onChange={(e) => updateStyle({ openInNewTab: e.target.checked })}
+                          className="rounded border-zinc-700 text-indigo-500 focus:ring-0"
+                        />
+                        <span>Abrir em nova aba</span>
+                      </label>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => window.open(buildPublicAgendaPath(targetSlug || undefined), "_blank")}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Calendar className="w-3 h-3" />
+                          <span>Testar Página de Agendamento</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

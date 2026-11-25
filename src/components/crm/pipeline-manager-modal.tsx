@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { 
   X, Plus, Trash2, ArrowUp, ArrowDown, Settings2, Layers, Clock, 
   CheckCircle2, AlertTriangle, UserCheck, Shield, ChevronRight,
-  Sparkles, RefreshCw, MoveRight, HelpCircle
+  Sparkles, RefreshCw, MoveRight, HelpCircle, Check
 } from "lucide-react";
 import { 
   type Pipeline, 
@@ -12,6 +12,7 @@ import {
   type Role 
 } from "@/data/mock";
 import { useData } from "@/hooks/use-data";
+import { getEffectiveEnabledRolesForPipeline } from "@/lib/lead-rules";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -338,6 +339,48 @@ export function PipelineManagerModal({
                   </span>
                 </div>
               </div>
+
+              {/* Cargos habilitados na pipeline selecionada */}
+              {currentPipeline && (
+                <div className="p-4 rounded-xl border border-border bg-card space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5 text-primary" />
+                      Cargos Habilitados para Acessar esta Pipeline
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Novos usuários recebem acesso automático ao cargo cadastrado
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AVAILABLE_ROLES.filter(r => r !== "Admin Geral" && r !== "Head of Sales").map((roleName) => {
+                      const enabledList = getEffectiveEnabledRolesForPipeline(currentPipeline);
+                      const isOn = enabledList.includes(roleName);
+                      return (
+                        <button
+                          key={roleName}
+                          type="button"
+                          onClick={() => {
+                            const nextRoles = isOn
+                              ? enabledList.filter(r => r !== roleName)
+                              : [...enabledList, roleName];
+                            updatePipeline(currentPipeline.id, { enabledRoles: nextRoles });
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer",
+                            isOn
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
+                              : "bg-background text-muted-foreground border-border opacity-60 hover:opacity-100"
+                          )}
+                        >
+                          {isOn ? <Check className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+                          <span>{roleName}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Lista de Etapas e Reordenação */}
               <div className="space-y-3">
@@ -675,9 +718,37 @@ export function PipelineManagerModal({
                         )}
                       </div>
 
-                      <div className="pt-2 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>{pipe.stages?.length || 0} etapas</span>
-                        <span className="font-bold text-foreground">{pipeLeads.length} leads</span>
+                      <div className="pt-2 border-t border-border space-y-2">
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>{pipe.stages?.length || 0} etapas</span>
+                          <span className="font-bold text-foreground">{pipeLeads.length} leads</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {AVAILABLE_ROLES.filter(r => r !== "Admin Geral" && r !== "Head of Sales" && r !== "CX (Customer Experience)").map((roleName) => {
+                            const enabledList = getEffectiveEnabledRolesForPipeline(pipe);
+                            const isOn = enabledList.includes(roleName);
+                            return (
+                              <button
+                                key={roleName}
+                                type="button"
+                                onClick={() => {
+                                  const nextRoles = isOn
+                                    ? enabledList.filter(r => r !== roleName)
+                                    : [...enabledList, roleName];
+                                  updatePipeline(pipe.id, { enabledRoles: nextRoles });
+                                }}
+                                className={cn(
+                                  "px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer",
+                                  isOn
+                                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                    : "bg-muted/30 text-muted-foreground border-border opacity-55 hover:opacity-100"
+                                )}
+                              >
+                                {roleName}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 pt-1">

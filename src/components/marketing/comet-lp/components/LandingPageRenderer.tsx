@@ -88,6 +88,7 @@ import {
 import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-viewer";
 import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 import { cloudStore } from "@/services/cloudStorageService";
+import { buildPublicAgendaPath } from "@/lib/agenda-engine";
 
 interface LandingPageRendererProps {
   page: LandingPage;
@@ -610,7 +611,43 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
     } else {
       setIsSubmitted(true);
       toast.success("✅ Cadastro concluído com sucesso!");
+      const bookingUrl = getPostSubmitBookingUrl({ nome: name, whatsapp, email });
+      if (bookingUrl && !isEditorPreview && !page.formSection?.gift?.enabled) {
+        setTimeout(() => {
+          window.location.assign(bookingUrl);
+        }, 1000);
+      }
     }
+  };
+
+  const getPostSubmitBookingUrl = (overrideContact?: {
+    nome?: string;
+    whatsapp?: string;
+    email?: string;
+  }) => {
+    const lpAgendaId = page.formSection?.postSubmitEventId || (page as any)?.agendaEventId;
+    const lpAgendaSlug = page.formSection?.postSubmitEventSlug || (page as any)?.agendaEventSlug;
+    const hasPostBooking =
+      page.formSection?.postSubmitAction === "booking_event" ||
+      Boolean(lpAgendaId || lpAgendaSlug);
+    if (!hasPostBooking) return null;
+    const events = cloudStore.getState().agendaEvents || [];
+    const matched = events.find(
+      (ev) => ev.id_evento === lpAgendaId || ev.slug === lpAgendaSlug
+    );
+    const targetSlug = matched?.slug || lpAgendaSlug || "";
+    const urlUtms = extractUrlUtms();
+    return buildPublicAgendaPath(targetSlug || undefined, {
+      nome: overrideContact?.nome ?? (leadName || surveyLeadData?.name),
+      whatsapp: overrideContact?.whatsapp ?? (leadPhone || surveyLeadData?.whatsapp),
+      email: overrideContact?.email ?? (leadEmail || surveyLeadData?.email),
+      lp: page.id,
+      lp_title: page.title,
+      utm_source: urlUtms?.utm_source,
+      utm_medium: urlUtms?.utm_medium,
+      utm_campaign: urlUtms?.utm_campaign,
+      src: urlUtms?.src,
+    });
   };
   const [floatingCardConfig, setFloatingCardConfig] = useState<{
     type: "bento" | "testimonial" | "quiz" | "metric" | "faq" | "hero_media";
@@ -1037,6 +1074,16 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
         setIsSubmitted(true);
       } else {
         setIsSubmitted(true);
+        const bookingUrl = getPostSubmitBookingUrl({
+          nome: leadName,
+          whatsapp: leadPhone,
+          email: leadEmail,
+        });
+        if (bookingUrl && !isEditorPreview) {
+          setTimeout(() => {
+            window.location.assign(bookingUrl);
+          }, 1000);
+        }
       }
 
       try {
@@ -1057,6 +1104,16 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
         });
       } catch {}
       setIsSubmitted(true);
+      const bookingUrl = getPostSubmitBookingUrl({
+        nome: leadName,
+        whatsapp: leadPhone,
+        email: leadEmail,
+      });
+      if (bookingUrl && !isEditorPreview && !page.formSection?.gift?.enabled) {
+        setTimeout(() => {
+          window.location.assign(bookingUrl);
+        }, 1000);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -2596,15 +2653,30 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                       />
                     </h4>
 
-                    {isSubmitted ? (
-                      <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-center space-y-2">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-                        <h5 className="font-bold text-white text-base">Material Enviado com Sucesso!</h5>
-                        <p className="text-xs text-zinc-300">
-                          Verifique sua caixa de entrada e seu WhatsApp para acessar seu material.
-                        </p>
-                      </div>
-                    ) : (
+                    {isSubmitted ? (() => {
+                      const postBookingUrl = getPostSubmitBookingUrl();
+                      return (
+                        <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-center space-y-3">
+                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+                          <h5 className="font-bold text-white text-base">
+                            {postBookingUrl ? "Cadastro Recebido! Escolha seu Horário" : "Material Enviado com Sucesso!"}
+                          </h5>
+                          <p className="text-xs text-zinc-300">
+                            {postBookingUrl
+                              ? "Seus dados já foram pré-preenchidos na agenda. Clique abaixo se o redirecionamento não iniciar automaticamente."
+                              : "Verifique sua caixa de entrada e seu WhatsApp para acessar seu material."}
+                          </p>
+                          {postBookingUrl && (
+                            <a
+                              href={postBookingUrl}
+                              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-lg"
+                            >
+                              <Calendar className="w-4 h-4" /> Escolher Dia e Horário Agora
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })() : (
                       <form onSubmit={handleLeadSubmit} className="space-y-3">
                         {submitError && (
                           <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-xs text-red-300">
@@ -6744,41 +6816,60 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                 style={{ backgroundColor: theme.primaryColor }}
               />
 
-              {isSubmitted ? (
-                <div className="text-center py-10 space-y-4">
-                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto">
-                    <Check className="w-8 h-8" />
-                  </div>
-                  <h3 className={`text-2xl font-bold ${page.theme === "light" ? "text-zinc-950" : "text-white"}`}>Solicitação Enviada com Sucesso!</h3>
-                  <p className={`text-sm max-w-md mx-auto ${page.theme === "light" ? "text-zinc-600" : "text-zinc-400"}`}>
-                    Nossa equipe executiva entrará em contato via WhatsApp e e-mail nos próximos minutos para dar continuidade ao seu atendimento.
-                  </p>
-                  {page.formSection.gift?.enabled && (
-                    <div className="pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsGiftModalOpen(true)}
-                        className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-sm shadow-lg shadow-amber-500/20 inline-flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
-                      >
-                        <Gift className="w-4 h-4" />
-                        <span>{page.formSection.gift.buttonText || "Baixar Meu Brinde / Material Exclusivo"}</span>
-                        <Download className="w-4 h-4" />
-                      </button>
+              {isSubmitted ? (() => {
+                const postBookingUrl = getPostSubmitBookingUrl();
+                return (
+                  <div className="text-center py-10 space-y-4">
+                    <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto">
+                      <Check className="w-8 h-8" />
                     </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setIsSubmitted(false)}
-                    className={`px-6 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
-                      page.theme === "light"
-                        ? "bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-200"
-                        : "bg-zinc-800 hover:bg-zinc-700 text-white"
-                    }`}
-                  >
-                    Enviar Outro Contato
-                  </button>
-                </div>
-              ) : (
+                    <h3 className={`text-2xl font-bold ${page.theme === "light" ? "text-zinc-950" : "text-white"}`}>
+                      {postBookingUrl ? "Cadastro Confirmado! Escolha seu Horário" : "Solicitação Enviada com Sucesso!"}
+                    </h3>
+                    <p className={`text-sm max-w-md mx-auto ${page.theme === "light" ? "text-zinc-600" : "text-zinc-400"}`}>
+                      {postBookingUrl
+                        ? "Estamos direcionando você para escolher o melhor dia e horário na agenda com seus dados já preenchidos."
+                        : "Nossa equipe executiva entrará em contato via WhatsApp e e-mail nos próximos minutos para dar continuidade ao seu atendimento."}
+                    </p>
+                    {postBookingUrl && (
+                      <div className="pt-1">
+                        <a
+                          href={postBookingUrl}
+                          className="px-6 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-sm shadow-lg inline-flex items-center gap-2 transition-all hover:scale-105"
+                        >
+                          <Calendar className="w-4 h-4" />
+                          <span>Escolher Dia e Horário Agora</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </a>
+                      </div>
+                    )}
+                    {page.formSection.gift?.enabled && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsGiftModalOpen(true)}
+                          className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-sm shadow-lg shadow-amber-500/20 inline-flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+                        >
+                          <Gift className="w-4 h-4" />
+                          <span>{page.formSection.gift.buttonText || "Baixar Meu Brinde / Material Exclusivo"}</span>
+                          <Download className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsSubmitted(false)}
+                      className={`px-6 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${
+                        page.theme === "light"
+                          ? "bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-200"
+                          : "bg-zinc-800 hover:bg-zinc-700 text-white"
+                      }`}
+                    >
+                      Enviar Outro Contato
+                    </button>
+                  </div>
+                );
+              })() : (
                 <>
                   {/* Form Header */}
                   <div className={`mb-8 ${getHeadingAlignClass(page.formSection.align)}`}>
@@ -8269,6 +8360,17 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
                       setIsSurveyModalOpen(false);
                       if (page.formSection?.gift?.enabled) {
                         setIsGiftModalOpen(true);
+                      } else {
+                        const bookingUrl = getPostSubmitBookingUrl({
+                          nome: payload.name,
+                          whatsapp: payload.whatsapp,
+                          email: payload.email,
+                        });
+                        if (bookingUrl && !isEditorPreview) {
+                          setTimeout(() => {
+                            window.location.assign(bookingUrl);
+                          }, 1000);
+                        }
                       }
                       try {
                         confetti({

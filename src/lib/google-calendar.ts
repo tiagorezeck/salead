@@ -119,10 +119,16 @@ function loadGisScript(): Promise<void> {
       return;
     }
 
-    const existingScript = document.getElementById("google-gis-script");
+    const existingScript = document.getElementById("google-gis-script") as HTMLScriptElement | null;
     if (existingScript) {
-      existingScript.addEventListener("load", () => resolve());
-      existingScript.addEventListener("error", () => reject(new Error("Falha ao carregar Google Identity Services")));
+      if ((window as any).google?.accounts?.oauth2) {
+        resolve();
+        return;
+      }
+      const onLoad = () => resolve();
+      const onError = () => reject(new Error("Falha ao carregar Google Identity Services"));
+      existingScript.addEventListener("load", onLoad, { once: true });
+      existingScript.addEventListener("error", onError, { once: true });
       return;
     }
 
@@ -147,79 +153,109 @@ export async function connectGoogleCalendar(): Promise<GoogleCalendarConnection>
     console.warn("[Google Calendar] Não foi possível carregar script GIS CDN, tentando fallback de autorização:", e);
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: GoogleCalendarConnection) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
     const google = (window as any).google;
+    const clientId =
+      (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
+      "543217043656-applet.apps.googleusercontent.com";
 
     // Use GIS tokenClient if GIS loaded
     if (google?.accounts?.oauth2) {
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: "543217043656-applet.apps.googleusercontent.com", // Generic / AI Studio OAuth client
-        scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
-        callback: async (tokenResponse: any) => {
-          if (tokenResponse.error) {
-            console.error("[Google Calendar OAuth Error]", tokenResponse);
-            toast.error(`Erro na autorização do Google: ${tokenResponse.error}`);
-            reject(new Error(tokenResponse.error));
-            return;
-          }
-
-          const accessToken = tokenResponse.access_token;
-          const expiresIn = Number(tokenResponse.expires_in) || 3600;
-          const expiresAt = Date.now() + (expiresIn - 60) * 1000;
-
-          // Fetch user info with token
-          try {
-            let email = "conta@google.com";
-            let name = "Usuário Google";
-            let avatarUrl = "";
-
-            const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-
-            if (userRes.ok) {
-              const userData = await userRes.json();
-              email = userData.email || email;
-              name = userData.name || name;
-              avatarUrl = userData.picture || "";
+      try {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+          callback: async (tokenResponse: any) => {
+            if (!tokenResponse || tokenResponse.error) {
+              const errCode = String(tokenResponse?.error || "unknown_error");
+              if (errCode === "access_denied" || errCode === "popup_closed") {
+                toast.info("Autorização do Google Agenda cancelada.");
+              } else {
+                console.warn("[Google Calendar OAuth]", errCode);
+                toast.warning(`Não foi possível autorizar o Google Agenda (${errCode}).`);
+              }
+              finish({ connected: false });
+              return;
             }
 
-            const connState: GoogleCalendarConnection = {
-              connected: true,
-              email,
-              name,
-              avatarUrl,
-              accessToken,
-              expiresAt
-            };
+            const accessToken = tokenResponse.access_token;
+            const expiresIn = Number(tokenResponse.expires_in) || 3600;
+            const expiresAt = Date.now() + (expiresIn - 60) * 1000;
 
-            saveCalendarConnectionState(connState);
-            toast.success(`Google Agenda conectada: ${email}`);
-            resolve(connState);
-          } catch (fetchErr) {
-            console.error("Erro ao obter dados do perfil do Google:", fetchErr);
-            const connState: GoogleCalendarConnection = {
-              connected: true,
-              email: "usuario.google@gmail.com",
-              name: "Usuário Conectado",
-              accessToken,
-              expiresAt
-            };
-            saveCalendarConnectionState(connState);
-            toast.success("Google Agenda conectada com sucesso!");
-            resolve(connState);
+            // Fetch user info with token
+            try {
+              let email = "conta@google.com";
+              let name = "Usuário Google";
+              let avatarUrl = "";
+
+              const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+                headers: { Authorization: `Bearer ${accessToken}` }
+              });
+
+              if (userRes.ok) {
+                const userData = await userRes.json();
+                email = userData.email || email;
+                name = userData.name || name;
+                avatarUrl = userData.picture || "";
+              }
+
+              const connState: GoogleCalendarConnection = {
+                connected: true,
+                email,
+                name,
+                avatarUrl,
+                accessToken,
+                expiresAt
+              };
+
+              saveCalendarConnectionState(connState);
+              toast.success(`Google Agenda conectada: ${email}`);
+              finish(connState);
+            } catch (fetchErr) {
+              console.warn("Aviso ao obter dados do perfil do Google:", fetchErr);
+              const connState: GoogleCalendarConnection = {
+                connected: true,
+                email: "usuario.google@gmail.com",
+                name: "Usuário Conectado",
+                accessToken,
+                expiresAt
+              };
+              saveCalendarConnectionState(connState);
+              toast.success("Google Agenda conectada com sucesso!");
+              finish(connState);
+            }
+          },
+          error_callback: (err: any) => {
+            const errType = String(err?.type || "").toLowerCase();
+            const errMsg = String(err?.message || "").toLowerCase();
+
+            if (errType === "popup_closed" || errMsg.includes("popup window closed") || errMsg.includes("popup_closed")) {
+              toast.info("Conexão com Google Agenda cancelada. Você pode continuar usando a Agenda Interna do Salead.");
+            } else if (errType === "popup_failed_to_open") {
+              toast.warning("Popup de login do Google bloqueado pelo navegador. Libere popups ou continue na Agenda Interna.");
+            } else {
+              console.warn("[Google Calendar OAuth]", err?.type || err?.message || err);
+              toast.warning("Não foi possível concluir o login do Google Agenda.");
+            }
+            finish({ connected: false });
           }
-        },
-        error_callback: (err: any) => {
-          console.error("GIS error_callback:", err);
-          toast.error("Erro no popup de autorização do Google.");
-          reject(err);
-        }
-      });
+        });
 
-      client.requestAccessToken({ prompt: "consent" });
+        client.requestAccessToken({ prompt: "consent" });
+      } catch (initErr: any) {
+        console.warn("[Google Calendar] Falha ao iniciar popup OAuth:", initErr?.message || initErr);
+        toast.warning("Não foi possível abrir o popup de autorização do Google.");
+        finish({ connected: false });
+      }
     } else {
-      // Fallback: Custom OAuth token mock or simulator when offline/restricted
+      // Fallback: Custom OAuth token simulator when offline/restricted
       toast.info("Iniciando conexão segura com Google Agenda...");
       setTimeout(() => {
         const mockToken = "ya29.a0AXooC9_" + Date.now() + "_" + Math.random().toString(36).substring(2);
@@ -232,7 +268,7 @@ export async function connectGoogleCalendar(): Promise<GoogleCalendarConnection>
         };
         saveCalendarConnectionState(connState);
         toast.success("Google Agenda conectada com sucesso: tiagorezeck@hotmail.com");
-        resolve(connState);
+        finish(connState);
       }, 1000);
     }
   });
@@ -372,11 +408,8 @@ export async function createGoogleCalendarEvent(
       throw err;
     }
 
-    // Fallback record creation with generated Event ID to prevent blockage
-    const fallbackId = "gcal_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
-    const fallbackMeet = input.createMeet 
-      ? `https://meet.google.com/${Math.random().toString(36).substring(2, 5)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 5)}`
-      : "";
+    const fallbackId = "agd_crm_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+    const fallbackMeet = input.meetingUrl?.trim() || "";
 
     return {
       googleEventId: fallbackId,
@@ -388,13 +421,50 @@ export async function createGoogleCalendarEvent(
       location: input.location,
       meetingUrl: input.meetingUrl,
       attendees: (input.attendees || []).filter(e => e.includes("@")),
-      calendarLink: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(input.title)}`,
-      meetLink: fallbackMeet,
+      calendarLink: buildValidCalendarTemplateUrl(input),
+      meetLink: fallbackMeet || undefined,
       responsibleUser,
       createdAt: new Date().toISOString(),
       status: "confirmed"
     };
   }
+}
+
+export function buildValidCalendarTemplateUrl(input: GoogleCalendarEventInput): string {
+  const d = (input.date || "").replace(/-/g, "");
+  const s = (input.startTime || "10:00").replace(/:/g, "") + "00";
+  const e = (input.endTime || "10:30").replace(/:/g, "") + "00";
+  const qs = new URLSearchParams({
+    action: "TEMPLATE",
+    text: input.title || "Reunião Comercial",
+    dates: d ? `${d}T${s}/${d}T${e}` : "",
+    details: input.description || "",
+    location: input.location || input.meetingUrl || ""
+  });
+  return `https://calendar.google.com/calendar/render?${qs.toString()}`;
+}
+
+export function createInternalCalendarRecord(
+  input: GoogleCalendarEventInput,
+  responsibleUser: string = "Vendedor"
+): GoogleCalendarEventRecord {
+  const internalId = "agd_crm_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+  return {
+    googleEventId: internalId,
+    title: input.title,
+    description: input.description,
+    date: input.date,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    location: input.location,
+    meetingUrl: input.meetingUrl,
+    attendees: (input.attendees || []).filter(e => e.includes("@")),
+    calendarLink: buildValidCalendarTemplateUrl(input),
+    meetLink: input.meetingUrl?.trim() || undefined,
+    responsibleUser,
+    createdAt: new Date().toISOString(),
+    status: "confirmed"
+  };
 }
 
 /**

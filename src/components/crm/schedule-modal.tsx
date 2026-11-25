@@ -13,9 +13,12 @@ import {
   createGoogleCalendarEvent, 
   updateGoogleCalendarEvent, 
   deleteGoogleCalendarEvent,
+  createInternalCalendarRecord,
   type GoogleCalendarConnection, 
   type GoogleCalendarEventRecord 
 } from "@/lib/google-calendar";
+import { cloudStore } from "@/services/cloudStorageService";
+import { syncManualCrmMeetingToDraft } from "@/lib/agenda-engine";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -107,7 +110,7 @@ export function ScheduleModal({ isOpen, onClose, lead, existingEvent, onSuccess 
       const res = await connectGoogleCalendar();
       setConn(res);
     } catch (err: any) {
-      console.error("Erro ao conectar Google Agenda:", err);
+      console.warn("Conexão com Google Agenda não concluída:", err?.message || err);
     } finally {
       setIsConnecting(false);
     }
@@ -180,13 +183,7 @@ export function ScheduleModal({ isOpen, onClose, lead, existingEvent, onSuccess 
       return;
     }
 
-    // Check Google Calendar OAuth connection
     const currentConn = getCalendarConnectionState();
-    if (!currentConn.connected) {
-      toast.error("Sua conta do Google Agenda não está conectada. Clique em 'Conectar Google Agenda' para continuar.");
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
@@ -207,14 +204,21 @@ export function ScheduleModal({ isOpen, onClose, lead, existingEvent, onSuccess 
 
       let record: GoogleCalendarEventRecord;
 
-      if (existingEvent?.googleEventId) {
-        // EDIT EXISTING EVENT
-        record = await updateGoogleCalendarEvent(existingEvent.googleEventId, eventInput, responsibleUser);
-        toast.success("Agendamento atualizado com sucesso no Google Calendar!");
+      if (currentConn.connected) {
+        if (existingEvent?.googleEventId && !existingEvent.googleEventId.startsWith("agd_crm_")) {
+          record = await updateGoogleCalendarEvent(existingEvent.googleEventId, eventInput, responsibleUser);
+          toast.success("Agendamento atualizado no Salead e Google Calendar!");
+        } else {
+          record = await createGoogleCalendarEvent(eventInput, responsibleUser);
+          toast.success("Evento agendado no Salead e Google Calendar!");
+        }
       } else {
-        // CREATE NEW EVENT
-        record = await createGoogleCalendarEvent(eventInput, responsibleUser);
-        toast.success("Evento agendado com sucesso no Google Agenda!");
+        // Grava diretamente na Agenda Interna Unificada do Salead mesmo sem Google OAuth conectado
+        record = createInternalCalendarRecord(eventInput, responsibleUser);
+        if (existingEvent?.googleEventId) {
+          record.googleEventId = existingEvent.googleEventId;
+        }
+        toast.success("Reunião salva em Minha Agenda!");
       }
 
       // 1. Format date for display
@@ -226,8 +230,8 @@ export function ScheduleModal({ isOpen, onClose, lead, existingEvent, onSuccess 
 ${formattedDate} às ${startTime} - ${endTime}
 Participantes (${attendees.length}): ${attendees.join(", ")}
 Responsável: ${responsibleUser}
-${record.meetLink ? `Google Meet: ${record.meetLink}` : "Google Meet: Não ativado"}
-${record.calendarLink ? `Link do Google Agenda: ${record.calendarLink}` : ""}`;
+${record.meetLink ? `Link da reunião: ${record.meetLink}` : ""}
+${record.calendarLink ? `Adicionar no Google Agenda: ${record.calendarLink}` : ""}`;
 
       const newActivity = {
         id: "act_meeting_" + Date.now(),
@@ -252,6 +256,11 @@ ${record.calendarLink ? `Link do Google Agenda: ${record.calendarLink}` : ""}`;
 
       updateLead(lead.id, updatedLead);
 
+      // 4. Sincronizar na coleção unificada agendaBookings e Tarefas em Minha Agenda
+      cloudStore.mutate((draft) => {
+        syncManualCrmMeetingToDraft(draft, lead, record, false);
+      }, { immediate: true });
+
       if (onSuccess) {
         onSuccess(record);
       }
@@ -259,7 +268,7 @@ ${record.calendarLink ? `Link do Google Agenda: ${record.calendarLink}` : ""}`;
       onClose();
     } catch (err: any) {
       console.error("Erro ao salvar agendamento:", err);
-      toast.error(err.message || "Ocorreu um erro ao comunicar com o Google Calendar.");
+      toast.error(err.message || "Ocorreu um erro ao salvar o agendamento.");
     } finally {
       setIsSubmitting(false);
     }
@@ -278,8 +287,10 @@ ${record.calendarLink ? `Link do Google Agenda: ${record.calendarLink}` : ""}`;
     try {
       const responsibleUser = currentUser?.name || lead.owner || "Vendedor";
 
-      // 1. Delete on Google Calendar
-      await deleteGoogleCalendarEvent(existingEvent.googleEventId);
+      // 1. Delete on Google Calendar if connected and not internal-only
+      if (!existingEvent.googleEventId.startsWith("agd_crm_") && !existingEvent.googleEventId.startsWith("PROT-")) {
+        await deleteGoogleCalendarEvent(existingEvent.googleEventId);
+      }
 
       // 2. Update activity history
       const cancelActivity = {
@@ -299,7 +310,11 @@ ${record.calendarLink ? `Link do Google Agenda: ${record.calendarLink}` : ""}`;
         metadata: updatedMeta
       });
 
-      toast.success("Evento cancelado e removido do Google Agenda.");
+      cloudStore.mutate((draft) => {
+        syncManualCrmMeetingToDraft(draft, lead, existingEvent, true);
+      }, { immediate: true });
+
+      toast.success("Evento cancelado na Agenda e no CRM.");
       onClose();
     } catch (err: any) {
       console.error("Erro ao cancelar evento:", err);
@@ -342,13 +357,14 @@ ${record.calendarLink ? `Link do Google Agenda: ${record.calendarLink}` : ""}`;
             {conn.connected ? (
               <>
                 <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-bold text-foreground">Google Agenda conectada:</span>
+                <span className="font-bold text-foreground">Google Agenda sincronizado:</span>
                 <span className="text-muted-foreground font-mono">{conn.email}</span>
               </>
             ) : (
               <>
-                <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                <span className="font-bold text-amber-500">Google Agenda não conectada</span>
+                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span className="font-bold text-foreground">Agenda Interna Salead ativa</span>
+                <span className="text-muted-foreground text-[11px] hidden sm:inline">· Google Agenda opcional</span>
               </>
             )}
           </div>

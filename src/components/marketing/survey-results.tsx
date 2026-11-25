@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { 
   BarChart3, Users, TrendingUp, MessageSquare, PieChart, 
   ArrowLeft, Calendar, Clock, User, ChevronRight, Download,
-  Search, Filter, Mail, Phone
+  Search, Filter, Mail, Phone, Trash2
 } from "lucide-react";
 import { useData, type Survey, type SurveyResponse } from "@/hooks/use-data";
 import { cn, formatPhone } from "@/lib/utils";
@@ -21,9 +21,11 @@ interface SurveyResultsProps {
 const COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#eab308'];
 
 export function SurveyResults({ survey, onBack }: SurveyResultsProps) {
-  const { surveyResponses, leads } = useData();
+  const { surveyResponses, leads, deleteSurveyResponse } = useData();
   const [view, setView] = useState<'stats' | 'responses'>('stats');
   const [selectedResponseId, setSelectedResponseId] = useState<string | null>(null);
+  const [searchRespondent, setSearchRespondent] = useState("");
+  const [confirmingDeleteRespId, setConfirmingDeleteRespId] = useState<string | null>(null);
 
   const responses = useMemo(() => 
     surveyResponses.filter(r => 
@@ -54,6 +56,18 @@ export function SurveyResults({ survey, onBack }: SurveyResultsProps) {
       return { ...q, data };
     });
   }, [survey.questions, responses]);
+
+  const filteredResponses = useMemo(() => {
+    const q = searchRespondent.trim().toLowerCase();
+    if (!q) return responses;
+    return responses.filter((r) => {
+      const lead = leads.find((l) => l.id === r.leadId || l.id === (r as any).lead_id);
+      const name = String(lead?.name || (r as any).leadName || "Usuário Anônimo").toLowerCase();
+      const company = String(lead?.company || (r as any).leadCompany || "").toLowerCase();
+      const email = String(lead?.email || (r as any).leadEmail || "").toLowerCase();
+      return name.includes(q) || company.includes(q) || email.includes(q);
+    });
+  }, [responses, leads, searchRespondent]);
 
   const selectedResponse = useMemo(() => 
     responses.find(r => r.id === selectedResponseId),
@@ -160,21 +174,29 @@ export function SurveyResults({ survey, onBack }: SurveyResultsProps) {
             <div className="p-4 border-b border-border bg-muted/10">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input placeholder="Buscar respondente..." className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-xl text-xs outline-none" />
+                <input
+                  value={searchRespondent}
+                  onChange={(e) => setSearchRespondent(e.target.value)}
+                  placeholder="Buscar respondente..."
+                  className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-xl text-xs outline-none"
+                />
               </div>
             </div>
             <div className="max-h-[600px] overflow-y-auto divide-y divide-border">
-              {responses.map(r => {
-                const lead = leads.find(l => l.id === r.leadId);
-                const leadName = lead?.name || "Usuário Anônimo";
-                const initials = leadName.split(" ").map((n: string) => n[0]).join("").toUpperCase();
+              {filteredResponses.map(r => {
+                const lead = leads.find(l => l.id === r.leadId || l.id === (r as any).lead_id);
+                const leadName = lead?.name || (r as any).leadName || (r as any).answers?.name || "Usuário Anônimo";
+                const initials = leadName.split(" ").filter(Boolean).map((n: string) => n[0]).slice(0, 2).join("").toUpperCase() || "?";
 
                 return (
                   <button 
                     key={r.id}
-                    onClick={() => setSelectedResponseId(r.id)}
+                    onClick={() => {
+                      setSelectedResponseId(r.id);
+                      setConfirmingDeleteRespId(null);
+                    }}
                     className={cn(
-                      "w-full text-left p-4 flex items-center gap-4 transition-all hover:bg-muted/50",
+                      "w-full text-left p-4 flex items-center gap-4 transition-all hover:bg-muted/50 cursor-pointer",
                       selectedResponseId === r.id ? "bg-primary/5 border-l-4 border-primary" : "border-l-4 border-transparent"
                     )}
                   >
@@ -189,28 +211,79 @@ export function SurveyResults({ survey, onBack }: SurveyResultsProps) {
                   </button>
                 );
               })}
+              {filteredResponses.length === 0 && (
+                <div className="p-8 text-center text-xs text-muted-foreground">
+                  Nenhuma resposta encontrada.
+                </div>
+              )}
             </div>
           </div>
 
           {selectedResponse ? (
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <div className="p-8 rounded-[2rem] bg-gradient-surface border border-border shadow-card space-y-6">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between flex-wrap gap-3">
                   <div className="flex items-center gap-4">
                     <div className="h-16 w-16 rounded-2xl bg-primary/10 text-primary grid place-items-center">
                       <User className="h-8 w-8" />
                     </div>
                     <div>
-                      <h3 className="font-display text-2xl font-bold">{respondentLead?.name || "Respondente"}</h3>
-                      <div className="flex items-center gap-4 mt-1">
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="h-3.5 w-3.5" /> {respondentLead?.email}</div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Phone className="h-3.5 w-3.5" /> {respondentLead?.whatsapp}</div>
+                      <h3 className="font-display text-2xl font-bold">
+                        {respondentLead?.name || (selectedResponse as any).leadName || "Respondente"}
+                      </h3>
+                      <div className="flex items-center gap-4 mt-1 flex-wrap">
+                        {respondentLead?.email && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="h-3.5 w-3.5" /> {respondentLead.email}</div>
+                        )}
+                        {respondentLead?.whatsapp && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Phone className="h-3.5 w-3.5" /> {respondentLead.whatsapp}</div>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <button className="px-4 py-2 rounded-xl border border-border text-[10px] font-black uppercase tracking-widest hover:bg-muted transition-all flex items-center gap-2">
-                    <Download className="h-3.5 w-3.5" /> EXPORTAR PDF
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-4 py-2 rounded-xl border border-border text-[10px] font-black uppercase tracking-widest hover:bg-muted transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <Download className="h-3.5 w-3.5" /> EXPORTAR PDF
+                    </button>
+
+                    {confirmingDeleteRespId === selectedResponse.id ? (
+                      <div className="flex items-center gap-1.5 bg-destructive/10 border border-destructive/30 rounded-xl px-2.5 py-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const idToDelete = selectedResponse.id;
+                            const nextResp = filteredResponses.find((r) => r.id !== idToDelete);
+                            await deleteSurveyResponse(idToDelete);
+                            setConfirmingDeleteRespId(null);
+                            setSelectedResponseId(nextResp?.id || null);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-destructive text-white text-[10px] font-black uppercase cursor-pointer"
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDeleteRespId(null)}
+                          className="px-2 py-1 rounded-lg text-[10px] font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDeleteRespId(selectedResponse.id)}
+                        title="Excluir esta resposta"
+                        className="p-2.5 rounded-xl border border-destructive/30 text-destructive hover:bg-destructive hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid gap-4 pt-6 border-t border-border">

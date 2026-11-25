@@ -47,11 +47,13 @@ export interface ButtonCustomStyle {
   customTextColorHex?: string;
   customGradient?: string;
   // Action & Destination Configuration
-  actionType?: "scroll_form" | "whatsapp" | "custom_url" | "instagram";
+  actionType?: "scroll_form" | "whatsapp" | "custom_url" | "instagram" | "booking_event";
   whatsappNumber?: string;
   whatsappMessage?: string;
   customUrl?: string;
   instagramUsername?: string;
+  bookingEventId?: string;
+  bookingEventSlug?: string;
   openInNewTab?: boolean;
 }
 
@@ -411,6 +413,10 @@ export interface FormSection {
     fileName?: string;
     buttonText?: string;
   };
+  // Ação pós-formulário (página de obrigado ou redirecionamento para Agenda Ativa)
+  postSubmitAction?: "thank_you" | "booking_event";
+  postSubmitEventId?: string;
+  postSubmitEventSlug?: string;
   // Visual Customizations
   align?: TextAlign;
   headlineSize?: FontSize;
@@ -672,6 +678,8 @@ export interface LandingPage {
   previewToken?: string;
   webhookUrl?: string;
   surveyId?: string;
+  agendaEventId?: string | null;
+  agendaEventSlug?: string | null;
   productId?: string;
   productIds?: string[];
   useMinQualification?: boolean;

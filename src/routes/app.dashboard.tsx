@@ -1,6 +1,6 @@
 "use client";
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useData } from "@/hooks/use-data";
 import { 
   TrendingUp, Target, DollarSign, Users, Timer, Activity, Zap, 
@@ -35,7 +35,7 @@ export const Route = createFileRoute("/app/dashboard")({
 type TabID = 'operation' | 'perf' | 'intel' | 'fin' | 'ceo' | 'mkt' | 'abc' | 'acquisition';
 
 function DashboardPage() {
-  const { leads, tasks, users, initialized, dateFilter, company, landingPages, workingDays, holidays, products, marketingInvestments } = useData();
+  const { leads, tasks, users, initialized, dateFilter, company, landingPages, workingDays, holidays, products, marketingInvestments, agendaBookings } = useData();
   const [activeTab, setActiveTab] = useState<TabID>('ceo');
 
   const stats = useMemo(() => {
@@ -234,7 +234,7 @@ function DashboardPage() {
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden flex-1 flex flex-col min-h-0">
         {activeTab === 'ceo' && <CEOView stats={stats} />}
         {activeTab === 'mkt' && <MarketingView stats={stats} />}
-        {activeTab === 'operation' && <OperationView stats={stats} tasks={tasks} users={users} />}
+        {activeTab === 'operation' && <OperationView stats={stats} tasks={tasks} users={users} agendaBookings={agendaBookings} />}
         {activeTab === 'perf' && <PerformanceView stats={stats} />}
         {activeTab === 'intel' && <IntelligenceView stats={stats} />}
         {activeTab === 'abc' && <ABCView stats={stats} />}
@@ -532,8 +532,14 @@ function CEOView({ stats }: { stats: any }) {
   );
 }
 
-function OperationView({ stats, tasks, users }: { stats: any, tasks: any[], users: any[] }) {
+function OperationView({ stats, tasks, users, agendaBookings = [] }: { stats: any, tasks: any[], users: any[], agendaBookings?: any[] }) {
+  const navigate = useNavigate();
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const todayBookings = agendaBookings.filter(b => b.status !== "CANCELADO" && b.data_agendamento === todayIso);
   const todayTasks = tasks.filter(t => !t.done && isToday(new Date(t.due)));
+  const totalTodayCount = todayBookings.length + todayTasks.length;
+
   return (
     <div className="h-full flex flex-col gap-4 min-h-0 overflow-y-auto pr-2 scrollbar-thin pb-6">
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 shrink-0">
@@ -577,8 +583,60 @@ function OperationView({ stats, tasks, users }: { stats: any, tasks: any[], user
           <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-none">{stats.taskRanking?.map((item: any, i: number) => (<div key={item.name} className="flex items-center justify-between group"><div className="flex items-center gap-3"><div className="relative shrink-0"><div className="h-9 w-9 rounded-full bg-muted border border-border overflow-hidden flex items-center justify-center">{item.avatarUrl ? <img src={item.avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="text-[10px] font-black text-muted-foreground">{item.avatar}</span>}</div></div><div className="min-w-0"><div className="text-xs font-bold truncate group-hover:text-primary transition-colors">{item.name}</div><div className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">{item.count} concluídas</div></div></div><div className="text-right shrink-0"><div className="font-display font-black text-base leading-none">{item.count}</div></div></div>))}</div>
         </div>
         <div className="bg-card border border-border rounded-[2.5rem] p-6 shadow-card flex flex-col min-h-0 overflow-hidden">
-          <div className="flex items-center justify-between shrink-0 mb-6 px-1"><div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-primary/10 text-primary grid place-items-center"><Calendar className="h-4 w-4" /></div><h3 className="font-display text-sm font-bold">Agenda Hoje</h3></div><span className="text-[8px] font-black bg-primary/20 text-primary px-2 py-1 rounded-full uppercase">{todayTasks.length} PENDÊNCIAS</span></div>
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin">{todayTasks.map(t => (<div key={t.id} className="p-3 bg-muted/30 border border-border rounded-2xl flex items-center gap-3 group hover:border-primary/40 transition-all shrink-0"><div className="h-8 w-8 rounded-lg bg-background border border-border grid place-items-center shrink-0 group-hover:bg-primary/10 transition-colors"><Calendar className="h-4 w-4 text-muted-foreground group-hover:text-primary" /></div><div className="flex-1 min-w-0"><div className="text-xs font-bold truncate">{t.title}</div><div className="text-[8px] text-muted-foreground uppercase font-black tracking-widest truncate">{t.lead}</div></div></div>))}</div>
+          <div className="flex items-center justify-between shrink-0 mb-6 px-1">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-primary/10 text-primary grid place-items-center"><Calendar className="h-4 w-4" /></div>
+              <h3 className="font-display text-sm font-bold">Agenda Hoje</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/app/tasks", search: { tab: "agendamentos" } as any })}
+              className="text-[9px] font-black bg-primary/20 text-primary px-2.5 py-1 rounded-full uppercase hover:bg-primary/30 transition-colors cursor-pointer tabular-nums"
+            >
+              {totalTodayCount} COMPROMISSOS
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+            {todayBookings.map((b: any) => (
+              <button
+                type="button"
+                key={b.id_agendamento}
+                onClick={() => navigate({ to: "/app/tasks", search: { tab: "agendamentos", bookingId: b.id_agendamento } as any })}
+                className="w-full text-left p-3 bg-primary/5 border border-primary/20 rounded-2xl flex items-center gap-3 group hover:border-primary/50 transition-all shrink-0 cursor-pointer"
+              >
+                <div className="h-8 w-8 rounded-lg bg-background border border-primary/20 grid place-items-center shrink-0">
+                  <Calendar className="h-4 w-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold truncate">{b.hora_inicio} · {b.evento_nome || "Reunião"}</div>
+                  <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider truncate">{b.lead_nome} · {b.protocolo}</div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
+              </button>
+            ))}
+            {todayTasks.map(t => (
+              <button
+                type="button"
+                key={t.id}
+                onClick={() => navigate({ to: "/app/tasks", search: { tab: "tarefas", lead: t.lead } as any })}
+                className="w-full text-left p-3 bg-muted/30 border border-border rounded-2xl flex items-center gap-3 group hover:border-primary/40 transition-all shrink-0 cursor-pointer"
+              >
+                <div className="h-8 w-8 rounded-lg bg-background border border-border grid place-items-center shrink-0 group-hover:bg-primary/10 transition-colors">
+                  <Calendar className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold truncate">{t.title}</div>
+                  <div className="text-[8px] text-muted-foreground uppercase font-black tracking-widest truncate">{t.lead}</div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
+              </button>
+            ))}
+            {totalTodayCount === 0 && (
+              <div className="py-10 text-center text-xs text-muted-foreground">
+                Nenhum compromisso para hoje. Clique acima para abrir Minha Agenda.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -199,6 +199,8 @@ export function ensureCometLP(rawLP: any): LandingPage {
     name: source.name || resolvedPageTitle,
     slug: resolvedSlug,
     surveyId: source.surveyId || source.survey_id || unpackedConfig.surveyId || undefined,
+    agendaEventId: source.agendaEventId || source.agenda_event_id || unpackedConfig.agendaEventId || undefined,
+    agendaEventSlug: source.agendaEventSlug || source.agenda_event_slug || unpackedConfig.agendaEventSlug || undefined,
     externalUrl: source.externalUrl || source.external_url || unpackedConfig.externalUrl || undefined,
     accentColor: source.accentColor || (source.theme?.primary ? "orange" : isUserCustomLP ? "purple" : base.accentColor || "orange"),
     accentShade: source.accentShade || base.accentShade || "600",

@@ -3,7 +3,7 @@ import { useData, type Survey } from "@/hooks/use-data";
 import { 
   Plus, Search, ClipboardList, Users, TrendingUp, ExternalLink, 
   MoreVertical, Pencil, Trash2, Play, Pause, BarChart3, UserCheck, Globe,
-  Copy, Check, Sparkles, Flame, Zap, Star, Clock, Eye
+  Copy, Check, Sparkles, Flame, Zap, Star, Clock, Eye, RotateCcw
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
@@ -18,9 +18,11 @@ export const Route = createFileRoute("/app/surveys/")({
 
 export function SurveysPage() {
   const navigate = useNavigate();
-  const { surveys, surveyResponses = [], addSurvey, updateSurvey, deleteSurvey, initialized } = useData();
+  const { surveys, surveyResponses = [], addSurvey, updateSurvey, deleteSurvey, clearSurveyResponses, initialized } = useData();
   const [search, setSearch] = useState("");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [confirmClearId, setConfirmClearId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
   const [editingSurvey, setEditingSurvey] = useState<Survey | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -276,7 +278,11 @@ export function SurveysPage() {
                       </button>
 
                       <button 
-                        onClick={() => setActiveMenu(activeMenu === s.id ? null : s.id)}
+                        onClick={() => {
+                          setActiveMenu(activeMenu === s.id ? null : s.id);
+                          setConfirmClearId(null);
+                          setConfirmDeleteId(null);
+                        }}
                         className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground transition-colors cursor-pointer"
                       >
                         <MoreVertical className="h-4 w-4" />
@@ -284,7 +290,7 @@ export function SurveysPage() {
                     </div>
                     
                     {activeMenu === s.id && (
-                      <div className="absolute right-12 top-1/2 -translate-y-1/2 bg-card border border-border rounded-xl shadow-2xl z-20 py-1 min-w-[150px] animate-in fade-in zoom-in-95 text-left">
+                      <div className="absolute right-12 top-1/2 -translate-y-1/2 bg-card border border-border rounded-xl shadow-2xl z-20 py-1 min-w-[180px] animate-in fade-in zoom-in-95 text-left">
                         <button 
                           onClick={() => { setSelectedSurveyId(s.id); setActiveMenu(null); }}
                           className="w-full text-left px-3 py-2 text-xs hover:bg-muted flex items-center gap-2 cursor-pointer font-medium"
@@ -304,12 +310,84 @@ export function SurveysPage() {
                         >
                           <Pencil className="h-3.5 w-3.5 text-primary" /> Editar Perguntas
                         </button>
-                        <button 
-                          onClick={() => { if(confirm("Excluir esta pesquisa?")) deleteSurvey(s.id); setActiveMenu(null); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-destructive/10 text-destructive flex items-center gap-2 cursor-pointer font-medium"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Excluir
-                        </button>
+
+                        {confirmClearId === s.id ? (
+                          <div className="px-3 py-2 bg-amber-500/10 border-y border-amber-500/20 space-y-1.5">
+                            <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                              Zerar respostas de teste?
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await clearSurveyResponses(s.id);
+                                  setConfirmClearId(null);
+                                  setActiveMenu(null);
+                                }}
+                                className="flex-1 py-1 rounded bg-amber-600 text-white text-[10px] font-bold cursor-pointer"
+                              >
+                                Confirmar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmClearId(null)}
+                                className="px-2 py-1 rounded border border-border text-[10px] font-semibold cursor-pointer"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              setConfirmDeleteId(null);
+                              setConfirmClearId(s.id);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center gap-2 cursor-pointer font-medium"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" /> Apagar Respostas
+                          </button>
+                        )}
+
+                        {confirmDeleteId === s.id ? (
+                          <div className="px-3 py-2 bg-destructive/10 border-t border-destructive/20 space-y-1.5">
+                            <div className="text-[10px] font-bold text-destructive">
+                              Excluir pesquisa?
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await deleteSurvey(s.id);
+                                  setConfirmDeleteId(null);
+                                  setActiveMenu(null);
+                                }}
+                                className="flex-1 py-1 rounded bg-destructive text-white text-[10px] font-bold cursor-pointer"
+                              >
+                                Excluir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="px-2 py-1 rounded border border-border text-[10px] font-semibold cursor-pointer"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              setConfirmClearId(null);
+                              setConfirmDeleteId(s.id);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-destructive/10 text-destructive flex items-center gap-2 cursor-pointer font-medium"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Excluir
+                          </button>
+                        )}
                       </div>
                     )}
                   </td>

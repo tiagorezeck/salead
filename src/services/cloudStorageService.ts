@@ -109,6 +109,14 @@ export interface CloudDatabase {
   lpAnalytics: Record<string, any>;
   automationLogs: any[];
   brandIdentity: any | null;
+  agendaEvents: any[];
+  agendaSchedules: any[];
+  agendaBlocks: any[];
+  agendaBookings: any[];
+  agendaFormFields: any[];
+  agendaFormResponses: any[];
+  agendaWaitlist: any[];
+  agendaCustomItems: any[];
   revision: number;
   ultimoBackup?: string;
   versao?: string;
@@ -266,6 +274,14 @@ function createInitialCloudDatabase(): CloudDatabase {
     lpAnalytics: {},
     automationLogs: [],
     brandIdentity: null,
+    agendaEvents: [],
+    agendaSchedules: [],
+    agendaBlocks: [],
+    agendaBookings: [],
+    agendaFormFields: [],
+    agendaFormResponses: [],
+    agendaWaitlist: [],
+    agendaCustomItems: [],
     revision: 0,
     versao: "3.0-CloudEngine",
   };
@@ -607,6 +623,44 @@ class CloudStorageService {
         ? payload.automationLogs
         : this.db.automationLogs,
       brandIdentity: payload.brandIdentity || this.db.brandIdentity,
+      agendaEvents: Array.isArray(payload.agendaEvents)
+        ? payload.agendaEvents
+        : Array.isArray(payload.eventos)
+        ? payload.eventos
+        : this.db.agendaEvents,
+      agendaSchedules: Array.isArray(payload.agendaSchedules)
+        ? payload.agendaSchedules
+        : Array.isArray(payload.horarios)
+        ? payload.horarios
+        : this.db.agendaSchedules,
+      agendaBlocks: Array.isArray(payload.agendaBlocks)
+        ? payload.agendaBlocks
+        : Array.isArray(payload.bloqueios)
+        ? payload.bloqueios
+        : this.db.agendaBlocks,
+      agendaBookings: Array.isArray(payload.agendaBookings)
+        ? payload.agendaBookings
+        : Array.isArray(payload.agendamentos)
+        ? payload.agendamentos
+        : this.db.agendaBookings,
+      agendaFormFields: Array.isArray(payload.agendaFormFields)
+        ? payload.agendaFormFields
+        : Array.isArray(payload.campos_formulario)
+        ? payload.campos_formulario
+        : this.db.agendaFormFields,
+      agendaFormResponses: Array.isArray(payload.agendaFormResponses)
+        ? payload.agendaFormResponses
+        : Array.isArray(payload.respostas)
+        ? payload.respostas
+        : this.db.agendaFormResponses,
+      agendaWaitlist: Array.isArray(payload.agendaWaitlist)
+        ? payload.agendaWaitlist
+        : Array.isArray(payload.lista_espera)
+        ? payload.lista_espera
+        : this.db.agendaWaitlist,
+      agendaCustomItems: Array.isArray(payload.agendaCustomItems)
+        ? payload.agendaCustomItems
+        : this.db.agendaCustomItems,
       revision: Number(payload.revision) || this.db.revision,
       ultimoBackup: payload.ultimoBackup || this.db.ultimoBackup,
       versao: payload.versao || "3.0-CloudEngine",

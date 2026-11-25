@@ -22,7 +22,8 @@ import {
   ShieldCheck,
   Check,
   ArrowRight,
-  MessageSquare
+  MessageSquare,
+  Calendar
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ import {
   recordLpVisitToDrive,
 } from "@/services/googleDriveDatabaseService";
 import { cloudStore } from "@/services/cloudStorageService";
+import { buildPublicAgendaPath } from "@/lib/agenda-engine";
 
 const SURVEY_PRESETS: any[] = [
   {
@@ -1038,6 +1040,30 @@ function PublicLPPage() {
                   });
 
                   toast.success("✅ Cadastro e respostas enviadas com sucesso!");
+
+                  const fsCfgSurvey = lp?.cometData?.formSection || lp?.formSection;
+                  const targetEvtId = fsCfgSurvey?.postSubmitEventId || lp?.agendaEventId;
+                  const targetEvtSlug = fsCfgSurvey?.postSubmitEventSlug || lp?.agendaEventSlug;
+                  if (fsCfgSurvey?.postSubmitAction === "booking_event" || Boolean(targetEvtId || targetEvtSlug)) {
+                    const events = cloudStore.getState().agendaEvents || [];
+                    const matched = events.find(
+                      (ev) => ev.id_evento === targetEvtId || ev.slug === targetEvtSlug
+                    );
+                    const bookingUrl = buildPublicAgendaPath(matched?.slug || targetEvtSlug || undefined, {
+                      nome: leadName,
+                      whatsapp: leadWhatsapp,
+                      email: leadEmail,
+                      lp: lp?.id,
+                      lp_title: lp?.name || lp?.title,
+                      utm_source: utm?.utm_source,
+                      utm_medium: utm?.utm_medium,
+                      utm_campaign: utm?.utm_campaign,
+                      src: effectiveSource,
+                    });
+                    setTimeout(() => {
+                      window.location.assign(bookingUrl);
+                    }, 1100);
+                  }
                 }}
               />
               </Suspense>
@@ -1456,6 +1482,31 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
 
       setIsSubmitted(true);
       onComplete();
+
+      const fsCfg = lp?.cometData?.formSection || lp?.formSection;
+      const targetEvtId = fsCfg?.postSubmitEventId || lp?.agendaEventId;
+      const targetEvtSlug = fsCfg?.postSubmitEventSlug || lp?.agendaEventSlug;
+      if (fsCfg?.postSubmitAction === "booking_event" || Boolean(targetEvtId || targetEvtSlug)) {
+        const events = cloudStore.getState().agendaEvents || [];
+        const matched = events.find(
+          (ev) => ev.id_evento === targetEvtId || ev.slug === targetEvtSlug
+        );
+        const finalSlug = matched?.slug || targetEvtSlug || "";
+        const bookingUrl = buildPublicAgendaPath(finalSlug || undefined, {
+          nome: name.trim(),
+          whatsapp: whatsapp.trim(),
+          email: email.trim(),
+          lp: lp?.id,
+          lp_title: lp?.name || lp?.title,
+          utm_source: utm?.utm_source,
+          utm_medium: utm?.utm_medium,
+          utm_campaign: utm?.utm_campaign,
+          src: effectiveSource,
+        });
+        setTimeout(() => {
+          window.location.assign(bookingUrl);
+        }, 1000);
+      }
     } catch (err) {
       console.error("Erro ao enviar lead:", err);
       toast.error("Ocorreu um erro ao salvar o cadastro. Tente novamente.");
@@ -1471,6 +1522,30 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
     const safeEmail = email ? String(email) : "";
     const safeSource = effectiveSource ? String(effectiveSource) : "Direto";
 
+    const fsCfg = lp?.cometData?.formSection || lp?.formSection;
+    const targetEvtId = fsCfg?.postSubmitEventId || lp?.agendaEventId;
+    const targetEvtSlug = fsCfg?.postSubmitEventSlug || lp?.agendaEventSlug;
+    const isBookingFlow = fsCfg?.postSubmitAction === "booking_event" || Boolean(targetEvtId || targetEvtSlug);
+    const postBookingUrl = isBookingFlow
+      ? (() => {
+          const events = cloudStore.getState().agendaEvents || [];
+          const matched = events.find(
+            (ev) => ev.id_evento === targetEvtId || ev.slug === targetEvtSlug
+          );
+          return buildPublicAgendaPath(matched?.slug || targetEvtSlug || undefined, {
+            nome: safeName,
+            whatsapp: safePhone,
+            email: safeEmail,
+            lp: lp?.id,
+            lp_title: lp?.name || lp?.title,
+            utm_source: utm?.utm_source,
+            utm_medium: utm?.utm_medium,
+            utm_campaign: utm?.utm_campaign,
+            src: effectiveSource,
+          });
+        })()
+      : null;
+
     return (
       <div className="bg-zinc-900/70 backdrop-blur-xl border border-zinc-800 rounded-3xl p-8 md:p-10 shadow-2xl text-center space-y-6 animate-in zoom-in-95 duration-300">
         <div className="w-16 h-16 mx-auto rounded-3xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/10">
@@ -1483,7 +1558,9 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
           </span>
           <h2 className="text-2xl font-black text-zinc-100 tracking-tight">Obrigado, {safeName.split(" ")[0]}!</h2>
           <p className="text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
-            Seus dados foram recebidos com sucesso. Nossa equipe entrará em contato via WhatsApp em breve.
+            {postBookingUrl
+              ? "Seus dados foram registrados. Você está sendo direcionado para escolher seu dia e horário na agenda."
+              : "Seus dados foram recebidos com sucesso. Nossa equipe entrará em contato via WhatsApp em breve."}
           </p>
         </div>
 
@@ -1505,6 +1582,16 @@ function DirectExternalLeadForm({ lp, pipelines, onComplete }: DirectExternalLea
         </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+          {postBookingUrl && (
+            <a
+              href={postBookingUrl}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition-all shadow-lg cursor-pointer"
+            >
+              <Calendar className="h-4 w-4" />
+              <span>Escolher Dia e Horário Agora</span>
+            </a>
+          )}
+
           <a
             href={`https://wa.me/55${safeCleanPhone}`}
             target="_blank"

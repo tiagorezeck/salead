@@ -1,10 +1,11 @@
-import { type Lead, type Stage, type Classification, type LeadType, type Strategy, type DecisionRole, type MINScore, type Temperature, SLA_CONFIG, CLASSIFICATION_CONFIG, SOURCES } from "@/data/mock";
+import { type Lead, type Stage, type Classification, type LeadType, type Strategy, type DecisionRole, type MINScore, type Temperature, type CopilotInterviewDocument, SLA_CONFIG, CLASSIFICATION_CONFIG, SOURCES } from "@/data/mock";
+import { Link } from "@tanstack/react-router";
 import { 
   Trash2, Flame, Unlock, Lock, FileText, Clock, UserPlus, CheckSquare, Sparkles, 
   History, Info, Mail, Phone, Target, GitMerge, AlertCircle, ExternalLink, Pencil, 
   Save, X, Thermometer, UserCheck, Zap, TrendingUp, Calendar, ArrowUpRight, 
   ArrowDownRight, Check, Ban, CreditCard, RefreshCw, MessageCircle, DollarSign, 
-  Building2, Globe, User, Video, FileCheck, Layers, ArrowRightLeft, ArrowRight 
+  Building2, Globe, User, Video, FileCheck, Layers, ArrowRightLeft, ArrowRight, ChevronDown 
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ import {
   LEAD_STATUS_CONFIG, 
   type LeadStatusCode 
 } from "@/lib/lead-status-utils";
+import { buildGoogleCalendarTemplateLink, formatDateBR } from "@/lib/agenda-engine";
 
 interface LeadDrawerProps {
   lead: Lead;
@@ -39,6 +41,8 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showSurveyModal, setShowSurveyModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [expandedCopilotDocId, setExpandedCopilotDocId] = useState<string | null>(null);
+  const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   
   const [editForm, setEditForm] = useState({
@@ -67,6 +71,29 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
   const leadPipelineMovements = useMemo(() => {
     return pipelineHistory.filter(h => h.leadId === lead.id);
   }, [pipelineHistory, lead.id]);
+
+  const copilotDocuments = useMemo<CopilotInterviewDocument[]>(() => {
+    const docs = Array.isArray(lead.copilotDocuments)
+      ? lead.copilotDocuments
+      : Array.isArray(lead.metadata?.copilotDocuments)
+      ? lead.metadata.copilotDocuments
+      : [];
+    return [...docs].sort((a, b) => (Number(b.interviewNumber) || 0) - (Number(a.interviewNumber) || 0));
+  }, [lead.copilotDocuments, lead.metadata]);
+
+  const handleDeleteCopilotDocument = (docId: string) => {
+    const nextDocs = copilotDocuments.filter((d) => d.id !== docId);
+    onUpdate(lead.id, {
+      copilotDocuments: nextDocs,
+      metadata: {
+        ...(lead.metadata || {}),
+        copilotDocuments: nextDocs,
+      },
+    });
+    setConfirmDeleteDocId(null);
+    if (expandedCopilotDocId === docId) setExpandedCopilotDocId(null);
+    toast.success("Documento da entrevista excluído do cadastro e do Copiloto.");
+  };
 
   useEffect(() => { 
     if (lead) {
@@ -459,6 +486,17 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
+                <Link
+                  to="/playbook/view"
+                  search={{ leadId: lead.id }}
+                  target="_blank"
+                  className="px-2 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500 text-amber-600 dark:text-amber-400 hover:text-white border border-amber-500/30 text-[9px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer"
+                  title="Abrir Copiloto de Vendas para entrevistar este lead"
+                >
+                  <Zap className="h-3 w-3" />
+                  <span>Copiloto</span>
+                </Link>
+
                 <button
                   type="button"
                   onClick={() => setShowTransferModal(true)}
@@ -541,6 +579,129 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
           {activeTab === 'perfil' ? (
             <div className="p-5 space-y-6 pb-12">
 
+              {/* DOCUMENTOS DO COPILOTO (ENTREVISTAS SALVAS) */}
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-muted/20 border border-emerald-500/30 shadow-sm space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-xs font-black text-emerald-500 uppercase tracking-wider">
+                    <FileText className="h-4 w-4" /> Documentos do Copiloto ({copilotDocuments.length})
+                  </div>
+                  <Link
+                    to="/playbook/view"
+                    search={{ leadId: lead.id }}
+                    target="_blank"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-colors"
+                  >
+                    <Zap className="h-3 w-3" /> Abrir Copiloto
+                  </Link>
+                </div>
+
+                {copilotDocuments.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhuma entrevista do Copiloto salva neste lead ainda. Ao finalizar uma entrevista no Copiloto, o formulário será gravado aqui automaticamente.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {copilotDocuments.map((doc) => {
+                      const isExpanded = expandedCopilotDocId === doc.id;
+                      const isConfirmingDel = confirmDeleteDocId === doc.id;
+                      return (
+                        <div key={doc.id} className="rounded-xl bg-background/80 border border-border overflow-hidden">
+                          <div className="p-3 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedCopilotDocId(isExpanded ? null : doc.id)}
+                              className="flex-1 text-left flex items-center gap-2.5 min-w-0 cursor-pointer"
+                            >
+                              <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform shrink-0", isExpanded && "rotate-180 text-primary")} />
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-foreground truncate">{doc.title}</div>
+                                <div className="text-[10px] text-muted-foreground">
+                                  {new Date(doc.createdAt).toLocaleString("pt-BR")} · {doc.interviewer || "Copiloto"}
+                                </div>
+                              </div>
+                            </button>
+
+                            {isConfirmingDel ? (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCopilotDocument(doc.id)}
+                                  className="px-2 py-1 rounded-md bg-destructive text-white text-[10px] font-black uppercase cursor-pointer"
+                                >
+                                  Apagar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteDocId(null)}
+                                  className="px-2 py-1 rounded-md border border-border text-[10px] font-semibold cursor-pointer"
+                                >
+                                  Não
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteDocId(doc.id)}
+                                title="Apagar entrevista deste cadastro e do Copiloto"
+                                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {isExpanded && (
+                            <div className="px-3.5 pb-3.5 pt-2 border-t border-border/70 bg-muted/20 space-y-3 text-xs">
+                              {Array.isArray(doc.mandatoryQuestions) && doc.mandatoryQuestions.length > 0 && (
+                                <div className="space-y-2">
+                                  <div className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                                    Perguntas &amp; Respostas
+                                  </div>
+                                  {doc.mandatoryQuestions.map((q) => (
+                                    <div key={q.id} className="p-2.5 rounded-lg bg-background border border-border/60">
+                                      <div className="text-[11px] font-bold text-foreground">{q.text}</div>
+                                      <div className="text-xs text-primary font-medium mt-0.5">
+                                        {q.answer || <span className="italic text-muted-foreground">Não respondida</span>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                                  <div className="text-[9px] font-black uppercase text-emerald-500 mb-1">Green Flags</div>
+                                  {doc.greenFlags?.length > 0 ? (
+                                    doc.greenFlags.map((f) => <div key={f.id} className="text-[11px]">• {f.text}</div>)
+                                  ) : (
+                                    <div className="text-[11px] opacity-50 italic">Nenhuma</div>
+                                  )}
+                                </div>
+                                <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                                  <div className="text-[9px] font-black uppercase text-rose-500 mb-1">Red Flags</div>
+                                  {doc.redFlags?.length > 0 ? (
+                                    doc.redFlags.map((f) => <div key={f.id} className="text-[11px]">• {f.text}</div>)
+                                  ) : (
+                                    <div className="text-[11px] opacity-50 italic">Nenhuma</div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {doc.notes && (
+                                <div className="p-2.5 rounded-lg bg-background border border-border/60">
+                                  <div className="text-[10px] font-black uppercase text-muted-foreground mb-0.5">Notas da Entrevista</div>
+                                  <div className="text-[11px] whitespace-pre-wrap">{doc.notes}</div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* CARD DE RESPOSTAS DA PESQUISA (DEEPFIND) */}
               {leadSurveyResponses.length > 0 && (
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/15 via-purple-500/5 to-muted/20 border border-purple-500/30 shadow-sm space-y-3">
@@ -569,68 +730,96 @@ export function LeadDrawer({ lead, stages, onClose, onUpdate, onDelete }: LeadDr
                 </div>
               )}
 
-              {/* CARD DE AGENDAMENTO NO GOOGLE CALENDAR */}
-              {lead.metadata?.calendarEvent ? (
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted/20 border border-primary/30 shadow-sm space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-black text-primary uppercase tracking-wider">
-                      <Calendar className="h-4 w-4" /> Reunião no Google Agenda
-                    </div>
-                    <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                      Confirmado
-                    </span>
-                  </div>
+              {/* CARD DE AGENDAMENTO */}
+              {lead.metadata?.calendarEvent ? (() => {
+                const ce = lead.metadata.calendarEvent;
+                const fallbackCalHref =
+                  ce.calendarLink ||
+                  buildGoogleCalendarTemplateLink({
+                    title: ce.title || `Reunião: ${lead.name}`,
+                    description: ce.description || "",
+                    location: ce.location || "Online",
+                    date: ce.date,
+                    startTime: ce.startTime || "09:00",
+                    endTime: ce.endTime || "09:30",
+                  });
 
-                  <div>
-                    <div className="text-sm font-bold text-foreground">{lead.metadata.calendarEvent.title}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5 font-medium">
-                      📅 {lead.metadata.calendarEvent.date} · {lead.metadata.calendarEvent.startTime} - {lead.metadata.calendarEvent.endTime}
+                return (
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted/20 border border-primary/30 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 text-xs font-black text-primary uppercase tracking-wider">
+                        <Calendar className="h-4 w-4" /> Reunião Agendada
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {ce.protocolo && (
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-background border border-border text-foreground">
+                            {ce.protocolo}
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            "text-[9px] uppercase font-black px-2 py-0.5 rounded border",
+                            ce.status === "cancelled"
+                              ? "bg-destructive/20 text-destructive border-destructive/30"
+                              : "bg-emerald-500/20 text-emerald-500 border-emerald-500/30"
+                          )}
+                        >
+                          {ce.status === "cancelled" ? "Cancelado" : "Confirmado"}
+                        </span>
+                      </div>
                     </div>
-                  </div>
 
-                  {lead.metadata.calendarEvent.attendees?.length > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      <strong>Participantes ({lead.metadata.calendarEvent.attendees.length}):</strong> {lead.metadata.calendarEvent.attendees.join(", ")}
+                    <div>
+                      <div className="text-sm font-bold text-foreground">{ce.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 font-medium font-mono tabular-nums">
+                        {formatDateBR(ce.date)} · {ce.startTime} - {ce.endTime}
+                      </div>
                     </div>
-                  )}
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-primary/20 flex-wrap">
-                    {lead.metadata.calendarEvent.meetLink && (
-                      <a
-                        href={lead.metadata.calendarEvent.meetLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 rounded-xl bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-emerald-600 transition-colors"
-                      >
-                        <Video className="h-3.5 w-3.5" /> Entrar no Google Meet
-                      </a>
+                    {ce.attendees?.length > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        <strong>Participantes ({ce.attendees.length}):</strong> {ce.attendees.join(", ")}
+                      </div>
                     )}
 
-                    {lead.metadata.calendarEvent.calendarLink && (
+                    <div className="flex items-center gap-2 pt-2 border-t border-primary/20 flex-wrap">
+                      {ce.meetLink && (
+                        <a
+                          href={ce.meetLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 rounded-xl bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-emerald-600 transition-colors"
+                        >
+                          <Video className="h-3.5 w-3.5" /> Entrar no Google Meet
+                        </a>
+                      )}
+
                       <a
-                        href={lead.metadata.calendarEvent.calendarLink}
+                        href={fallbackCalHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-3 py-1.5 rounded-xl bg-card border border-border text-foreground text-xs font-bold flex items-center gap-1.5 hover:bg-muted transition-colors"
                       >
-                        <ExternalLink className="h-3.5 w-3.5" /> Google Agenda
+                        <ExternalLink className="h-3.5 w-3.5" /> Adicionar ao Calendar
                       </a>
-                    )}
 
-                    <button
-                      onClick={() => setShowScheduleModal(true)}
-                      className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all ml-auto"
-                    >
-                      Editar Agendamento
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowScheduleModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all ml-auto cursor-pointer"
+                      >
+                        Gerenciar Agendamento
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : (
+                );
+              })() : (
                 <button
+                  type="button"
                   onClick={() => setShowScheduleModal(true)}
-                  className="w-full py-3 rounded-2xl bg-primary text-primary-foreground font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-elegant hover:scale-[1.01] transition-all"
+                  className="w-full py-3 rounded-2xl bg-primary text-primary-foreground font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-elegant hover:scale-[1.01] transition-all cursor-pointer"
                 >
-                  <Calendar className="h-4 w-4" /> Agendar Reunião no Google Agenda
+                  <Calendar className="h-4 w-4" /> Agendar / Gerenciar Reunião
                 </button>
               )}
 

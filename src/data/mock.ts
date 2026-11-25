@@ -18,6 +18,24 @@ export type Role =
   | "Farmer" 
   | "CX (Customer Experience)";
 
+export const ROLES: Role[] = [
+  "Admin Geral",
+  "Head of Sales",
+  "Team Leader",
+  "Marketing",
+  "LDR",
+  "BDR",
+  "SDR",
+  "Hunter",
+  "Closer",
+  "Seller",
+  "Full Stack Seller",
+  "Onboarding",
+  "CS (Customer Success)",
+  "Farmer",
+  "CX (Customer Experience)",
+];
+
 export type Stage = string;
 
 export type StageType = 
@@ -50,6 +68,7 @@ export interface Pipeline {
   name: string;
   code?: string;
   functionRole?: Role | string;
+  enabledRoles?: string[];
   description?: string;
   stages: PipelineStage[];
   color: string;
@@ -713,6 +732,29 @@ export interface Activity {
 
 import { type MinQualification } from "@/lib/min-qualification";
 
+export interface CopilotInterviewDocument {
+  id: string;
+  interviewNumber: number;
+  title: string;
+  playbookId: string;
+  playbookTitle: string;
+  createdAt: string;
+  updatedAt?: string;
+  interviewer?: string;
+  leadId: string;
+  leadName?: string;
+  leadCompany?: string;
+  checklist: Record<string, boolean>;
+  checklistLabels?: { id: string; text: string; done: boolean }[];
+  mandatoryQuestions: { id: string; text: string; answer: string }[];
+  answers: Record<string, string>;
+  greenFlags: { id: string; text: string }[];
+  redFlags: { id: string; text: string }[];
+  notes: string;
+  nextAction?: string;
+  summary?: string;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -743,6 +785,7 @@ export interface Lead {
   createdAt: string;
   activities: Activity[];
   completedCheckpoints?: string[];
+  copilotDocuments?: CopilotInterviewDocument[];
   wonAt?: string;
 
   // Rastreamento de Movimentações de Pipeline
@@ -833,6 +876,8 @@ export interface LandingPage {
   status: string;
   productId?: string;
   surveyId?: string;
+  agendaEventId?: string | null;
+  agendaEventSlug?: string | null;
   useMinQualification?: boolean;
   minSurveyId?: string;
   additionalSurveyIds?: string[];

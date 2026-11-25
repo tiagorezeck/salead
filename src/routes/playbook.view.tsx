@@ -5,11 +5,12 @@ import { useData } from "@/hooks/use-data";
 import { 
   BookOpen, ShieldAlert, MessageSquare, Zap, Search, X, 
   CheckCircle2, Circle, Target, Flag, AlertTriangle, 
-  FileDown, Save, User, Users, ChevronRight, Play, Check, Timer, FileCheck, Sparkles, Layers 
+  FileDown, Save, User, Users, ChevronRight, Play, Check, Timer, FileCheck, Sparkles, Layers,
+  RotateCcw, FileText, Plus, Eye
 } from "lucide-react";
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { cn, formatCurrency } from "@/lib/utils";
-import { type Playbook, type Lead } from "@/data/mock";
+import { type Playbook, type Lead, type CopilotInterviewDocument } from "@/data/mock";
 import { calculateMinQualification, getMinClassificationBadge } from "@/lib/min-qualification";
 import { toast } from "sonner";
 
@@ -22,11 +23,12 @@ export const Route = createFileRoute("/playbook/view")({
 
 function PlaybookCopilotPage() {
   const { leadId } = useSearch({ from: "/playbook/view" });
-  const { playbooks, leads, updateLead, initialized, surveys = [], surveysResponses = [] } = useData();
+  const { playbooks, leads, updateLead, initialized, surveys = [], surveysResponses = [], currentUser } = useData();
   
   const [selectedPBId, setSelectedPBId] = useState<string | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(leadId || null);
   const [sessionActive, setSessionActive] = useState(false);
+  const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   
   // Estados da Sessão
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
@@ -36,8 +38,24 @@ function PlaybookCopilotPage() {
 
   const reportRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (leadId) {
+      setSelectedLeadId(leadId);
+    }
+  }, [leadId]);
+
   const currentLead = useMemo(() => leads.find(l => l.id === selectedLeadId), [leads, selectedLeadId]);
   const currentPB = useMemo(() => playbooks.find(p => p.id === selectedPBId) || playbooks[0], [playbooks, selectedPBId]);
+
+  const leadCopilotDocs = useMemo<CopilotInterviewDocument[]>(() => {
+    if (!currentLead) return [];
+    const docs = Array.isArray(currentLead.copilotDocuments)
+      ? currentLead.copilotDocuments
+      : Array.isArray(currentLead.metadata?.copilotDocuments)
+      ? currentLead.metadata.copilotDocuments
+      : [];
+    return [...docs].sort((a, b) => (Number(b.interviewNumber) || 0) - (Number(a.interviewNumber) || 0));
+  }, [currentLead]);
 
   const leadMinBadge = useMemo(() => {
     if (!currentLead) return null;
@@ -65,22 +83,60 @@ function PlaybookCopilotPage() {
 
   if (!initialized) return <div className="p-8 text-center text-primary font-black animate-pulse">Iniciando Copiloto...</div>;
 
+  const resetQuestionnaire = (activateSession = false) => {
+    setChecklist({});
+    setAnswers({});
+    setFlags({});
+    setNotes("");
+    setViewingDocId(null);
+    if (activateSession) {
+      setSessionActive(true);
+    }
+    toast.success("Questionário zerado para nova entrevista! Os documentos anteriores permanecem salvos.");
+  };
+
   const startSession = () => {
     if (!selectedLeadId) return toast.error("Selecione um lead para iniciar.");
     setChecklist({});
     setAnswers({});
     setFlags({});
     setNotes("");
+    setViewingDocId(null);
     setSessionActive(true);
-    toast.success("Sessão iniciada! Siga o roteiro.");
+    toast.success(`Entrevista #${leadCopilotDocs.length + 1} iniciada! Siga o roteiro.`);
+  };
+
+  const loadDocumentIntoView = (doc: CopilotInterviewDocument) => {
+    if (doc.playbookId) {
+      setSelectedPBId(doc.playbookId);
+    }
+    setChecklist(doc.checklist || {});
+    setAnswers(doc.answers || {});
+    const restoredFlags: Record<string, boolean> = {};
+    (doc.greenFlags || []).forEach((f) => { restoredFlags[f.id] = true; });
+    (doc.redFlags || []).forEach((f) => { restoredFlags[f.id] = true; });
+    setFlags(restoredFlags);
+    setNotes(doc.notes || "");
+    setViewingDocId(doc.id);
+    setSessionActive(false);
+    toast.info(`Visualizando ${doc.title}`);
   };
 
   const handleFinish = async () => {
     if (!currentLead) return;
 
+    const existingDocs: CopilotInterviewDocument[] = Array.isArray(currentLead.copilotDocuments)
+      ? currentLead.copilotDocuments
+      : Array.isArray(currentLead.metadata?.copilotDocuments)
+      ? currentLead.metadata.copilotDocuments
+      : [];
+
+    const nextInterviewNumber =
+      existingDocs.reduce((maxN, d) => Math.max(maxN, Number(d.interviewNumber) || 0), 0) + 1;
+
     // Gerar Resumo para o Histórico
     const summary = `
-QUALIFICAÇÃO EXECUTIVA: ${currentPB.title}
+QUALIFICAÇÃO EXECUTIVA: ${currentPB.title} (Entrevista #${nextInterviewNumber})
 ----------------------------------------
 CHECKLIST: ${Object.values(checklist).filter(v => v).length}/${currentPB.initialChecklist.length} concluídos.
 RESPOSTAS:
@@ -94,20 +150,63 @@ NOTAS ADICIONAIS:
 ${notes || 'Sem observações.'}
     `;
 
+    const nowIso = new Date().toISOString();
+    const newDoc: CopilotInterviewDocument = {
+      id: `doc_copilot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      interviewNumber: nextInterviewNumber,
+      title: `Entrevista #${nextInterviewNumber} — ${currentPB.title}`,
+      playbookId: currentPB.id,
+      playbookTitle: currentPB.title,
+      createdAt: nowIso,
+      interviewer: currentUser?.name || "Copiloto de Vendas",
+      leadId: currentLead.id,
+      leadName: currentLead.name,
+      leadCompany: currentLead.company,
+      checklist: { ...checklist },
+      checklistLabels: currentPB.initialChecklist.map((item) => ({
+        id: item.id,
+        text: item.text,
+        done: Boolean(checklist[item.id]),
+      })),
+      mandatoryQuestions: currentPB.mandatoryQuestions.map((q) => ({
+        id: q.id,
+        text: q.text,
+        answer: answers[q.id] || "",
+      })),
+      answers: { ...answers },
+      greenFlags: currentPB.greenFlags
+        .filter((f) => flags[f.id])
+        .map((f) => ({ id: f.id, text: f.text })),
+      redFlags: currentPB.redFlags
+        .filter((f) => flags[f.id])
+        .map((f) => ({ id: f.id, text: f.text })),
+      notes: notes || "",
+      nextAction: currentPB.nextAction,
+      summary,
+    };
+
+    const nextDocs = [newDoc, ...existingDocs];
+
     const newActivity = {
       id: `qual-${Date.now()}`,
       type: 'note' as const,
-      description: `[COPILOTO] Sessão Finalizada: ${currentPB.title}\n\n${summary}`,
+      description: `[COPILOTO] Entrevista #${nextInterviewNumber} Finalizada: ${currentPB.title}\n\n${summary}`,
       timestamp: new Date().toLocaleString('pt-BR'),
-      user: 'Copiloto de Vendas'
+      user: currentUser?.name || 'Copiloto de Vendas'
     };
 
-    updateLead(currentLead.id, { 
+    await updateLead(currentLead.id, { 
+      copilotDocuments: nextDocs,
+      metadata: {
+        ...(currentLead.metadata || {}),
+        copilotDocuments: nextDocs,
+      },
       activities: [newActivity, ...(currentLead.activities || [])] 
     });
 
-    toast.success("Dados salvos no histórico do lead!");
+    toast.success(`Entrevista #${nextInterviewNumber} salva no cadastro do lead e no Copiloto!`);
     setSessionActive(false);
+    setViewingDocId(newDoc.id);
     generatePDF();
   };
 
@@ -150,38 +249,59 @@ ${notes || 'Sem observações.'}
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 flex-wrap">
           {!sessionActive ? (
             <>
               <div className="relative group">
                 <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-primary" />
                 <select 
                   value={selectedLeadId || ""} 
-                  onChange={(e) => setSelectedLeadId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedLeadId(e.target.value);
+                    setViewingDocId(null);
+                  }}
                   className="pl-9 pr-8 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer"
                 >
                   <option value="" disabled className="bg-[#121214]">Selecionar Lead...</option>
-                  {leads.map(l => <option key={l.id} value={l.id} className="bg-[#121214]">{l.company} ({l.name})</option>)}
+                  {leads.map(l => <option key={l.id} value={l.id} className="bg-[#121214]">{l.company ? `${l.company} (${l.name})` : l.name}</option>)}
                 </select>
               </div>
-              <button 
-                onClick={startSession}
-                className="px-6 py-2 rounded-xl bg-primary text-white text-[10px] font-black uppercase tracking-widest shadow-elegant hover:scale-105 transition-all flex items-center gap-2"
+              <button
+                type="button"
+                onClick={() => resetQuestionnaire(false)}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Zera os campos para preencher nova entrevista sem apagar as entrevistas salvas"
               >
-                <Play className="h-3.5 w-3.5" /> Iniciar Atendimento
+                <RotateCcw className="h-3.5 w-3.5 text-amber-400" /> Zerar Questionário
+              </button>
+              <button 
+                type="button"
+                onClick={startSession}
+                className="px-6 py-2 rounded-xl bg-primary text-white text-[10px] font-black uppercase tracking-widest shadow-elegant hover:scale-105 transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <Play className="h-3.5 w-3.5" /> Iniciar Entrevista #{leadCopilotDocs.length + 1}
               </button>
             </>
           ) : (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 flex-wrap">
                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-success/10 border border-success/30 text-success animate-pulse">
                   <div className="h-1.5 w-1.5 rounded-full bg-success" />
-                  <span className="text-[9px] font-black uppercase tracking-widest">Sessão Ativa: {currentLead?.company}</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest">Entrevista #{leadCopilotDocs.length + 1}: {currentLead?.company || currentLead?.name}</span>
                </div>
-               <button 
-                onClick={handleFinish}
-                className="px-6 py-2 rounded-xl bg-success text-white text-[10px] font-black uppercase tracking-widest shadow-lg hover:scale-105 transition-all flex items-center gap-2"
+               <button
+                type="button"
+                onClick={() => resetQuestionnaire(true)}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Limpar respostas atuais para recomeçar o questionário sem apagar entrevistas anteriores"
               >
-                <Check className="h-4 w-4" /> Finalizar e Gerar Relatório
+                <RotateCcw className="h-3.5 w-3.5 text-amber-400" /> Zerar Questionário
+              </button>
+               <button 
+                type="button"
+                onClick={handleFinish}
+                className="px-6 py-2 rounded-xl bg-success text-white text-[10px] font-black uppercase tracking-widest shadow-lg hover:scale-105 transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <Check className="h-4 w-4" /> Finalizar e Salvar no Lead
               </button>
             </div>
           )}
@@ -256,6 +376,71 @@ ${notes || 'Sem observações.'}
                       <span>{leadMinBadge.emoji}</span>
                       <span>Qualificação MIN: {leadMinBadge.label}</span>
                       <span className="text-[10px] opacity-80">({leadMinBadge.scoreText})</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Entrevistas / Formulários Salvos do Lead (Copiloto) */}
+                <div className="pt-3 border-t border-white/10 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                      <FileText className="h-4 w-4 text-emerald-400" />
+                      <span>Formulários &amp; Entrevistas Salvas no Lead ({leadCopilotDocs.length})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => resetQuestionnaire(true)}
+                      className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" /> Nova Entrevista #{leadCopilotDocs.length + 1}
+                    </button>
+                  </div>
+
+                  {leadCopilotDocs.length > 0 ? (
+                    <div className="grid md:grid-cols-2 gap-3">
+                      {leadCopilotDocs.map((doc) => {
+                        const isViewing = viewingDocId === doc.id;
+                        const answeredCount = (doc.mandatoryQuestions || []).filter((q) => q.answer?.trim()).length;
+                        return (
+                          <div
+                            key={doc.id}
+                            className={cn(
+                              "p-3.5 rounded-2xl border space-y-2 text-xs transition-all",
+                              isViewing
+                                ? "bg-emerald-500/15 border-emerald-400"
+                                : "bg-black/50 border-white/10 hover:border-white/25"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="font-bold text-white">{doc.title}</div>
+                                <div className="text-[10px] text-muted-foreground mt-0.5">
+                                  {new Date(doc.createdAt).toLocaleString("pt-BR")} · {doc.interviewer || "Copiloto"}
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-black shrink-0">
+                                {answeredCount}/{doc.mandatoryQuestions?.length || 0} resp.
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                              <span className="text-[10px] text-muted-foreground">
+                                {doc.greenFlags?.length || 0} Green · {doc.redFlags?.length || 0} Red
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => loadDocumentIntoView(doc)}
+                                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Eye className="h-3 w-3" /> Abrir Entrevista
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground italic">
+                      Nenhuma entrevista finalizada ainda. Ao finalizar uma entrevista, o formulário ficará salvo aqui e no cadastro do lead.
                     </div>
                   )}
                 </div>

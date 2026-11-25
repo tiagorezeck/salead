@@ -5,6 +5,7 @@
 // =========================================================================
 
 import { cloudStore } from "@/services/cloudStorageService";
+import { enableRoleInPipelinesList } from "@/lib/lead-rules";
 
 export interface AuthUser {
   id: string;
@@ -427,6 +428,14 @@ export async function registerNewUser(data: {
   users.push(newUser);
   saveRegisteredUsers(users);
 
+  // Habilita automaticamente o cargo cadastrado no pipeline correspondente
+  cloudStore.mutate(
+    (draft) => {
+      draft.pipelines = enableRoleInPipelinesList(draft.pipelines || [], finalRole);
+    },
+    { immediate: true }
+  );
+
   if (initialStatus === "Ativo") {
     const session: AuthSession = {
       user: newUser,
@@ -460,6 +469,14 @@ export function approveUserAccess(
   };
   users[idx] = updated;
   saveRegisteredUsers(users);
+
+  cloudStore.mutate(
+    (draft) => {
+      draft.pipelines = enableRoleInPipelinesList(draft.pipelines || [], updated.role);
+    },
+    { immediate: true }
+  );
+
   return updated;
 }
 

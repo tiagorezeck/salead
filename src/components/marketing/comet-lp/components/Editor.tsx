@@ -3578,6 +3578,66 @@ export const Editor: React.FC<EditorProps> = ({ page: initialPage, onSave, onBac
                           className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white"
                         />
                       </div>
+
+                      <div className="pt-3 border-t border-zinc-800 space-y-2.5">
+                        <label className="block text-xs font-bold text-indigo-300">
+                          Ação Pós-Formulário (Fluxo ao Enviar)
+                        </label>
+                        <select
+                          value={page.formSection.postSubmitAction || "thank_you"}
+                          onChange={(e) =>
+                            updatePage((p) => ({
+                              ...p,
+                              formSection: {
+                                ...p.formSection,
+                                postSubmitAction: e.target.value as "thank_you" | "booking_event",
+                              },
+                            }))
+                          }
+                          className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white"
+                        >
+                          <option value="thank_you">Página de Obrigado / Mensagem (Padrão)</option>
+                          <option value="booking_event">Agendar Evento (Agenda Ativa)</option>
+                        </select>
+
+                        {page.formSection.postSubmitAction === "booking_event" && (() => {
+                          const agendaEvents = cloudStore.getState().agendaEvents || [];
+                          return (
+                            <div>
+                              <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                                Evento de Destino
+                              </label>
+                              <select
+                                value={page.formSection.postSubmitEventId || ""}
+                                onChange={(e) => {
+                                  const ev = agendaEvents.find(
+                                    (item) => item.id_evento === e.target.value
+                                  );
+                                  updatePage((p) => ({
+                                    ...p,
+                                    formSection: {
+                                      ...p.formSection,
+                                      postSubmitEventId: ev?.id_evento || undefined,
+                                      postSubmitEventSlug: ev?.slug || undefined,
+                                    },
+                                  }));
+                                }}
+                                className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white"
+                              >
+                                <option value="">Portal de Eventos (/agendar)</option>
+                                {agendaEvents.map((ev) => (
+                                  <option key={ev.id_evento} value={ev.id_evento}>
+                                    {ev.nome} ({ev.status})
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="text-[10px] text-zinc-400 mt-1">
+                                Após enviar o formulário, o visitante é levado com os dados já preenchidos para escolher dia e horário.
+                              </p>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                   )}
 

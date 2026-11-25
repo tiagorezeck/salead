@@ -27,6 +27,7 @@ import {
   type SLAThresholds
 } from "@/hooks/use-data";
 import { type PipelineStage, SYSTEM_MODULES, DEFAULT_ROLE_MODULES, type SystemModule } from "@/data/mock";
+import { getEffectiveEnabledRolesForPipeline } from "@/lib/lead-rules";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -161,7 +162,7 @@ function SettingsIndexPage() {
         const res = await connectGoogleCalendar();
         setCalendarConn(res);
       } catch (e: any) {
-        console.error(e);
+        console.warn("Conexão com Google Agenda não concluída:", e?.message || e);
       } finally {
         setIsConnectingCalendar(false);
       }
@@ -869,9 +870,9 @@ function SettingsIndexPage() {
         <div className="bg-card border border-border rounded-[1.75rem] p-6 md:p-8 shadow-sm space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border">
             <div>
-              <h3 className="text-base font-bold text-foreground">Funis e Etapas Configurados</h3>
+              <h3 className="text-base font-bold text-foreground">Funis, Etapas e Cargos Habilitados</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Clique em qualquer pipeline ou em &ldquo;Gerenciar Pipelines&rdquo; para adicionar, renomear ou reordenar etapas.
+                Habilite ou desabilite quais cargos acessam cada pipeline. Ao cadastrar um novo login com um cargo, o sistema habilita o acesso automaticamente.
               </p>
             </div>
             <span className="text-xs font-mono tabular-nums text-muted-foreground">
@@ -880,31 +881,85 @@ function SettingsIndexPage() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-4">
-            {pipelines.map((pipe) => (
-              <button
-                key={pipe.id}
-                type="button"
-                onClick={() => setActiveModal("pipelines")}
-                className="text-left p-5 rounded-2xl bg-muted/25 border border-border hover:border-primary/40 hover:bg-muted/40 transition-all cursor-pointer space-y-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-display font-bold text-sm text-foreground">{pipe.name}</span>
-                  <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
-                    {pipe.stages.length} etapas
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {pipe.stages.map((st, idx) => (
-                    <span
-                      key={`${pipe.id}-${idx}`}
-                      className="text-[11px] px-2.5 py-1 rounded-lg bg-background border border-border text-muted-foreground font-medium"
+            {pipelines.map((pipe) => {
+              const enabledRoles = getEffectiveEnabledRolesForPipeline(pipe);
+              const toggleableRoles = ROLES.filter((r) => r !== "Admin Geral" && r !== "Head of Sales");
+
+              const handleToggleRole = (roleName: string) => {
+                const isEnabled = enabledRoles.includes(roleName);
+                const nextRoles = isEnabled
+                  ? enabledRoles.filter((r) => r !== roleName)
+                  : [...enabledRoles, roleName];
+                updatePipeline(pipe.id, { enabledRoles: nextRoles });
+                toast.success(
+                  isEnabled
+                    ? `Cargo "${roleName}" desabilitado em ${pipe.name}.`
+                    : `Cargo "${roleName}" habilitado em ${pipe.name}.`
+                );
+              };
+
+              return (
+                <div
+                  key={pipe.id}
+                  className="text-left p-5 rounded-2xl bg-muted/25 border border-border hover:border-primary/40 transition-all space-y-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className="font-display font-bold text-sm text-foreground block">{pipe.name}</span>
+                      <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
+                        {pipe.stages.length} etapas · Cargo principal: {pipe.functionRole || "Comercial"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal("pipelines")}
+                      className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-[11px] font-bold transition-colors cursor-pointer shrink-0"
                     >
-                      {st.name}
-                    </span>
-                  ))}
+                      Editar Etapas
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-border/70">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                      Cargos habilitados nesta pipeline ({enabledRoles.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {toggleableRoles.map((roleName) => {
+                        const isOn = enabledRoles.includes(roleName);
+                        return (
+                          <button
+                            key={roleName}
+                            type="button"
+                            onClick={() => handleToggleRole(roleName)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer",
+                              isOn
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 shadow-2xs"
+                                : "bg-background text-muted-foreground border-border opacity-60 hover:opacity-100"
+                            )}
+                            title={isOn ? `Clique para desabilitar ${roleName}` : `Clique para habilitar ${roleName}`}
+                          >
+                            {isOn ? <Check className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5 opacity-60" />}
+                            <span>{roleName}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-border/50">
+                    {pipe.stages.map((st, idx) => (
+                      <span
+                        key={`${pipe.id}-${idx}`}
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-background border border-border text-muted-foreground font-medium"
+                      >
+                        {st.name}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -1474,6 +1529,38 @@ function PipelineManagerModal({ pipelines, onAdd, onUpdate, onDelete, onClose }:
             <div className="grid sm:grid-cols-2 gap-6">
               <div className="space-y-1.5"><label className="text-[11px] uppercase tracking-widest font-bold text-muted-foreground">Nome</label><input value={active.name} onChange={e => onUpdate(active.id, { name: e.target.value })} className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm font-bold" /></div>
               <div className="space-y-1.5"><label className="text-[11px] uppercase tracking-widest font-bold text-muted-foreground">Cor Global</label><div className="flex gap-2">{PIPELINE_COLORS.map(c => (<button key={c.id} onClick={() => onUpdate(active.id, { color: c.id })} className={cn("h-8 w-8 rounded-full border-2", c.bg, active.color === c.id ? "border-foreground scale-110" : "border-transparent")} />))}</div></div>
+            </div>
+            <div className="space-y-2.5">
+              <label className="text-[11px] uppercase tracking-widest font-bold text-muted-foreground">
+                Cargos Habilitados nesta Pipeline
+              </label>
+              <div className="flex flex-wrap gap-1.5 p-3 rounded-xl bg-muted/20 border border-border">
+                {ROLES.filter((r) => r !== "Admin Geral" && r !== "Head of Sales").map((roleName) => {
+                  const enabledList = getEffectiveEnabledRolesForPipeline(active);
+                  const isOn = enabledList.includes(roleName);
+                  return (
+                    <button
+                      key={roleName}
+                      type="button"
+                      onClick={() => {
+                        const nextRoles = isOn
+                          ? enabledList.filter((r) => r !== roleName)
+                          : [...enabledList, roleName];
+                        onUpdate(active.id, { enabledRoles: nextRoles });
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer",
+                        isOn
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
+                          : "bg-background text-muted-foreground border-border opacity-60 hover:opacity-100"
+                      )}
+                    >
+                      {isOn ? <Check className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+                      <span>{roleName}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div className="space-y-3">
               <label className="text-[11px] uppercase tracking-widest font-bold text-muted-foreground">Etapas</label>
