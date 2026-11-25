@@ -49,11 +49,19 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   useEffect(() => {
-    const theme = localStorage.getItem("comet_theme");
-    if (theme === "light") {
-      document.documentElement.classList.remove("dark");
-    } else {
-      document.documentElement.classList.add("dark");
+    const path = window.location.pathname || "";
+    const isPublicAgendaRoute =
+      path === "/agendar" || path.startsWith("/agendar/") || path === "/obrigado";
+
+    if (!isPublicAgendaRoute) {
+      const theme = localStorage.getItem("comet_theme");
+      if (theme === "light") {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.style.colorScheme = "light";
+      } else {
+        document.documentElement.classList.add("dark");
+        document.documentElement.style.colorScheme = "dark";
+      }
     }
 
     purgeLegacyBusinessLocalStorage();

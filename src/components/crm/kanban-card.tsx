@@ -11,6 +11,9 @@ interface KanbanCardProps {
   lead: Lead;
   color?: string;
   stages?: string[];
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (e: React.MouseEvent | React.ChangeEvent) => void;
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: (e: React.DragEvent) => void;
@@ -24,6 +27,9 @@ export function KanbanCard({
   lead, 
   color = 'primary', 
   stages = [],
+  selectable = false,
+  selected = false,
+  onToggleSelect,
   onClick, 
   onDragStart, 
   onDragEnd, 
@@ -32,7 +38,7 @@ export function KanbanCard({
   onMoveStage,
   onTransfer
 }: KanbanCardProps) {
-  const { products } = useData();
+  const { products, agendaBookings, agendaEvents } = useData();
   const sla = SLA_CONFIG[lead.sla] || SLA_CONFIG.ok;
   const classification = CLASSIFICATION_CONFIG[lead.classification || "Lead"];
   
@@ -58,6 +64,29 @@ export function KanbanCard({
 
   const scheduledEvent = lead.metadata?.calendarEvent;
 
+  const matchedBooking = (agendaBookings || []).find(
+    (b) =>
+      b.id_lead === lead.id ||
+      (b.lead_email && lead.email && b.lead_email.toLowerCase() === lead.email.toLowerCase())
+  );
+  const matchedAgendaEvent = (agendaEvents || []).find(
+    (ev) =>
+      (lead.metadata?.eventId && ev.id_evento === lead.metadata.eventId) ||
+      (matchedBooking?.id_evento && ev.id_evento === matchedBooking.id_evento) ||
+      (lead.metadata?.eventSlug && ev.slug === lead.metadata.eventSlug) ||
+      (Array.isArray(lead.tags) && lead.tags.some((t) => String(t).toLowerCase() === ev.slug.toLowerCase()))
+  );
+  const linkedEventName =
+    lead.metadata?.eventName ||
+    matchedBooking?.evento_nome ||
+    matchedAgendaEvent?.nome ||
+    scheduledEvent?.eventName ||
+    (typeof lead.source === "string" && lead.source.startsWith("Agenda Pública:")
+      ? lead.source.replace("Agenda Pública:", "").split("(")[0].trim()
+      : typeof lead.source === "string" && lead.source.startsWith("Lista de Espera:")
+      ? lead.source.replace("Lista de Espera:", "").trim()
+      : "");
+
   const currentStageIdx = stages.indexOf(lead.stage);
   const nextStage = currentStageIdx !== -1 && currentStageIdx < stages.length - 1 ? stages[currentStageIdx + 1] : null;
 
@@ -76,7 +105,7 @@ export function KanbanCard({
       onClick={onClick}
       className={cn(
         "cursor-grab active:cursor-grabbing bg-gradient-surface border rounded-lg p-3 hover:shadow-elegant transition-all group relative overflow-hidden",
-        "border-primary/20 hover:border-primary/60",
+        selected ? "border-primary ring-2 ring-primary/30" : "border-primary/20 hover:border-primary/60",
         lead.stage === "Perdido" && "opacity-60 grayscale-[0.5]"
       )}
     >
@@ -84,11 +113,33 @@ export function KanbanCard({
 
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1.5">
+          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+            {selectable && (
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onToggleSelect?.(e);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                aria-label={`Selecionar ${lead.name}`}
+                className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+              />
+            )}
             <div className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter shadow-sm border", moment.bgColor, moment.color, "border-current/10")}>
               <MomentIcon className="h-2.5 w-2.5" />
               {moment.label}
             </div>
+            {linkedEventName && (
+              <div
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 max-w-full truncate"
+                title={`Evento: ${linkedEventName}`}
+              >
+                <CalendarIcon className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{linkedEventName}</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mb-0.5">
             <span className={`text-[8px] px-1 py-0 rounded font-black uppercase tracking-tighter ${classification.cls}`}>

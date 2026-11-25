@@ -66,8 +66,11 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [descricao, setDescricao] = useState("");
   const [tipoEvento, setTipoEvento] = useState<AgendaEventType>("ONLINE");
   const [localEvento, setLocalEvento] = useState("Reunião Online (Videochamada)");
+  const [labelLocal, setLabelLocal] = useState("");
   const [localOpcoesText, setLocalOpcoesText] = useState("");
+  const [imagemUrl, setImagemUrl] = useState("");
   const [productId, setProductId] = useState("");
+  const [exibirProdutoPublico, setExibirProdutoPublico] = useState(true);
   const [duracaoMinutos, setDuracaoMinutos] = useState(30);
   const [capacidadePadrao, setCapacidadePadrao] = useState(1);
   const [diasAntecedenciaMax, setDiasAntecedenciaMax] = useState(30);
@@ -90,8 +93,23 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [newEnd, setNewEnd] = useState("09:30");
   const [newCap, setNewCap] = useState(1);
 
+  const lastInitKeyRef = React.useRef<string>("");
+  const slotsCustomizedRef = React.useRef<boolean>(false);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      lastInitKeyRef.current = "";
+      slotsCustomizedRef.current = false;
+      return;
+    }
+
+    const initKey = eventoToEdit ? `edit:${eventoToEdit.id_evento}` : "create:new";
+    if (lastInitKeyRef.current === initKey) {
+      return;
+    }
+    lastInitKeyRef.current = initKey;
+    slotsCustomizedRef.current = Boolean(eventoToEdit);
+
     setActiveTab("geral");
     if (eventoToEdit) {
       setEventId(eventoToEdit.id_evento);
@@ -101,8 +119,11 @@ export const EventModal: React.FC<EventModalProps> = ({
       setDescricao(eventoToEdit.descricao || "");
       setTipoEvento(eventoToEdit.tipo_evento || "ONLINE");
       setLocalEvento(eventoToEdit.local_evento || "");
+      setLabelLocal(eventoToEdit.label_local || "");
       setLocalOpcoesText((eventoToEdit.local_opcoes || []).join("\n"));
+      setImagemUrl(eventoToEdit.imagem_url || "");
       setProductId(eventoToEdit.product_id || "");
+      setExibirProdutoPublico(eventoToEdit.exibir_produto_publico !== false);
       setDuracaoMinutos(Number(eventoToEdit.duracao_minutos || 30));
       setCapacidadePadrao(Number(eventoToEdit.capacidade_padrao || 1));
       setDiasAntecedenciaMax(Number(eventoToEdit.dias_antecedencia_max || 30));
@@ -127,6 +148,7 @@ export const EventModal: React.FC<EventModalProps> = ({
       setNewEnd(calcEndTime("09:00", Number(eventoToEdit.duracao_minutos || 30)));
     } else {
       const freshId = `EVT-${generateRandomCode(5)}`;
+      const defaultDays = ["SEG", "TER", "QUA", "QUI", "SEX"];
       setEventId(freshId);
       setNome("");
       setSlug("");
@@ -134,12 +156,15 @@ export const EventModal: React.FC<EventModalProps> = ({
       setDescricao("");
       setTipoEvento("ONLINE");
       setLocalEvento("Reunião Online (Google Meet / WhatsApp)");
+      setLabelLocal("");
       setLocalOpcoesText("");
+      setImagemUrl("");
       setProductId("");
+      setExibirProdutoPublico(true);
       setDuracaoMinutos(30);
       setCapacidadePadrao(1);
       setDiasAntecedenciaMax(30);
-      setDiasSemana(["SEG", "TER", "QUA", "QUI", "SEX"]);
+      setDiasSemana(defaultDays);
       setStatus("PUBLICADO");
       setAgendaPublicaAtiva(true);
       setPermitirListaEspera(true);
@@ -150,10 +175,10 @@ export const EventModal: React.FC<EventModalProps> = ({
       );
       setMensagemIndisponivel("");
       setSchedules([
-        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "09:00", hora_fim: "09:30", capacidade: 1, dias_aplicaveis: ["SEG", "TER", "QUA", "QUI", "SEX"], ativo: true },
-        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "10:00", hora_fim: "10:30", capacidade: 1, dias_aplicaveis: ["SEG", "TER", "QUA", "QUI", "SEX"], ativo: true },
-        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "14:00", hora_fim: "14:30", capacidade: 1, dias_aplicaveis: ["SEG", "TER", "QUA", "QUI", "SEX"], ativo: true },
-        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "16:00", hora_fim: "16:30", capacidade: 1, dias_aplicaveis: ["SEG", "TER", "QUA", "QUI", "SEX"], ativo: true },
+        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "09:00", hora_fim: "09:30", capacidade: 1, dias_aplicaveis: defaultDays, ativo: true },
+        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "10:00", hora_fim: "10:30", capacidade: 1, dias_aplicaveis: defaultDays, ativo: true },
+        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "14:00", hora_fim: "14:30", capacidade: 1, dias_aplicaveis: defaultDays, ativo: true },
+        { id_horario: `SCH-${generateRandomCode(5)}`, id_evento: freshId, hora_inicio: "16:00", hora_fim: "16:30", capacidade: 1, dias_aplicaveis: defaultDays, ativo: true },
       ]);
       setFields([]);
       setNewStart("09:00");
@@ -165,9 +190,19 @@ export const EventModal: React.FC<EventModalProps> = ({
   if (!isOpen) return null;
 
   const toggleWeekday = (dayId: string) => {
-    setDiasSemana((prev) =>
-      prev.includes(dayId) ? prev.filter((d) => d !== dayId) : [...prev, dayId]
-    );
+    setDiasSemana((prev) => {
+      const nextDays = prev.includes(dayId)
+        ? prev.filter((d) => d !== dayId)
+        : [...prev, dayId];
+      // Mantém os horários da grade sincronizados com os dias da semana selecionados
+      setSchedules((cur) =>
+        cur.map((s) => ({
+          ...s,
+          dias_aplicaveis: nextDays.length > 0 ? nextDays : s.dias_aplicaveis,
+        }))
+      );
+      return nextDays;
+    });
   };
 
   const handleAddSlot = () => {
@@ -179,6 +214,7 @@ export const EventModal: React.FC<EventModalProps> = ({
       toast.error("Já existe um horário começando às " + newStart);
       return;
     }
+    slotsCustomizedRef.current = true;
     setSchedules((prev) =>
       [
         ...prev,
@@ -245,7 +281,10 @@ export const EventModal: React.FC<EventModalProps> = ({
       capacidade_padrao: Math.max(1, Number(capacidadePadrao) || 1),
       dias_semana: diasSemana,
       dias_antecedencia_max: Math.max(1, Number(diasAntecedenciaMax) || 30),
+      imagem_url: imagemUrl.trim() || undefined,
       product_id: productId || undefined,
+      exibir_produto_publico: exibirProdutoPublico,
+      label_local: labelLocal.trim() || undefined,
       local_opcoes: localOpcoes.length > 0 ? localOpcoes : undefined,
       status,
       agenda_publica_ativa: agendaPublicaAtiva,
@@ -259,14 +298,15 @@ export const EventModal: React.FC<EventModalProps> = ({
       atualizado_em: nowIso,
     };
 
-    const syncedSchedules = schedules.map((s) => ({
-      ...s,
-      id_evento: eventId,
-      dias_aplicaveis:
-        Array.isArray(s.dias_aplicaveis) && s.dias_aplicaveis.length > 0
-          ? s.dias_aplicaveis
-          : diasSemana,
-    }));
+    const syncedSchedules = schedules.map((s) => {
+      const existingDays = Array.isArray(s.dias_aplicaveis) ? s.dias_aplicaveis : [];
+      const intersected = existingDays.filter((d) => diasSemana.includes(d));
+      return {
+        ...s,
+        id_evento: eventId,
+        dias_aplicaveis: intersected.length > 0 ? intersected : diasSemana,
+      };
+    });
 
     setSaving(true);
     try {
@@ -465,6 +505,14 @@ export const EventModal: React.FC<EventModalProps> = ({
                         const val = Number(e.target.value) || 30;
                         setDuracaoMinutos(val);
                         setNewEnd(calcEndTime(newStart, val));
+                        if (!slotsCustomizedRef.current) {
+                          setSchedules((prev) =>
+                            prev.map((s) => ({
+                              ...s,
+                              hora_fim: calcEndTime(s.hora_inicio, val),
+                            }))
+                          );
+                        }
                       }}
                       className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono tabular-nums"
                     />
@@ -480,17 +528,25 @@ export const EventModal: React.FC<EventModalProps> = ({
                       max={500}
                       value={capacidadePadrao}
                       onChange={(e) => {
-                        const val = Number(e.target.value) || 1;
+                        const val = Math.max(1, Number(e.target.value) || 1);
                         setCapacidadePadrao(val);
                         setNewCap(val);
+                        if (!slotsCustomizedRef.current) {
+                          setSchedules((prev) =>
+                            prev.map((s) => ({ ...s, capacidade: val }))
+                          );
+                        }
                       }}
                       className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono tabular-nums"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold uppercase text-muted-foreground">
-                      Janela (dias)
+                    <label
+                      className="text-[11px] font-bold uppercase text-muted-foreground"
+                      title="Quantos dias futuros à frente ficam visíveis para agendamento (ex: 30 dias)"
+                    >
+                      Dias Futuros Abertos
                     </label>
                     <input
                       type="number"
@@ -549,6 +605,33 @@ export const EventModal: React.FC<EventModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                      Rótulo do Campo Local (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={labelLocal}
+                      onChange={(e) => setLabelLocal(e.target.value)}
+                      placeholder="Ex: Bairro / Escola / Empresa / Local"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                      URL da Imagem / Capa do Evento (opcional)
+                    </label>
+                    <input
+                      type="url"
+                      value={imagemUrl}
+                      onChange={(e) => setImagemUrl(e.target.value)}
+                      placeholder="https://..."
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold uppercase text-muted-foreground">
                       Opções de Local para o Visitante (opcional, 1 por linha)
                     </label>
                     <textarea
@@ -571,6 +654,20 @@ export const EventModal: React.FC<EventModalProps> = ({
                     />
                   </div>
                 </div>
+
+                {productId && (
+                  <label className="flex items-center gap-2 rounded-lg border border-border p-3 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exibirProdutoPublico}
+                      onChange={(e) => setExibirProdutoPublico(e.target.checked)}
+                      className="h-4 w-4 rounded border-border"
+                    />
+                    <span className="font-medium">
+                      Exibir produto vinculado e valor na página pública de agendamento
+                    </span>
+                  </label>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                   <label className="flex items-center gap-2 rounded-lg border border-border p-3 text-xs cursor-pointer">
@@ -712,15 +809,16 @@ export const EventModal: React.FC<EventModalProps> = ({
                               type="time"
                               aria-label="Hora de início"
                               value={slot.hora_inicio}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                slotsCustomizedRef.current = true;
                                 setSchedules((prev) =>
                                   prev.map((s) =>
                                     s.id_horario === slot.id_horario
                                       ? { ...s, hora_inicio: e.target.value }
                                       : s
                                   )
-                                )
-                              }
+                                );
+                              }}
                               className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-mono font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25"
                             />
                             <span className="text-xs text-muted-foreground font-semibold">—</span>
@@ -728,15 +826,16 @@ export const EventModal: React.FC<EventModalProps> = ({
                               type="time"
                               aria-label="Hora de término"
                               value={slot.hora_fim}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                slotsCustomizedRef.current = true;
                                 setSchedules((prev) =>
                                   prev.map((s) =>
                                     s.id_horario === slot.id_horario
                                       ? { ...s, hora_fim: e.target.value }
                                       : s
                                   )
-                                )
-                              }
+                                );
+                              }}
                               className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-mono font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25"
                             />
                           </div>
@@ -749,6 +848,7 @@ export const EventModal: React.FC<EventModalProps> = ({
                               aria-label="Quantidade de vagas"
                               value={slot.capacidade}
                               onChange={(e) => {
+                                slotsCustomizedRef.current = true;
                                 const parsed = Math.max(1, Number(e.target.value) || 1);
                                 setSchedules((prev) =>
                                   prev.map((s) =>

@@ -16,6 +16,8 @@ import {
 } from "@/data/mock";
 import { DEFAULT_LEAD_ROUTING_CONFIG, type LeadRoutingConfig } from "@/lib/lead-rules";
 import { SURVEY_PRESETS } from "@/lib/survey-templates";
+import { createStarterAgendaSeed } from "@/lib/agenda-seed";
+import { normalizeWeekdayList } from "@/lib/agenda-engine";
 import {
   getDriveConfig,
   initializeSharedDriveConfig,
@@ -205,6 +207,8 @@ const LEGACY_BUSINESS_PREFIXES = [
 
 const PRESERVED_SESSION_UI_KEYS = new Set([
   "comet_theme",
+  "agenda_public_theme",
+  "salead_agenda_cleared_by_user",
   "sidebar_pinned",
   "comet_local_session",
   "comet_user_email",
@@ -238,6 +242,7 @@ export function purgeLegacyBusinessLocalStorage(): void {
 }
 
 function createInitialCloudDatabase(): CloudDatabase {
+  const agendaSeed = createStarterAgendaSeed();
   return {
     leads: [],
     leads_landing_pages: [],
@@ -274,11 +279,11 @@ function createInitialCloudDatabase(): CloudDatabase {
     lpAnalytics: {},
     automationLogs: [],
     brandIdentity: null,
-    agendaEvents: [],
-    agendaSchedules: [],
+    agendaEvents: agendaSeed.events,
+    agendaSchedules: agendaSeed.schedules,
     agendaBlocks: [],
     agendaBookings: [],
-    agendaFormFields: [],
+    agendaFormFields: agendaSeed.fields,
     agendaFormResponses: [],
     agendaWaitlist: [],
     agendaCustomItems: [],
@@ -666,11 +671,162 @@ class CloudStorageService {
       versao: payload.versao || "3.0-CloudEngine",
     };
 
+    const clearedByUser =
+      typeof window !== "undefined" &&
+      Boolean(window.localStorage.getItem("salead_agenda_cleared_by_user"));
+    if (
+      !clearedByUser &&
+      this.db.agendaEvents.length === 0 &&
+      this.db.agendaBookings.length === 0
+    ) {
+      const seed = createStarterAgendaSeed();
+      this.db.agendaEvents = seed.events;
+      this.db.agendaSchedules = seed.schedules;
+      this.db.agendaFormFields = seed.fields;
+    }
+
+    // Auto-correção de horários legados cujos dias_aplicaveis ficaram desconectados de dias_semana do evento
+    if (Array.isArray(this.db.agendaSchedules) && this.db.agendaSchedules.length > 0) {
+      const eventMap = new Map<string, any>();
+      for (const ev of this.db.agendaEvents || []) {
+        if (ev?.id_evento) eventMap.set(ev.id_evento, ev);
+      }
+      this.db.agendaSchedules = this.db.agendaSchedules.map((sch: any) => {
+        if (!sch || !sch.id_evento) return sch;
+        const parent = eventMap.get(sch.id_evento);
+        if (!parent) return sch;
+        const evDays = normalizeWeekdayList(parent.dias_semana);
+        if (evDays.length === 0) return sch;
+        const schDays = normalizeWeekdayList(sch.dias_aplicaveis);
+        if (schDays.length === 0 || !schDays.some((d) => evDays.includes(d))) {
+          return { ...sch, dias_aplicaveis: evDays };
+        }
+        return sch;
+      });
+    }
+
     saveLocalDatabaseRoot(this.db);
+    if (Array.isArray(payload.agendaEvents) && !this.status.pendingWrite) {
+      this.syncAgendaToServer().catch(() => {});
+    }
   }
 
-  async bootstrap(): Promise<CloudDatabase> {
-    if (this.bootstrapPromise) return this.bootstrapPromise;
+  async syncAgendaToServer(): Promise<void> {
+    if (typeof window === "undefined") return;
+    try {
+      await fetch("/api/agenda/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agendaEvents: this.db.agendaEvents || [],
+          agendaSchedules: this.db.agendaSchedules || [],
+          agendaBlocks: this.db.agendaBlocks || [],
+          agendaBookings: this.db.agendaBookings || [],
+          agendaFormFields: this.db.agendaFormFields || [],
+          agendaFormResponses: this.db.agendaFormResponses || [],
+          agendaWaitlist: this.db.agendaWaitlist || [],
+          agendaCustomItems: this.db.agendaCustomItems || [],
+          company: this.db.company,
+          products: this.db.products,
+        }),
+      });
+    } catch {}
+  }
+
+  async fetchPublicAgendaFromServer(slug?: string): Promise<any | null> {
+    if (typeof window === "undefined") return null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      const endpoint = slug
+        ? `/api/public/agenda/${encodeURIComponent(slug)}?t=${Date.now()}`
+        : `/api/public/agenda?t=${Date.now()}`;
+      const res = await fetch(endpoint, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      const json = await res.json();
+      if (!json || typeof json !== "object") return null;
+      const eventsList = Array.isArray(json.agendaEvents) ? json.agendaEvents : [];
+      if (eventsList.length > 0 && !this.status.pendingWrite && !this.isPushing) {
+        const healedSchedules = (Array.isArray(json.agendaSchedules) ? json.agendaSchedules : []).map((sch: any) => {
+          const parent = eventsList.find((e: any) => e?.id_evento === sch?.id_evento);
+          if (!parent) return sch;
+          const evDays = normalizeWeekdayList(parent.dias_semana);
+          if (evDays.length === 0) return sch;
+          const schDays = normalizeWeekdayList(sch?.dias_aplicaveis);
+          if (schDays.length === 0 || !schDays.some((d) => evDays.includes(d))) {
+            return { ...sch, dias_aplicaveis: evDays };
+          }
+          return sch;
+        });
+
+        // Mescla eventos e metadados do cache rápido sem sobrescrever estado mais novo do Drive já carregado
+        const existingEvents = Array.isArray(this.db.agendaEvents) ? this.db.agendaEvents : [];
+        const mergedEventsMap = new Map<string, any>();
+        for (const ev of this.status.loadedFromCloud ? existingEvents : []) {
+          if (ev?.id_evento) mergedEventsMap.set(ev.id_evento, ev);
+        }
+        for (const ev of eventsList) {
+          if (!ev?.id_evento) continue;
+          const prev = mergedEventsMap.get(ev.id_evento);
+          const prevTs = prev?.atualizado_em ? new Date(prev.atualizado_em).getTime() : 0;
+          const nextTs = ev?.atualizado_em ? new Date(ev.atualizado_em).getTime() : 0;
+          if (!prev || nextTs >= prevTs) {
+            mergedEventsMap.set(ev.id_evento, ev);
+          }
+        }
+        const mergedEvents = Array.from(mergedEventsMap.values());
+
+        this.db = {
+          ...this.db,
+          agendaEvents: mergedEvents.length > 0 ? mergedEvents : this.db.agendaEvents,
+          agendaSchedules:
+            healedSchedules.length > 0 || !this.status.loadedFromCloud
+              ? healedSchedules
+              : this.db.agendaSchedules,
+          agendaBlocks:
+            Array.isArray(json.agendaBlocks) && (!this.status.loadedFromCloud || json.agendaBlocks.length > 0)
+              ? json.agendaBlocks
+              : this.db.agendaBlocks,
+          agendaBookings:
+            Array.isArray(json.agendaBookings) && (!this.status.loadedFromCloud || json.agendaBookings.length > 0)
+              ? json.agendaBookings
+              : this.db.agendaBookings,
+          agendaFormFields:
+            Array.isArray(json.agendaFormFields) && (!this.status.loadedFromCloud || json.agendaFormFields.length > 0)
+              ? json.agendaFormFields
+              : this.db.agendaFormFields,
+          agendaFormResponses:
+            Array.isArray(json.agendaFormResponses) && (!this.status.loadedFromCloud || json.agendaFormResponses.length > 0)
+              ? json.agendaFormResponses
+              : this.db.agendaFormResponses,
+          agendaWaitlist:
+            Array.isArray(json.agendaWaitlist) && (!this.status.loadedFromCloud || json.agendaWaitlist.length > 0)
+              ? json.agendaWaitlist
+              : this.db.agendaWaitlist,
+          agendaCustomItems:
+            Array.isArray(json.agendaCustomItems) && (!this.status.loadedFromCloud || json.agendaCustomItems.length > 0)
+              ? json.agendaCustomItems
+              : this.db.agendaCustomItems,
+          company: json.company || this.db.company,
+          products:
+            Array.isArray(json.products) && json.products.length > 0
+              ? json.products
+              : this.db.products,
+        };
+        this.emit(false);
+      }
+      return json;
+    } catch {
+      return null;
+    }
+  }
+
+  async bootstrap(forceNoCache = false): Promise<CloudDatabase> {
+    if (this.bootstrapPromise && !forceNoCache) return this.bootstrapPromise;
 
     this.bootstrapPromise = (async () => {
       purgeLegacyBusinessLocalStorage();
@@ -679,6 +835,8 @@ class CloudStorageService {
       this.emit(false);
 
       try {
+        // Aquecimento instantâneo via servidor Node para páginas públicas (/agendar/:slug)
+        const serverWarmPromise = this.fetchPublicAgendaFromServer().catch(() => null);
         const cfg = await initializeSharedDriveConfig();
         const url = cfg.webappUrl || getGlobalGasConfig().WEBAPP_URL;
         this.status.webappUrl = url;
@@ -686,8 +844,13 @@ class CloudStorageService {
         this.status.spreadsheetUrl = cfg.spreadsheetUrl;
         this.status.spreadsheetName = cfg.spreadsheetName;
 
+        const [, remoteInitial] = await Promise.all([
+          serverWarmPromise,
+          url ? fetchFromGoogleDrive<any>(url, forceNoCache).catch(() => null) : Promise.resolve(null),
+        ]);
+
         if (url) {
-          let remote = await fetchFromGoogleDrive<any>(url);
+          let remote = remoteInitial;
           if (!remote) {
             remote = await forceReadSpreadsheetFromDrive<any>(url);
           }
@@ -715,13 +878,14 @@ class CloudStorageService {
     }
   }
 
-  async pullNow(forceReadSheets = false): Promise<CloudDatabase | null> {
+  async pullNow(forceReadSheets = false, nocache = false): Promise<CloudDatabase | null> {
     if (typeof window === "undefined") return this.db;
     if (this.isPulling || this.isPushing || this.status.pendingWrite) {
       return null;
     }
     if (
       !forceReadSheets &&
+      !nocache &&
       this.status.lastPushTimestamp &&
       Date.now() - this.status.lastPushTimestamp < 3000
     ) {
@@ -738,7 +902,7 @@ class CloudStorageService {
 
       const remote = forceReadSheets
         ? await forceReadSpreadsheetFromDrive<any>(url)
-        : await fetchFromGoogleDrive<any>(url);
+        : await fetchFromGoogleDrive<any>(url, nocache);
 
       if (remote && typeof remote === "object") {
         // Re-check dirty flag before overwriting RAM
@@ -898,7 +1062,10 @@ class CloudStorageService {
     }
 
     this.emit(true);
-    const synced = await this.pushNow();
+    const [synced] = await Promise.all([
+      this.pushNow(),
+      this.syncAgendaToServer().catch(() => {}),
+    ]);
     return {
       db: this.db,
       synced,

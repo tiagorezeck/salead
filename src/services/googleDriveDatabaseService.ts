@@ -1199,16 +1199,29 @@ export const downloadJsonBackup = (
 // =========================================================================
 
 export const submitLpLeadToDrive = async (leadData: {
+  id?: string;
   landingPageId?: string;
   landingPageTitle?: string;
+  pageId?: string;
+  pageTitle?: string;
   name: string;
   email?: string;
   whatsapp?: string;
   company?: string;
   source?: string;
+  pipelineId?: string;
+  stage?: string;
+  owner?: string;
+  temperature?: string;
+  classification?: string;
+  value?: number;
+  tags?: string[];
   utm?: any;
+  utms?: any;
   answers?: any;
+  quizAnswers?: any;
   customFields?: any;
+  submittedAt?: string;
   isTest?: boolean;
 }): Promise<any> => {
   let config = getDriveConfig();

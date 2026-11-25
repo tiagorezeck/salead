@@ -19,6 +19,7 @@ import {
   resolveLeadRoutingAssignment,
   type LeadRoutingConfig,
 } from "@/lib/lead-rules";
+import { DEFAULT_PIPELINES } from "@/data/mock";
 
 const DAY_KEYS = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"] as const;
 
@@ -142,6 +143,40 @@ export function buildGoogleCalendarTemplateLink(params: {
   return `https://calendar.google.com/calendar/render?${qs.toString()}`;
 }
 
+export function normalizeWeekdayList(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((d) => String(d || "").trim().toUpperCase())
+      .filter(Boolean);
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((d) => String(d || "").trim().toUpperCase())
+            .filter(Boolean);
+        }
+      } catch {}
+    }
+    return trimmed
+      .split(",")
+      .map((d) => d.trim().toUpperCase())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function getLocalTodayIso(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function getWeekdayKey(isoDate: string): string {
   const [y, m, d] = isoDate.split("-").map(Number);
   if (!y || !m || !d) return "SEG";
@@ -178,19 +213,27 @@ export function getEventSlotsForDate(
   if (!evento) return [];
 
   const weekday = getWeekdayKey(isoDate);
-  if (Array.isArray(evento.dias_semana) && evento.dias_semana.length > 0 && !evento.dias_semana.includes(weekday)) {
+  const eventDays = normalizeWeekdayList(evento.dias_semana);
+  if (eventDays.length > 0 && !eventDays.includes(weekday)) {
     return [];
   }
 
   const eventSchedules = schedules
     .filter((s) => {
       if (s.id_evento !== idEvento || s.ativo === false) return false;
-      if (Array.isArray(s.dias_aplicaveis) && s.dias_aplicaveis.length > 0) {
-        return s.dias_aplicaveis.includes(weekday);
+      const slotDays = normalizeWeekdayList(s.dias_aplicaveis);
+      if (slotDays.length > 0) {
+        // Se dias_aplicaveis não possui nenhuma interseção com dias_semana do evento
+        // (bug legado quando o usuário alterou dias da semana após abrir o modal),
+        // herda automaticamente os dias_semana do evento.
+        if (eventDays.length > 0 && !slotDays.some((d) => eventDays.includes(d))) {
+          return true;
+        }
+        return slotDays.includes(weekday);
       }
       return true;
     })
-    .sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
+    .sort((a, b) => String(a.hora_inicio || "").localeCompare(String(b.hora_inicio || "")));
 
   const dayAllBlock = blocks.find(
     (b) =>
@@ -200,7 +243,7 @@ export function getEventSlotsForDate(
   );
 
   const now = new Date();
-  const todayIso = now.toISOString().slice(0, 10);
+  const todayIso = getLocalTodayIso(now);
 
   return eventSchedules.map((slot) => {
     const slotBlock =
@@ -227,7 +270,7 @@ export function getEventSlotsForDate(
     if (isoDate < todayIso) {
       isPastSlot = true;
     } else if (isoDate === todayIso) {
-      const [sh, sm] = slot.hora_inicio.split(":").map(Number);
+      const [sh, sm] = String(slot.hora_inicio || "00:00").split(":").map(Number);
       const slotMinutes = (sh || 0) * 60 + (sm || 0);
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       if (slotMinutes <= currentMinutes + 15) {
@@ -262,34 +305,44 @@ export function getEventUpcomingDates(
   },
   evento: AgendaEvent
 ): Array<{ dataIso: string; diaSemana: string; rotulo: string; vagasDia: number }> {
-  const maxDays = Math.min(Math.max(Number(evento.dias_antecedencia_max || 30), 1), 120);
-  const out: Array<{ dataIso: string; diaSemana: string; rotulo: string; vagasDia: number }> = [];
+  const rawMaxDays = Math.min(Math.max(Number(evento.dias_antecedencia_max || 30), 1), 120);
+  const eventDays = normalizeWeekdayList(evento.dias_semana);
   const base = new Date();
-
   const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
-  for (let i = 0; i < maxDays; i++) {
-    const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
-    const yyyy = dt.getFullYear();
-    const mm = String(dt.getMonth() + 1).padStart(2, "0");
-    const dd = String(dt.getDate()).padStart(2, "0");
-    const dataIso = `${yyyy}-${mm}-${dd}`;
-    const weekday = DAY_KEYS[dt.getDay()];
+  const scanDates = (daysLimit: number) => {
+    const out: Array<{ dataIso: string; diaSemana: string; rotulo: string; vagasDia: number }> = [];
+    for (let i = 0; i < daysLimit; i++) {
+      const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
+      const yyyy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, "0");
+      const dd = String(dt.getDate()).padStart(2, "0");
+      const dataIso = `${yyyy}-${mm}-${dd}`;
+      const weekday = DAY_KEYS[dt.getDay()];
 
-    if (Array.isArray(evento.dias_semana) && evento.dias_semana.length > 0 && !evento.dias_semana.includes(weekday)) {
-      continue;
+      if (eventDays.length > 0 && !eventDays.includes(weekday)) {
+        continue;
+      }
+
+      const slots = getEventSlotsForDate(db, evento.id_evento, dataIso);
+      if (slots.length === 0) continue;
+
+      const vagasDia = slots.reduce((sum, s) => sum + (s.disponivel ? s.vagas_restantes : 0), 0);
+      out.push({
+        dataIso,
+        diaSemana: weekday,
+        rotulo: `${dd} ${monthNames[dt.getMonth()]}`,
+        vagasDia,
+      });
     }
+    return out;
+  };
 
-    const slots = getEventSlotsForDate(db, evento.id_evento, dataIso);
-    if (slots.length === 0) continue;
-
-    const vagasDia = slots.reduce((sum, s) => sum + (s.disponivel ? s.vagas_restantes : 0), 0);
-    out.push({
-      dataIso,
-      diaSemana: weekday,
-      rotulo: `${dd} ${monthNames[dt.getMonth()]}`,
-      vagasDia,
-    });
+  let out = scanDates(rawMaxDays);
+  // Se janela curta (< 7 dias, ex: usuário configurou 1 dia para um evento de sábado) não alcança o próximo dia da semana escolhido,
+  // garante alcance mínimo de 7 dias para exibir pelo menos a próxima ocorrência válida.
+  if (out.length === 0 && rawMaxDays < 7) {
+    out = scanDates(7);
   }
 
   return out;
@@ -334,10 +387,11 @@ export function getEventAvailabilitySummary(
   const firstOpen = dates.find((d) => d.vagasDia > 0);
 
   if (!firstOpen || vagasTotais <= 0) {
+    const reason: AgendaUnavailableReason = dates.length > 0 ? "LOTADO" : "AGENDA_FECHADA";
     return {
       disponivel: false,
-      motivo: "LOTADO",
-      mensagem: evento.mensagem_indisponivel || getDefaultUnavailableMessage("LOTADO"),
+      motivo: reason,
+      mensagem: evento.mensagem_indisponivel || getDefaultUnavailableMessage(reason),
       vagasTotais: 0,
     };
   }
@@ -358,13 +412,54 @@ function resolveBookingLeadOwnerAndPipeline(draft: any): {
   nextRoutingIndex?: number;
   nextRoleCursors?: Record<string, number>;
 } {
-  const pipelines: any[] = Array.isArray(draft.pipelines) ? draft.pipelines : [];
+  const rawPipelines: any[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0
+    ? draft.pipelines
+    : DEFAULT_PIPELINES;
+  const pipelines: any[] = DEFAULT_PIPELINES.map((def) => {
+    const found = rawPipelines.find((p: any) => p.id === def.id);
+    return found ? { ...def, ...found } : { ...def };
+  });
+  rawPipelines.forEach((p: any) => {
+    if (p?.id && !pipelines.some((m) => m.id === p.id)) pipelines.push(p);
+  });
+
   const users: any[] = Array.isArray(draft.users) ? draft.users : [];
   const leads: any[] = Array.isArray(draft.leads) ? draft.leads : [];
-  const routing: LeadRoutingConfig = draft.leadRoutingConfig || DEFAULT_LEAD_ROUTING_CONFIG;
+  const rawRouting: LeadRoutingConfig = draft.leadRoutingConfig || DEFAULT_LEAD_ROUTING_CONFIG;
+
+  // Para agendamentos de eventos públicos (reunião marcada), o destino comercial natural é SDR
+  // caso a regra global esteja apontada para LDR/BDR/prospecção fria ou vazia.
+  const sdrPipe =
+    pipelines.find((p) => p.id === "sdr") ||
+    pipelines.find((p) => String(p.functionRole || "").toUpperCase() === "SDR");
+  const isColdOrUnsetTarget =
+    rawRouting.targetRole === "LDR" ||
+    rawRouting.targetRole === "BDR" ||
+    rawRouting.targetRole === "Qualquer" ||
+    !rawRouting.targetRole ||
+    rawRouting.targetPipelineId === "prospection";
+
+  const bookingRouting: LeadRoutingConfig =
+    rawRouting.routingMode === "temperature_rules"
+      ? rawRouting
+      : isColdOrUnsetTarget
+      ? {
+          ...rawRouting,
+          routingMode: "single_role",
+          targetRole: "SDR",
+          targetPipelineId: sdrPipe?.id || "sdr",
+          targetStage:
+            sdrPipe?.stages?.find((s: any) => {
+              const nm = String(s?.name || "").toLowerCase();
+              return nm.includes("reuni") || nm.includes("agend");
+            })?.name ||
+            sdrPipe?.stages?.[0]?.name ||
+            "Agendamento de Reunião",
+        }
+      : rawRouting;
 
   const resolved = resolveLeadRoutingAssignment({
-    config: routing,
+    config: bookingRouting,
     leadData: { temperature: "Quente" },
     pipelines,
     users,
@@ -373,6 +468,7 @@ function resolveBookingLeadOwnerAndPipeline(draft: any): {
 
   const targetPipeline =
     pipelines.find((p) => p.id === resolved.targetPipelineId) ||
+    sdrPipe ||
     pipelines.find((p) => p.active !== false) ||
     pipelines[0];
 
@@ -383,7 +479,7 @@ function resolveBookingLeadOwnerAndPipeline(draft: any): {
     return name.includes("reuni") || name.includes("agend");
   });
 
-  const stage = meetingStage?.name || resolved.targetStage || stages[0]?.name || "Reunião";
+  const stage = meetingStage?.name || resolved.targetStage || stages[0]?.name || "Agendamento de Reunião";
 
   return {
     pipelineId,
@@ -505,9 +601,21 @@ export function applyPublicBookingToDraft(
   if (existingLeadIdx >= 0) {
     const prevLead = leads[existingLeadIdx];
     leadId = prevLead.id;
-    ownerName = prevLead.owner && prevLead.owner !== "Sem dono" && prevLead.owner !== "Sem responsável"
-      ? prevLead.owner
-      : routingResolved.owner;
+    const prevOwnerClean = String(prevLead.owner || "").trim();
+    const isGenericOwner =
+      !prevOwnerClean ||
+      prevOwnerClean === "Sem dono" ||
+      prevOwnerClean === "Sem responsável" ||
+      prevOwnerClean === "Inbound LP" ||
+      prevOwnerClean === "Não atribuído";
+    const isMovingFromProspection = !prevLead.pipelineId || prevLead.pipelineId === "prospection";
+
+    ownerName =
+      !isGenericOwner && !isMovingFromProspection
+        ? prevLead.owner
+        : routingResolved.owner && routingResolved.owner !== "Sem responsável"
+        ? routingResolved.owner
+        : prevOwnerClean || routingResolved.owner;
 
     const meetingRecord = {
       googleEventId: protocolo,
@@ -529,6 +637,9 @@ export function applyPublicBookingToDraft(
       status: "confirmed" as const,
       protocolo,
       bookingId: idAgendamento,
+      eventId: evento.id_evento,
+      eventName: evento.nome,
+      eventSlug: evento.slug,
     };
 
     const newActivity = {
@@ -553,6 +664,7 @@ export function applyPublicBookingToDraft(
       whatsapp: payload.whatsapp.trim() || prevLead.whatsapp,
       email: normEmail || prevLead.email,
       company: payload.empresa?.trim() || prevLead.company,
+      pipelineId: isWon ? prevLead.pipelineId : routingResolved.pipelineId,
       stage: isWon ? prevLead.stage : routingResolved.stage,
       owner: ownerName,
       temperature: "Quente",
@@ -565,6 +677,9 @@ export function applyPublicBookingToDraft(
         ...(prevLead.metadata || {}),
         calendarEvent: meetingRecord,
         lastBookingProtocol: protocolo,
+        eventId: evento.id_evento,
+        eventName: evento.nome,
+        eventSlug: evento.slug,
       },
     };
   } else {
@@ -637,6 +752,9 @@ export function applyPublicBookingToDraft(
       metadata: {
         calendarEvent: meetingRecord,
         lastBookingProtocol: protocolo,
+        eventId: evento.id_evento,
+        eventName: evento.nome,
+        eventSlug: evento.slug,
         utms: payload.utms || {},
         local: payload.local || "",
         customAnswers: payload.respostas_customizadas || {},
@@ -761,13 +879,30 @@ export function applyWaitlistToDraft(
   let ownerName = routingResolved.owner;
 
   if (existingIdx >= 0) {
-    leadId = leads[existingIdx].id;
-    ownerName = leads[existingIdx].owner || ownerName;
-    const prevTags = Array.isArray(leads[existingIdx].tags) ? leads[existingIdx].tags : [];
+    const prevLead = leads[existingIdx];
+    leadId = prevLead.id;
+    const prevOwnerClean = String(prevLead.owner || "").trim();
+    const isGenericOwner =
+      !prevOwnerClean ||
+      prevOwnerClean === "Sem dono" ||
+      prevOwnerClean === "Sem responsável" ||
+      prevOwnerClean === "Inbound LP";
+    ownerName = isGenericOwner ? ownerName : prevLead.owner;
+    const prevTags = Array.isArray(prevLead.tags) ? prevLead.tags : [];
+    const isWon = prevLead.stage === "Ganho" || prevLead.stage === "Recebimento";
     leads[existingIdx] = {
-      ...leads[existingIdx],
+      ...prevLead,
+      pipelineId: isWon ? prevLead.pipelineId : (prevLead.pipelineId || routingResolved.pipelineId),
+      stage: isWon ? prevLead.stage : (prevLead.pipelineId === "prospection" || !prevLead.pipelineId ? routingResolved.stage : prevLead.stage),
+      owner: ownerName,
       tags: Array.from(new Set([...prevTags, "lista-espera", evento.slug])),
       lastInteraction: `Entrou na lista de espera de ${evento.nome}`,
+      metadata: {
+        ...(prevLead.metadata || {}),
+        eventId: evento.id_evento,
+        eventName: evento.nome,
+        eventSlug: evento.slug,
+      },
       activities: [
         {
           id: `act_wl_${Date.now()}`,
@@ -776,7 +911,7 @@ export function applyWaitlistToDraft(
           timestamp: nowIso,
           user: ownerName,
         },
-        ...(Array.isArray(leads[existingIdx].activities) ? leads[existingIdx].activities : []),
+        ...(Array.isArray(prevLead.activities) ? prevLead.activities : []),
       ],
     };
   } else {
@@ -803,6 +938,11 @@ export function applyWaitlistToDraft(
       tags: ["lista-espera", evento.slug],
       lastInteraction: `Entrou na lista de espera (${evento.nome})`,
       createdAt: nowIso,
+      metadata: {
+        eventId: evento.id_evento,
+        eventName: evento.nome,
+        eventSlug: evento.slug,
+      },
       activities: [
         {
           id: `act_wl_${Date.now()}`,

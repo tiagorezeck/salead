@@ -15,7 +15,8 @@ import {
   AlertCircle,
   Timer,
   X,
-  SlidersHorizontal,
+  Clock,
+  FileSpreadsheet,
   ExternalLink,
 } from "lucide-react";
 import { useMemo, useState, useEffect } from "react";
@@ -26,8 +27,9 @@ import { EventListView } from "@/components/agenda/EventListView";
 import { AvailabilityManagerView } from "@/components/agenda/AvailabilityManagerView";
 import { BookingsScheduleView, EventDetailModal } from "@/components/agenda/BookingsScheduleView";
 import { EventModal } from "@/components/agenda/EventModal";
-import { FormBuilderModal } from "@/components/agenda/FormBuilderView";
+import { FormBuilderView } from "@/components/agenda/FormBuilderView";
 import { QRCodeModal } from "@/components/agenda/QRCodeModal";
+import { createStarterAgendaSeed } from "@/lib/agenda-seed";
 import type { AgendaBooking, AgendaEvent } from "@/types/agenda";
 import { cn } from "@/lib/utils";
 import { differenceInDays, parseISO, isBefore, startOfDay, isWithinInterval, format, isValid } from "date-fns";
@@ -46,14 +48,30 @@ function safeParseDate(value?: string | Date | null, fallback: Date = new Date()
   return isValid(parsedNative) ? parsedNative : fallback;
 }
 
-type AgendaTabId = "calendario" | "agendamentos" | "eventos" | "horarios" | "tarefas";
+type AgendaTabId =
+  | "calendario"
+  | "agendamentos"
+  | "eventos"
+  | "disponibilidade"
+  | "formularios"
+  | "tarefas";
 
 export const Route = createFileRoute("/app/tasks")({
   component: TasksPage,
   validateSearch: (search: Record<string, unknown>) => {
     const rawTab = String(search.tab || "");
-    const validTabs: AgendaTabId[] = ["calendario", "agendamentos", "eventos", "horarios", "tarefas"];
-    const tab = validTabs.includes(rawTab as AgendaTabId) ? (rawTab as AgendaTabId) : undefined;
+    const normalized = rawTab === "horarios" ? "disponibilidade" : rawTab;
+    const validTabs: AgendaTabId[] = [
+      "calendario",
+      "agendamentos",
+      "eventos",
+      "disponibilidade",
+      "formularios",
+      "tarefas",
+    ];
+    const tab = validTabs.includes(normalized as AgendaTabId)
+      ? (normalized as AgendaTabId)
+      : undefined;
     return {
       tab,
       eventId: (search.eventId as string) || undefined,
@@ -109,13 +127,12 @@ function TasksPage() {
   const { tab: paramTab, eventId: paramEventId, bookingId: paramBookingId, lead: leadFilter } = searchParams;
 
   const [activeTab, setActiveTab] = useState<AgendaTabId>(paramTab || "calendario");
-  const [selectedEventIdForHorarios, setSelectedEventIdForHorarios] = useState<string | undefined>(paramEventId);
+  const [selectedEventIdTarget, setSelectedEventIdTarget] = useState<string | undefined>(paramEventId);
   const [selectedBooking, setSelectedBooking] = useState<AgendaBooking | null>(null);
 
   // Modals for Events
   const [eventModalOpen, setEventModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<AgendaEvent | null>(null);
-  const [formBuilderEvent, setFormBuilderEvent] = useState<AgendaEvent | null>(null);
   const [qrEvent, setQrEvent] = useState<AgendaEvent | null>(null);
 
   // Tarefas tab states
@@ -134,7 +151,7 @@ function TasksPage() {
   }, [paramTab]);
 
   useEffect(() => {
-    if (paramEventId) setSelectedEventIdForHorarios(paramEventId);
+    if (paramEventId) setSelectedEventIdTarget(paramEventId);
   }, [paramEventId]);
 
   useEffect(() => {
@@ -196,7 +213,7 @@ function TasksPage() {
 
   return (
     <div className="p-4 md:px-6 md:py-4 max-w-[1440px] mx-auto space-y-4">
-      {/* Compact Workspace Bar: 5 Tabs + Quick Actions */}
+      {/* Compact Workspace Bar: Tabs + Direct Action Buttons (Criar Evento, Disponibilidade, Formulários, Agendamento Público) */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
         <div className="flex items-center gap-1 rounded-xl border border-border bg-muted/40 p-1 overflow-x-auto">
           {[
@@ -217,12 +234,6 @@ function TasksPage() {
               label: "Eventos",
               count: agendaEvents.length,
               icon: Calendar,
-            },
-            {
-              id: "horarios" as const,
-              label: "Horários & Bloqueios",
-              count: agendaSchedules.length,
-              icon: SlidersHorizontal,
             },
             {
               id: "tarefas" as const,
@@ -261,26 +272,61 @@ function TasksPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <a
-            href="/agendar"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted transition-colors whitespace-nowrap"
-          >
-            <ExternalLink className="h-3.5 w-3.5 text-primary" />
-            Portal Público
-          </a>
-
           <button
             type="button"
             onClick={() => {
               setEditingEvent(null);
               setEventModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/15 transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-orange-600 hover:bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer whitespace-nowrap shadow-xs"
           >
-            <Plus className="h-3.5 w-3.5" /> Novo Evento
+            <Plus className="h-3.5 w-3.5" /> Criar Evento
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("disponibilidade")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap",
+              activeTab === "disponibilidade"
+                ? "border-orange-500 bg-orange-500/15 text-orange-600 dark:text-orange-400"
+                : "border-border bg-card text-foreground hover:bg-muted"
+            )}
+          >
+            <Clock className="h-3.5 w-3.5 text-orange-500" />
+            <span>Disponibilidade</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("formularios")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap",
+              activeTab === "formularios"
+                ? "border-orange-500 bg-orange-500/15 text-orange-600 dark:text-orange-400"
+                : "border-border bg-card text-foreground hover:bg-muted"
+            )}
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-500" />
+            <span>Formulários</span>
+          </button>
+
+          <a
+            href={
+              agendaEvents.find((e) => e.status === "PUBLICADO")?.slug
+                ? `/agendar/${encodeURIComponent(
+                    agendaEvents.find((e) => e.status === "PUBLICADO")!.slug
+                  )}`
+                : "/agendar"
+            }
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Abrir tela pública de agendamento (Dia -> Horário -> Questionário)"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted transition-colors whitespace-nowrap"
+          >
+            <ExternalLink className="h-3.5 w-3.5 text-blue-500" />
+            <span>Página Pública</span>
+          </a>
 
           <button
             type="button"
@@ -354,7 +400,7 @@ function TasksPage() {
         />
       )}
 
-      {/* Tab 2: Eventos */}
+      {/* Tab 3: Eventos */}
       {activeTab === "eventos" && (
         <EventListView
           events={agendaEvents}
@@ -370,10 +416,13 @@ function TasksPage() {
             setEditingEvent(ev);
             setEventModalOpen(true);
           }}
-          onOpenFormBuilder={(ev) => setFormBuilderEvent(ev)}
+          onOpenFormBuilder={(ev) => {
+            setSelectedEventIdTarget(ev.id_evento);
+            setActiveTab("formularios");
+          }}
           onOpenAvailability={(ev) => {
-            setSelectedEventIdForHorarios(ev.id_evento);
-            setActiveTab("horarios");
+            setSelectedEventIdTarget(ev.id_evento);
+            setActiveTab("disponibilidade");
           }}
           onOpenQRCode={(ev) => setQrEvent(ev)}
           onDuplicateEvent={duplicateAgendaEvent}
@@ -385,24 +434,45 @@ function TasksPage() {
               agenda_publica_ativa: nextStatus === "PUBLICADO",
             });
           }}
+          onLoadStarterEvent={async () => {
+            const seed = createStarterAgendaSeed();
+            await saveAgendaEvent(seed.events[0], seed.schedules, seed.fields);
+            toast.success("Evento exemplo carregado com horários e questionário!");
+          }}
         />
       )}
 
-      {/* Tab 3: Horários & Bloqueios */}
-      {activeTab === "horarios" && (
+      {/* Disponibilidade (Controle de Vagas & Bloqueios) */}
+      {activeTab === "disponibilidade" && (
         <AvailabilityManagerView
           events={agendaEvents}
           schedules={agendaSchedules}
           blocks={agendaBlocks}
           bookings={agendaBookings}
           waitlist={agendaWaitlist}
-          initialEventId={selectedEventIdForHorarios}
+          products={products}
+          initialEventId={selectedEventIdTarget}
           onToggleBlock={toggleAgendaBlock}
           onUpdateBookingStatus={updateAgendaBookingStatus}
           onUpdateSchedule={updateAgendaSchedule}
           onSelectBooking={(bk) => {
             setSelectedBooking(bk);
             setActiveTab("agendamentos");
+          }}
+        />
+      )}
+
+      {/* Formulários (Construtor de Formulários de Qualificação) */}
+      {activeTab === "formularios" && (
+        <FormBuilderView
+          events={agendaEvents}
+          schedules={agendaSchedules}
+          formFields={agendaFormFields}
+          initialEventId={selectedEventIdTarget}
+          onSaveEvent={saveAgendaEvent}
+          onCreateEvent={() => {
+            setEditingEvent(null);
+            setEventModalOpen(true);
           }}
         />
       )}
@@ -540,23 +610,6 @@ function TasksPage() {
         products={products}
         onSave={saveAgendaEvent}
       />
-
-      {formBuilderEvent && (
-        <FormBuilderModal
-          isOpen={Boolean(formBuilderEvent)}
-          onClose={() => setFormBuilderEvent(null)}
-          evento={formBuilderEvent}
-          initialFields={agendaFormFields.filter(
-            (f) => f.id_evento === formBuilderEvent.id_evento
-          )}
-          onSave={async (campos) => {
-            const evSchedules = agendaSchedules.filter(
-              (s) => s.id_evento === formBuilderEvent.id_evento
-            );
-            await saveAgendaEvent(formBuilderEvent, evSchedules, campos);
-          }}
-        />
-      )}
 
       <QRCodeModal
         isOpen={Boolean(qrEvent)}

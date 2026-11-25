@@ -1,0 +1,141 @@
+{
+  "agendaEvents": [
+    {
+      "id_evento": "EVT-MYR2V",
+      "nome": "Aluno Nota 10",
+      "slug": "aluno-nota-10",
+      "descricao": "Teste",
+      "local_evento": "Online",
+      "tipo_evento": "PRESENCIAL",
+      "duracao_minutos": 30,
+      "capacidade_padrao": 6,
+      "dias_semana": [
+        "SAB"
+      ],
+      "dias_antecedencia_max": 1,
+      "exibir_produto_publico": true,
+      "label_local": "Escola",
+      "status": "PUBLICADO",
+      "agenda_publica_ativa": true,
+      "permitir_lista_espera": true,
+      "mensagem_confirmacao": "Seu horário está confirmado! Nossa equipe entrará em contato pelo WhatsApp para enviar os detalhes.",
+      "permite_cancelamento": true,
+      "horas_antecedencia_cancelamento": 4,
+      "visitas": 0,
+      "criado_em": "2026-11-25T22:51:24.275Z",
+      "atualizado_em": "2026-11-25T22:51:24.276Z"
+    }
+  ],
+  "agendaSchedules": [
+    {
+      "id_horario": "SCH-QH2LV",
+      "id_evento": "EVT-MYR2V",
+      "hora_inicio": "09:00",
+      "hora_fim": "09:30",
+      "capacidade": 6,
+      "dias_aplicaveis": [
+        "SAB"
+      ],
+      "ativo": true
+    },
+    {
+      "id_horario": "SCH-PV7WN",
+      "id_evento": "EVT-MYR2V",
+      "hora_inicio": "10:00",
+      "hora_fim": "10:30",
+      "capacidade": 6,
+      "dias_aplicaveis": [
+        "SAB"
+      ],
+      "ativo": true
+    },
+    {
+      "id_horario": "SCH-268K5",
+      "id_evento": "EVT-MYR2V",
+      "hora_inicio": "14:00",
+      "hora_fim": "14:30",
+      "capacidade": 6,
+      "dias_aplicaveis": [
+        "SAB"
+      ],
+      "ativo": true
+    },
+    {
+      "id_horario": "SCH-Z8P9H",
+      "id_evento": "EVT-MYR2V",
+      "hora_inicio": "16:00",
+      "hora_fim": "16:30",
+      "capacidade": 6,
+      "dias_aplicaveis": [
+        "SAB"
+      ],
+      "ativo": true
+    }
+  ],
+  "agendaBlocks": [],
+  "agendaBookings": [
+    {
+      "id_agendamento": "AGD-202611-U486",
+      "protocolo": "PROT-202611-XJ9A",
+      "id_evento": "EVT-MYR2V",
+      "evento_nome": "Aluno Nota 10",
+      "id_lead": "lead_1795627463069_szr99",
+      "lead_nome": "COMET Systems",
+      "lead_whatsapp": "(11) 11111-1111",
+      "lead_email": "sistemascomet@gmail.com",
+      "lead_local": "barão",
+      "responsavel_nome": "Sem responsável",
+      "data_agendamento": "2026-11-28",
+      "hora_inicio": "09:00",
+      "hora_fim": "09:30",
+      "status": "CONFIRMADO",
+      "origem": "PUBLICO",
+      "calendar_link": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Aluno+Nota+10+%E2%80%94+COMET+Systems&dates=20261128T090000%2F20261128T093000&details=Protocolo%3A+PROT-202611-XJ9A%0AParticipante%3A+COMET+Systems%0AWhatsApp%3A+%2811%29+11111-1111%0A&location=bar%C3%A3o",
+      "observacoes": "",
+      "criado_em": "2026-11-25T23:08:04.774Z",
+      "atualizado_em": "2026-11-25T23:08:04.774Z"
+    }
+  ],
+  "agendaFormFields": [],
+  "agendaFormResponses": [],
+  "agendaWaitlist": [
+    {
+      "id_espera": "WLT-B7K5CV",
+      "id_evento": "EVT-WFHZY",
+      "evento_nome": "evento teste",
+      "id_lead": "lead_1795627463069_szr99",
+      "nome": "COMET Systems",
+      "whatsapp": "(11) 11111-1111",
+      "email": "sistemascomet@gmail.com",
+      "local": "barão",
+      "criado_em": "2026-11-25T20:28:55.553Z"
+    },
+    {
+      "id_espera": "WLT-W6D8F2",
+      "id_evento": "EVT-WFHZY",
+      "evento_nome": "evento teste",
+      "id_lead": "lead_1795578902294_ldfok",
+      "nome": "COMET Systems",
+      "whatsapp": "(11) 11111-1111",
+      "email": "sistemascomet@gmail.com",
+      "criado_em": "2026-11-25T05:26:49.120Z"
+    },
+    {
+      "id_espera": "WLT-Z8TZ65",
+      "id_evento": "EVT-WFHZY",
+      "evento_nome": "evento teste",
+      "id_lead": "lead_1795578519377_p9ehw",
+      "nome": "COMET Systems",
+      "whatsapp": "(22) 22222-2222",
+      "email": "sistemascomet@gmail.com",
+      "criado_em": "2026-11-25T04:52:15.302Z"
+    }
+  ],
+  "agendaCustomItems": [],
+  "company": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "name": "Minha Empresa"
+  },
+  "products": [],
+  "updatedAt": "2026-11-25T23:15:06.578Z"
+}

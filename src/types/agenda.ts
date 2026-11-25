@@ -17,6 +17,8 @@ export interface AgendaEvent {
   dias_antecedencia_max: number;
   imagem_url?: string;
   product_id?: string; // Vínculo com Produto do Salead
+  exibir_produto_publico?: boolean;
+  label_local?: string;
   local_opcoes?: string[];
   status: AgendaEventStatus;
   agenda_publica_ativa?: boolean;

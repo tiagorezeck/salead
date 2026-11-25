@@ -210,6 +210,128 @@ app.post("/api/system/drive-config", (req, res) => {
 });
 
 // ============================================================================
+// CACHE & PERSISTÊNCIA RÁPIDA DA AGENDA (ZERO-LATENCY PARA PÁGINAS PÚBLICAS)
+// ============================================================================
+const AGENDA_STORE_FILE = process.env.VERCEL
+  ? path.join("/tmp", "agenda_store.json")
+  : path.join(process.cwd(), "data", "agenda_store.json");
+
+interface ServerAgendaStore {
+  agendaEvents: any[];
+  agendaSchedules: any[];
+  agendaBlocks: any[];
+  agendaBookings: any[];
+  agendaFormFields: any[];
+  agendaFormResponses: any[];
+  agendaWaitlist: any[];
+  agendaCustomItems: any[];
+  company?: any;
+  products?: any[];
+  updatedAt: string;
+}
+
+let memoryAgendaStore: ServerAgendaStore | null = null;
+
+function readAgendaStore(): ServerAgendaStore {
+  if (memoryAgendaStore) return memoryAgendaStore;
+  try {
+    if (fs.existsSync(AGENDA_STORE_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(AGENDA_STORE_FILE, "utf-8"));
+      if (parsed && typeof parsed === "object") {
+        memoryAgendaStore = {
+          agendaEvents: Array.isArray(parsed.agendaEvents) ? parsed.agendaEvents : [],
+          agendaSchedules: Array.isArray(parsed.agendaSchedules) ? parsed.agendaSchedules : [],
+          agendaBlocks: Array.isArray(parsed.agendaBlocks) ? parsed.agendaBlocks : [],
+          agendaBookings: Array.isArray(parsed.agendaBookings) ? parsed.agendaBookings : [],
+          agendaFormFields: Array.isArray(parsed.agendaFormFields) ? parsed.agendaFormFields : [],
+          agendaFormResponses: Array.isArray(parsed.agendaFormResponses) ? parsed.agendaFormResponses : [],
+          agendaWaitlist: Array.isArray(parsed.agendaWaitlist) ? parsed.agendaWaitlist : [],
+          agendaCustomItems: Array.isArray(parsed.agendaCustomItems) ? parsed.agendaCustomItems : [],
+          company: parsed.company || undefined,
+          products: Array.isArray(parsed.products) ? parsed.products : undefined,
+          updatedAt: parsed.updatedAt || new Date().toISOString(),
+        };
+        return memoryAgendaStore;
+      }
+    }
+  } catch (err) {
+    console.warn("Aviso ao ler agenda_store.json:", err);
+  }
+  memoryAgendaStore = {
+    agendaEvents: [],
+    agendaSchedules: [],
+    agendaBlocks: [],
+    agendaBookings: [],
+    agendaFormFields: [],
+    agendaFormResponses: [],
+    agendaWaitlist: [],
+    agendaCustomItems: [],
+    updatedAt: "",
+  };
+  return memoryAgendaStore;
+}
+
+function writeAgendaStore(patch: Partial<ServerAgendaStore>): ServerAgendaStore {
+  const cur = readAgendaStore();
+  const next: ServerAgendaStore = {
+    agendaEvents: Array.isArray(patch.agendaEvents) ? patch.agendaEvents : cur.agendaEvents,
+    agendaSchedules: Array.isArray(patch.agendaSchedules) ? patch.agendaSchedules : cur.agendaSchedules,
+    agendaBlocks: Array.isArray(patch.agendaBlocks) ? patch.agendaBlocks : cur.agendaBlocks,
+    agendaBookings: Array.isArray(patch.agendaBookings) ? patch.agendaBookings : cur.agendaBookings,
+    agendaFormFields: Array.isArray(patch.agendaFormFields) ? patch.agendaFormFields : cur.agendaFormFields,
+    agendaFormResponses: Array.isArray(patch.agendaFormResponses) ? patch.agendaFormResponses : cur.agendaFormResponses,
+    agendaWaitlist: Array.isArray(patch.agendaWaitlist) ? patch.agendaWaitlist : cur.agendaWaitlist,
+    agendaCustomItems: Array.isArray(patch.agendaCustomItems) ? patch.agendaCustomItems : cur.agendaCustomItems,
+    company: patch.company !== undefined ? patch.company : cur.company,
+    products: Array.isArray(patch.products) ? patch.products : cur.products,
+    updatedAt: new Date().toISOString(),
+  };
+  memoryAgendaStore = next;
+  try {
+    const dir = path.dirname(AGENDA_STORE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(AGENDA_STORE_FILE, JSON.stringify(next, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("Aviso ao salvar agenda_store.json:", err);
+  }
+  return next;
+}
+
+app.get("/api/public/agenda", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  const store = readAgendaStore();
+  res.json({ success: true, ...store });
+});
+
+app.get("/api/public/agenda/:slug", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  const target = decodeURIComponent(req.params.slug || "").trim().toLowerCase();
+  const store = readAgendaStore();
+  const evento =
+    store.agendaEvents.find(
+      (e: any) =>
+        String(e?.slug || "").trim().toLowerCase() === target ||
+        String(e?.id_evento || "").trim().toLowerCase() === target
+    ) || null;
+  res.json({
+    success: true,
+    found: Boolean(evento),
+    evento,
+    ...store,
+  });
+});
+
+app.post("/api/agenda/sync", (req, res) => {
+  try {
+    const body = req.body || {};
+    const saved = writeAgendaStore(body);
+    res.json({ success: true, updatedAt: saved.updatedAt, eventsCount: saved.agendaEvents.length });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Erro ao salvar agenda no servidor." });
+  }
+});
+
+// ============================================================================
 // PROXY DE CONEXÃO E SINCRONIZAÇÃO COM GOOGLE APPS SCRIPT / GOOGLE DRIVE
 // ============================================================================
 function normalizeGoogleScriptUrl(rawUrl: string): { url: string; error?: string } {
@@ -435,6 +557,35 @@ app.all("/api/drive-proxy", async (req, res) => {
     try {
       const parsed = JSON.parse(rawText);
       const payloadContent = parsed?.data || parsed?.content || parsed;
+      // Atualiza cache rápido de agenda no servidor quando houver dados de agenda na ida ou na volta
+      const savePayload = body?.data && typeof body.data === "object" ? body.data : null;
+      if (savePayload && Array.isArray(savePayload.agendaEvents)) {
+        writeAgendaStore({
+          agendaEvents: savePayload.agendaEvents,
+          agendaSchedules: savePayload.agendaSchedules,
+          agendaBlocks: savePayload.agendaBlocks,
+          agendaBookings: savePayload.agendaBookings,
+          agendaFormFields: savePayload.agendaFormFields,
+          agendaFormResponses: savePayload.agendaFormResponses,
+          agendaWaitlist: savePayload.agendaWaitlist,
+          agendaCustomItems: savePayload.agendaCustomItems,
+          company: savePayload.company,
+          products: savePayload.products,
+        });
+      } else if (payloadContent && Array.isArray(payloadContent.agendaEvents)) {
+        writeAgendaStore({
+          agendaEvents: payloadContent.agendaEvents,
+          agendaSchedules: payloadContent.agendaSchedules,
+          agendaBlocks: payloadContent.agendaBlocks,
+          agendaBookings: payloadContent.agendaBookings,
+          agendaFormFields: payloadContent.agendaFormFields,
+          agendaFormResponses: payloadContent.agendaFormResponses,
+          agendaWaitlist: payloadContent.agendaWaitlist,
+          agendaCustomItems: payloadContent.agendaCustomItems,
+          company: payloadContent.company,
+          products: payloadContent.products,
+        });
+      }
       if (
         !process.env.VERCEL &&
         payloadContent &&

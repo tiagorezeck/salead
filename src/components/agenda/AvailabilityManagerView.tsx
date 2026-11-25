@@ -9,10 +9,11 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  SlidersHorizontal,
+  ShieldAlert,
   Pencil,
   Save,
   X,
+  UserX,
 } from "lucide-react";
 import type {
   AgendaBlock,
@@ -39,6 +40,7 @@ interface AvailabilityManagerViewProps {
   blocks: AgendaBlock[];
   bookings: AgendaBooking[];
   waitlist: AgendaWaitlistEntry[];
+  products?: Array<{ id: string; name: string; salePrice?: number }>;
   initialEventId?: string;
   onToggleBlock: (
     idEvento: string,
@@ -69,6 +71,7 @@ export const AvailabilityManagerView: React.FC<AvailabilityManagerViewProps> = (
   blocks,
   bookings,
   waitlist,
+  products = [],
   initialEventId,
   onToggleBlock,
   onUpdateBookingStatus,
@@ -79,7 +82,9 @@ export const AvailabilityManagerView: React.FC<AvailabilityManagerViewProps> = (
     initialEventId || events[0]?.id_evento || ""
   );
   const [selectedDate, setSelectedDate] = useState<string>(getLocalTodayIso());
-  const [blockReason, setBlockReason] = useState<string>("Bloqueio administrativo");
+  const [blockReason, setBlockReason] = useState<string>("");
+
+  // Inline slot edit (horário + vagas)
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState<string>("");
   const [editEnd, setEditEnd] = useState<string>("");
@@ -91,15 +96,24 @@ export const AvailabilityManagerView: React.FC<AvailabilityManagerViewProps> = (
       setSelectedEventId(initialEventId);
     } else if (!selectedEventId && events.length > 0) {
       setSelectedEventId(events[0].id_evento);
-    } else if (selectedEventId && events.length > 0 && !events.some((e) => e.id_evento === selectedEventId)) {
+    } else if (
+      selectedEventId &&
+      events.length > 0 &&
+      !events.some((e) => e.id_evento === selectedEventId)
+    ) {
       setSelectedEventId(events[0].id_evento);
     }
   }, [initialEventId, events, selectedEventId]);
 
-  const selectedEvent = useMemo(
+  const eventoAtual = useMemo(
     () => events.find((e) => e.id_evento === selectedEventId) || null,
     [events, selectedEventId]
   );
+
+  const linkedProduct = useMemo(() => {
+    if (!eventoAtual?.product_id) return null;
+    return products.find((p) => p.id === eventoAtual.product_id) || null;
+  }, [eventoAtual, products]);
 
   const quickDates = useMemo(() => {
     const out: Array<{ iso: string; label: string; weekday: string }> = [];
@@ -147,11 +161,7 @@ export const AvailabilityManagerView: React.FC<AvailabilityManagerViewProps> = (
 
   const dayBookings = useMemo(() => {
     return bookings
-      .filter(
-        (b) =>
-          b.id_evento === selectedEventId &&
-          b.data_agendamento === selectedDate
-      )
+      .filter((b) => b.id_evento === selectedEventId && b.data_agendamento === selectedDate)
       .sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
   }, [bookings, selectedEventId, selectedDate]);
 
@@ -162,474 +172,626 @@ export const AvailabilityManagerView: React.FC<AvailabilityManagerViewProps> = (
 
   const handleToggleDayBlock = async () => {
     if (!selectedEventId) return;
-    await onToggleBlock(selectedEventId, selectedDate, "ALL_DAY", blockReason.trim() || "Dia bloqueado");
+    await onToggleBlock(
+      selectedEventId,
+      selectedDate,
+      "ALL_DAY",
+      blockReason.trim() || "Dia bloqueado administrativamente"
+    );
     toast.success(
-      dayAllBlock ? "Dia desbloqueado com sucesso." : `Dia ${formatDateBR(selectedDate)} bloqueado.`
+      dayAllBlock
+        ? "Dia desbloqueado com sucesso."
+        : `Dia ${formatDateBR(selectedDate)} bloqueado.`
     );
   };
 
   const handleToggleSlotBlock = async (horaInicio: string, currentlyBlocked: boolean) => {
     if (!selectedEventId) return;
-    await onToggleBlock(selectedEventId, selectedDate, horaInicio, blockReason.trim() || "Horário bloqueado");
+    await onToggleBlock(
+      selectedEventId,
+      selectedDate,
+      horaInicio,
+      blockReason.trim() || "Bloqueio manual pelo painel administrativo"
+    );
     toast.success(
-      currentlyBlocked
-        ? `Horário ${horaInicio} liberado.`
-        : `Horário ${horaInicio} bloqueado.`
+      currentlyBlocked ? `Horário ${horaInicio} liberado.` : `Horário ${horaInicio} bloqueado.`
     );
   };
 
   if (events.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center space-y-2">
-        <SlidersHorizontal className="h-6 w-6 mx-auto text-muted-foreground" />
-        <div className="text-sm font-bold text-foreground">
-          Crie um evento primeiro para gerenciar horários
-        </div>
-        <p className="text-xs text-muted-foreground max-w-md mx-auto">
-          Acesse a aba Eventos, cadastre sua grade semanal e volte aqui para bloquear dias específicos, acompanhar vagas por horário e gerenciar a lista de espera.
+      <div className="p-8 text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl">
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Nenhum evento encontrado. Crie seu primeiro evento para gerenciar horários e vagas.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-5">
-      {/* Controls Bar */}
-      <div className="rounded-2xl border border-border bg-card p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="block text-[11px] font-bold text-muted-foreground mb-1">
-              Evento Selecionado
-            </label>
-            <select
-              value={selectedEventId}
-              onChange={(e) => setSelectedEventId(e.target.value)}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
-            >
-              {events.map((ev) => (
-                <option key={ev.id_evento} value={ev.id_evento}>
-                  {ev.nome} ({ev.status})
-                </option>
-              ))}
-            </select>
-          </div>
+    <div className="space-y-6">
+      {/* Top Controls Bar */}
+      <div className="p-6 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm transition-colors">
+        <div>
+          <h2 className="text-lg font-bold text-neutral-900 dark:text-white tracking-tight">
+            Controle de Disponibilidade &amp; Capacidade
+          </h2>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-xl">
+            Monitore o preenchimento de vagas em tempo real para cada horário, edite horários/vagas ou realize bloqueios administrativos pontuais.
+          </p>
+        </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-muted-foreground mb-1">
-              Data de Consulta
-            </label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
+        {/* Seletor de Evento */}
+        <div className="flex items-center gap-3 shrink-0">
+          <label className="text-xs text-neutral-500 dark:text-neutral-400 whitespace-nowrap font-medium">
+            Evento:
+          </label>
+          <select
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
+            className="px-3 py-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 rounded-xl text-xs text-neutral-800 dark:text-white focus:outline-none focus:border-orange-500 font-medium cursor-pointer"
+          >
+            {events.map((ev) => (
+              <option key={ev.id_evento} value={ev.id_evento}>
+                {ev.nome} ({ev.id_evento})
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-muted-foreground mb-1">
-              Motivo de Bloqueio (Opcional)
-            </label>
-            <div className="flex items-center gap-2">
+      {eventoAtual ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Coluna 1: Seletor de Data & Parâmetros + Motivo Bloqueio */}
+          <div className="space-y-4">
+            <div className="p-5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-4 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-orange-500" />
+                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">
+                    Selecionar Data
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleDayBlock}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 border cursor-pointer transition-colors",
+                    dayAllBlock
+                      ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                      : "bg-neutral-50 dark:bg-neutral-950 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-800 hover:border-orange-500"
+                  )}
+                >
+                  {dayAllBlock ? (
+                    <>
+                      <Unlock className="w-3 h-3" /> Liberar Dia
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3 h-3" /> Bloquear Dia
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                  Data de Atendimento
+                </label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-orange-500 font-mono"
+                />
+              </div>
+
+              {/* Atalho Rápido 7 dias */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                {quickDates.map((qd) => {
+                  const active = selectedDate === qd.iso;
+                  return (
+                    <button
+                      key={qd.iso}
+                      type="button"
+                      onClick={() => setSelectedDate(qd.iso)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg border text-[11px] whitespace-nowrap shrink-0 cursor-pointer transition-colors",
+                        active
+                          ? "border-orange-600 bg-orange-600 text-white font-semibold"
+                          : "border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 hover:border-orange-500"
+                      )}
+                    >
+                      {qd.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 space-y-2 text-xs text-neutral-500 dark:text-neutral-400">
+                <div className="flex items-center justify-between gap-2">
+                  <span>Programação:</span>
+                  <span className="font-mono text-right text-neutral-800 dark:text-neutral-300">
+                    {(eventoAtual.dias_semana || []).join(", ") || "SEG - SEX"}
+                  </span>
+                </div>
+                {linkedProduct && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Produto / Valor:</span>
+                    <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400 text-right truncate">
+                      {linkedProduct.name}
+                      {Number(linkedProduct.salePrice || 0) > 0
+                        ? ` · R$ ${Number(linkedProduct.salePrice).toLocaleString("pt-BR", {
+                            minimumFractionDigits: 2,
+                          })}`
+                        : ""}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span>Capacidade Base por Slot:</span>
+                  <span className="font-mono font-bold text-orange-600 dark:text-orange-400">
+                    {eventoAtual.capacidade_padrao} vaga
+                    {eventoAtual.capacidade_padrao !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Duração da Sessão:</span>
+                  <span className="font-mono text-neutral-800 dark:text-neutral-300">
+                    {eventoAtual.duracao_minutos} min
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Status:</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                    {eventoAtual.status}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Motivo Opcional para Bloqueio */}
+            <div className="p-5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-3 shadow-sm">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-amber-500" />
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">
+                  Motivo do Bloqueio
+                </h3>
+              </div>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                Informe a razão ao bloquear um horário (ex: Reunião de Diretoria, Feriado ou Ausência).
+              </p>
               <input
                 type="text"
                 value={blockReason}
                 onChange={(e) => setBlockReason(e.target.value)}
-                placeholder="Ex: Feriado, Reunião interna..."
-                className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Ex: Reunião interna da equipe"
+                className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-orange-500"
               />
-              <button
-                type="button"
-                onClick={handleToggleDayBlock}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors",
-                  dayAllBlock
-                    ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15"
-                    : "border-border bg-muted/50 text-foreground hover:bg-muted"
-                )}
-              >
-                {dayAllBlock ? (
-                  <>
-                    <Unlock className="h-3.5 w-3.5" /> Desbloquear Dia
-                  </>
-                ) : (
-                  <>
-                    <Lock className="h-3.5 w-3.5" /> Bloquear Dia
-                  </>
-                )}
-              </button>
             </div>
           </div>
-        </div>
 
-        {/* Quick 7-day strip */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {quickDates.map((qd) => {
-            const active = selectedDate === qd.iso;
-            return (
-              <button
-                key={qd.iso}
-                type="button"
-                onClick={() => setSelectedDate(qd.iso)}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl border text-xs whitespace-nowrap shrink-0 cursor-pointer transition-colors",
-                  active
-                    ? "border-primary bg-primary text-primary-foreground font-semibold"
-                    : "border-border bg-background text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {qd.label} · {qd.weekday}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Main Split: Slots & Day Bookings */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Slots Grid */}
-        <div className="lg:col-span-7 rounded-2xl border border-border bg-card p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div>
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Clock className="h-4 w-4 text-primary" />
-                Grade de Horários — {formatDateBR(selectedDate)} ({getWeekdayKey(selectedDate)})
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {selectedEvent?.nome} · Clique no cadeado para bloquear ou liberar um horário específico.
-              </p>
-            </div>
-            {dayAllBlock && (
-              <span className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive">
-                <Lock className="h-3 w-3" /> Dia Bloqueado: {dayAllBlock.motivo}
-              </span>
-            )}
-          </div>
-
-          {slots.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground space-y-1">
-              <div className="font-semibold text-foreground">
-                Nenhum horário configurado para {getWeekdayKey(selectedDate)}
+          {/* Coluna 2 & 3: Horários e Vagas em Tempo Real + Agendamentos + Lista de Espera */}
+          <div className="lg:col-span-2 space-y-4">
+            <div className="p-5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-4 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-orange-500" />
+                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">
+                    Horários para {formatDateBR(selectedDate)} ({getWeekdayKey(selectedDate)})
+                  </h3>
+                </div>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
+                  {slots.length} horário{slots.length !== 1 ? "s" : ""} cadastrado
+                  {slots.length !== 1 ? "s" : ""}
+                </span>
               </div>
-              <div>
-                Verifique os dias de atendimento e a grade do evento em &ldquo;Eventos &gt; Editar&rdquo;.
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {slots.map((slot) => {
-                const slotSpecificBlock = blocks.find(
-                  (b) =>
-                    (b.id_evento === "*" || b.id_evento === selectedEventId) &&
-                    b.data === selectedDate &&
-                    b.hora_inicio === slot.hora_inicio
-                );
-                const isFull = !slot.bloqueado && slot.vagas_restantes <= 0;
-                const isEditing = editingSlotId === slot.id_horario;
 
-                return (
-                  <div
-                    key={slot.id_horario}
-                    className={cn(
-                      "rounded-xl border p-3.5 space-y-3 transition-colors",
-                      slot.bloqueado
-                        ? "border-destructive/30 bg-destructive/5"
-                        : isFull
-                        ? "border-amber-500/30 bg-amber-500/5"
-                        : "border-border bg-background"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 space-y-1">
-                        <div className="font-mono text-sm font-bold tabular-nums text-foreground">
-                          {slot.hora_inicio} — {slot.hora_fim}
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
-                          <span>
-                            Ocupação: {slot.agendamentos_confirmados}/{slot.capacidade_total}
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span
-                            className={cn(
-                              "font-semibold",
-                              slot.bloqueado
-                                ? "text-destructive"
-                                : isFull
-                                ? "text-amber-600 dark:text-amber-400"
-                                : "text-emerald-600 dark:text-emerald-400"
-                            )}
-                          >
-                            {slot.bloqueado
-                              ? slot.motivo_bloqueio || "Bloqueado"
-                              : isFull
-                              ? "Lotado"
-                              : `${slot.vagas_restantes} ${
-                                  slot.vagas_restantes === 1 ? "vaga livre" : "vagas livres"
-                                }`}
-                          </span>
-                        </div>
-                      </div>
+              {slots.length === 0 ? (
+                <div className="p-8 text-center bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl">
+                  <Calendar className="w-8 h-8 text-neutral-400 mx-auto mb-2" />
+                  <p className="text-xs text-neutral-700 dark:text-neutral-300 font-medium">
+                    Nenhum horário cadastrado para este dia da semana.
+                  </p>
+                  <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">
+                    Verifique os dias aplicáveis configurados na edição do evento.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {slots.map((slot) => {
+                    const esgotado = slot.vagas_restantes <= 0 && !slot.bloqueado;
+                    const percentual =
+                      slot.capacidade_total > 0
+                        ? Math.round(
+                            (slot.agendamentos_confirmados / slot.capacidade_total) * 100
+                          )
+                        : 0;
+                    const isEditing = editingSlotId === slot.id_horario;
+                    const slotSpecificBlock = blocks.find(
+                      (b) =>
+                        (b.id_evento === "*" || b.id_evento === selectedEventId) &&
+                        b.data === selectedDate &&
+                        b.hora_inicio === slot.hora_inicio
+                    );
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {onUpdateSchedule && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isEditing) {
-                                setEditingSlotId(null);
-                              } else {
-                                setEditingSlotId(slot.id_horario);
-                                setEditStart(slot.hora_inicio);
-                                setEditEnd(slot.hora_fim);
-                                setEditCap(slot.capacidade_total);
-                              }
-                            }}
-                            className={cn(
-                              "p-2 rounded-lg border text-xs cursor-pointer transition-colors",
-                              isEditing
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted"
-                            )}
-                            title="Editar horário e vagas"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
+                    return (
+                      <div
+                        key={slot.id_horario}
+                        className={cn(
+                          "p-4 rounded-xl border transition-all space-y-3",
+                          slot.bloqueado
+                            ? "bg-neutral-100 dark:bg-neutral-950/80 border-neutral-200 dark:border-neutral-800/80 opacity-80"
+                            : esgotado
+                            ? "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50"
+                            : "bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700"
                         )}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          {/* Horário & Status + Barra */}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
+                                {slot.hora_inicio} às {slot.hora_fim}
+                              </span>
+                              {slot.bloqueado ? (
+                                <span className="text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                                  <Lock className="w-3.5 h-3.5" />
+                                  Bloqueado Administrativamente
+                                </span>
+                              ) : esgotado ? (
+                                <span className="text-xs text-rose-600 dark:text-rose-400 font-medium flex items-center gap-1">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  Vagas Esgotadas ({slot.agendamentos_confirmados}/
+                                  {slot.capacidade_total})
+                                </span>
+                              ) : (
+                                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  Disponível ({slot.vagas_restantes} vaga
+                                  {slot.vagas_restantes !== 1 ? "s" : ""} livre
+                                  {slot.vagas_restantes !== 1 ? "s" : ""})
+                                </span>
+                              )}
+                            </div>
 
-                        {!dayAllBlock && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleToggleSlotBlock(slot.hora_inicio, Boolean(slotSpecificBlock))
-                            }
-                            className={cn(
-                              "p-2 rounded-lg border text-xs cursor-pointer transition-colors",
-                              slotSpecificBlock
-                                ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15"
-                                : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted"
+                            {slot.bloqueado && slot.motivo_bloqueio && (
+                              <p className="text-xs text-neutral-500 dark:text-neutral-400 italic">
+                                Motivo: {slot.motivo_bloqueio}
+                              </p>
                             )}
-                            title={slotSpecificBlock ? "Liberar horário" : "Bloquear horário"}
-                          >
-                            {slotSpecificBlock ? (
-                              <Unlock className="h-4 w-4" />
-                            ) : (
-                              <Lock className="h-4 w-4" />
+
+                            {/* Barra de Progresso */}
+                            <div className="flex items-center gap-3 pt-1.5">
+                              <div className="w-36 h-2 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden">
+                                <div
+                                  className={cn(
+                                    "h-full rounded-full transition-all",
+                                    slot.bloqueado
+                                      ? "bg-neutral-400 dark:bg-neutral-600"
+                                      : esgotado
+                                      ? "bg-rose-500"
+                                      : "bg-orange-500"
+                                  )}
+                                  style={{
+                                    width: `${Math.min(
+                                      100,
+                                      Math.max(slot.agendamentos_confirmados > 0 ? 10 : 0, percentual)
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                              <span className="text-xs font-mono tabular-nums text-neutral-500 dark:text-neutral-400">
+                                {slot.agendamentos_confirmados} de {slot.capacidade_total} vagas ocupadas ({percentual}%)
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Ações do Slot */}
+                          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                            {onUpdateSchedule && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isEditing) {
+                                    setEditingSlotId(null);
+                                  } else {
+                                    setEditingSlotId(slot.id_horario);
+                                    setEditStart(slot.hora_inicio);
+                                    setEditEnd(slot.hora_fim);
+                                    setEditCap(slot.capacidade_total);
+                                  }
+                                }}
+                                className={cn(
+                                  "px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border cursor-pointer transition-colors",
+                                  isEditing
+                                    ? "border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300"
+                                    : "bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                )}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                <span>Editar</span>
+                              </button>
                             )}
-                          </button>
+
+                            {!dayAllBlock && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleToggleSlotBlock(
+                                    slot.hora_inicio,
+                                    Boolean(slotSpecificBlock)
+                                  )
+                                }
+                                className={cn(
+                                  "px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer",
+                                  slotSpecificBlock
+                                    ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 hover:bg-amber-200"
+                                    : "bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                )}
+                              >
+                                {slotSpecificBlock ? (
+                                  <>
+                                    <Unlock className="w-3.5 h-3.5" />
+                                    <span>Desbloquear Horário</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
+                                    <span>Bloquear Horário</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Edição Inline de Horário e Vagas */}
+                        {isEditing && onUpdateSchedule && (
+                          <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 space-y-2.5">
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                  Início
+                                </label>
+                                <input
+                                  type="time"
+                                  value={editStart}
+                                  onChange={(e) => setEditStart(e.target.value)}
+                                  className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1.5 text-xs font-mono text-neutral-900 dark:text-white"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                  Término
+                                </label>
+                                <input
+                                  type="time"
+                                  value={editEnd}
+                                  onChange={(e) => setEditEnd(e.target.value)}
+                                  className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1.5 text-xs font-mono text-neutral-900 dark:text-white"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                  Vagas
+                                </label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={500}
+                                  value={editCap}
+                                  onChange={(e) =>
+                                    setEditCap(Math.max(1, Number(e.target.value) || 1))
+                                  }
+                                  className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1.5 text-xs font-mono font-bold tabular-nums text-neutral-900 dark:text-white"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setEditingSlotId(null)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 dark:border-neutral-700 px-2.5 py-1 text-[11px] font-semibold cursor-pointer"
+                              >
+                                <X className="h-3 w-3" /> Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingSlot}
+                                onClick={async () => {
+                                  if (!editStart || !editEnd || editEnd <= editStart) {
+                                    toast.error("O horário final deve ser maior que o inicial.");
+                                    return;
+                                  }
+                                  setSavingSlot(true);
+                                  try {
+                                    await onUpdateSchedule(slot.id_horario, {
+                                      hora_inicio: editStart,
+                                      hora_fim: editEnd,
+                                      capacidade: Math.max(1, Number(editCap) || 1),
+                                    });
+                                    toast.success("Horário e vagas atualizados!");
+                                    setEditingSlotId(null);
+                                  } finally {
+                                    setSavingSlot(false);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 rounded-lg bg-orange-600 hover:bg-orange-500 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50 cursor-pointer"
+                              >
+                                <Save className="h-3 w-3" /> Salvar
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
-                    </div>
-
-                    {isEditing && onUpdateSchedule && (
-                      <div className="pt-2.5 border-t border-border space-y-2.5">
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold uppercase text-muted-foreground">
-                              Início
-                            </label>
-                            <input
-                              type="time"
-                              value={editStart}
-                              onChange={(e) => setEditStart(e.target.value)}
-                              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-mono text-foreground"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold uppercase text-muted-foreground">
-                              Término
-                            </label>
-                            <input
-                              type="time"
-                              value={editEnd}
-                              onChange={(e) => setEditEnd(e.target.value)}
-                              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-mono text-foreground"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold uppercase text-muted-foreground">
-                              Vagas
-                            </label>
-                            <input
-                              type="number"
-                              min={1}
-                              max={500}
-                              value={editCap}
-                              onChange={(e) => setEditCap(Math.max(1, Number(e.target.value) || 1))}
-                              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-mono font-bold tabular-nums text-foreground"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setEditingSlotId(null)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-[11px] font-semibold hover:bg-muted cursor-pointer"
-                          >
-                            <X className="h-3 w-3" /> Cancelar
-                          </button>
-                          <button
-                            type="button"
-                            disabled={savingSlot}
-                            onClick={async () => {
-                              if (!editStart || !editEnd || editEnd <= editStart) {
-                                toast.error("O horário final deve ser maior que o inicial.");
-                                return;
-                              }
-                              setSavingSlot(true);
-                              try {
-                                await onUpdateSchedule(slot.id_horario, {
-                                  hora_inicio: editStart,
-                                  hora_fim: editEnd,
-                                  capacidade: Math.max(1, Number(editCap) || 1),
-                                });
-                                toast.success("Horário e vagas atualizados!");
-                                setEditingSlotId(null);
-                              } finally {
-                                setSavingSlot(false);
-                              }
-                            }}
-                            className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1 text-[11px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                          >
-                            <Save className="h-3 w-3" /> Salvar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Day Bookings + Waitlist */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-5 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-primary" />
-                Agendados no Dia ({dayBookings.length})
-              </h3>
-              <span className="text-[11px] font-mono text-muted-foreground tabular-nums">
-                {formatDateBR(selectedDate)}
-              </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            {dayBookings.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-                Nenhum agendamento registrado para esta data.
+            {/* Agendamentos em DD/MM/YYYY (Controle de Presença / Cancelamento) */}
+            <div className="p-5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">
+                  Agendamentos em {formatDateBR(selectedDate)}
+                </h3>
+                <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
+                  {dayBookings.length} registro{dayBookings.length !== 1 ? "s" : ""}
+                </span>
               </div>
-            ) : (
-              <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
-                {dayBookings.map((bk) => (
-                  <div
-                    key={bk.id_agendamento}
-                    className="p-3 bg-background hover:bg-muted/30 transition-colors space-y-2"
-                  >
-                    <div className="flex items-start justify-between gap-2">
+
+              {dayBookings.length === 0 ? (
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Nenhum agendamento registrado para esta data.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {dayBookings.map((agd) => (
+                    <div
+                      key={agd.id_agendamento}
+                      className="p-3.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
                       <button
                         type="button"
-                        onClick={() => onSelectBooking?.(bk)}
-                        className="text-left min-w-0 flex-1 cursor-pointer"
+                        onClick={() => onSelectBooking?.(agd)}
+                        className="text-left space-y-0.5 min-w-0 flex-1 cursor-pointer"
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-primary tabular-nums">
-                            {bk.hora_inicio}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-orange-600 dark:text-orange-400">
+                            {agd.hora_inicio}
                           </span>
-                          <span className="text-xs font-bold text-foreground truncate">
-                            {bk.lead_nome || "Participante"}
+                          <span className="font-semibold text-neutral-900 dark:text-white truncate">
+                            {agd.lead_nome || "Participante"}
+                          </span>
+                          <span className="font-mono text-[10px] text-neutral-500">
+                            {agd.protocolo}
                           </span>
                         </div>
-                        <div className="text-[11px] text-muted-foreground font-mono tabular-nums mt-0.5">
-                          {bk.protocolo} · {bk.lead_whatsapp || bk.lead_email || "Sem contato"}
-                        </div>
+                        <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                          Status atual: <strong className="font-mono">{agd.status}</strong>
+                        </p>
                       </button>
 
-                      <select
-                        value={bk.status}
-                        onChange={(e) =>
-                          onUpdateBookingStatus(
-                            bk.id_agendamento,
-                            e.target.value as AgendaBookingStatus
-                          )
-                        }
-                        className="rounded-lg border border-border bg-card px-2 py-1 text-[11px] font-semibold cursor-pointer"
-                      >
-                        <option value="CONFIRMADO">Confirmado</option>
-                        <option value="REALIZADO">Realizado</option>
-                        <option value="NO_SHOW">No-Show</option>
-                        <option value="CANCELADO">Cancelado</option>
-                      </select>
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateBookingStatus(agd.id_agendamento, "REALIZADO")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 border cursor-pointer transition-colors",
+                            agd.status === "REALIZADO"
+                              ? "bg-emerald-600 text-white border-emerald-600"
+                              : "bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700 hover:border-emerald-500"
+                          )}
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Realizado</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateBookingStatus(agd.id_agendamento, "NO_SHOW")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 border cursor-pointer transition-colors",
+                            agd.status === "NO_SHOW"
+                              ? "bg-amber-600 text-white border-amber-600"
+                              : "bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700 hover:border-amber-500"
+                          )}
+                        >
+                          <UserX className="w-3 h-3" />
+                          <span>Faltou</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateBookingStatus(
+                              agd.id_agendamento,
+                              agd.status === "CANCELADO" ? "CONFIRMADO" : "CANCELADO"
+                            )
+                          }
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 border cursor-pointer transition-colors",
+                            agd.status === "CANCELADO"
+                              ? "bg-rose-600 text-white border-rose-600"
+                              : "bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700 hover:border-rose-500"
+                          )}
+                        >
+                          <XCircle className="w-3 h-3" />
+                          <span>{agd.status === "CANCELADO" ? "Reativar" : "Cancelar"}</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Waitlist for this event */}
-          <div className="rounded-2xl border border-border bg-card p-5 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Users className="h-4 w-4 text-primary" />
-                Lista de Espera ({eventWaitlist.length})
-              </h3>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {eventWaitlist.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
-                Nenhum interessado aguardando vaga neste evento.
+            {/* Lista de Espera do Evento */}
+            <div className="p-5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-3 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <Users className="h-4 w-4 text-orange-500" />
+                  <span>Lista de Espera ({eventWaitlist.length})</span>
+                </h3>
               </div>
-            ) : (
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {eventWaitlist.map((w) => {
-                  const inviteUrl =
-                    typeof window !== "undefined" && selectedEvent
-                      ? `${window.location.origin}${buildPublicAgendaPath(selectedEvent.slug, {
-                          nome: w.nome,
-                          whatsapp: w.whatsapp,
-                          email: w.email,
-                        })}`
-                      : "";
-                  const waHref = buildWhatsAppLink(
-                    w.whatsapp,
-                    `Olá ${w.nome}! Liberamos um horário para ${
-                      w.evento_nome || selectedEvent?.nome || "nosso evento"
-                    }. Você pode escolher seu horário aqui: ${inviteUrl}`
-                  );
 
-                  return (
-                    <div
-                      key={w.id_espera}
-                      className="rounded-xl border border-border bg-background p-3 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-foreground truncate">{w.nome}</div>
-                        <div className="text-[11px] text-muted-foreground font-mono truncate">
-                          {w.whatsapp} {w.email ? `· ${w.email}` : ""}
-                        </div>
-                        {w.observacoes && (
-                          <div className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
-                            {w.observacoes}
-                          </div>
-                        )}
-                      </div>
-                      <a
-                        href={waHref}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 shrink-0"
+              {eventWaitlist.length === 0 ? (
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Nenhum interessado aguardando vaga neste evento.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {eventWaitlist.map((w) => {
+                    const inviteUrl =
+                      typeof window !== "undefined" && eventoAtual
+                        ? `${window.location.origin}${buildPublicAgendaPath(eventoAtual.slug, {
+                            nome: w.nome,
+                            whatsapp: w.whatsapp,
+                            email: w.email,
+                          })}`
+                        : "";
+                    const waHref = buildWhatsAppLink(
+                      w.whatsapp,
+                      `Olá ${w.nome}! Liberamos um horário para ${
+                        w.evento_nome || eventoAtual?.nome || "nosso evento"
+                      }. Você pode escolher seu horário aqui: ${inviteUrl}`
+                    );
+
+                    return (
+                      <div
+                        key={w.id_espera}
+                        className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 p-3 flex items-center justify-between gap-2"
                       >
-                        <MessageCircle className="h-3.5 w-3.5" /> Chamar
-                      </a>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                            {w.nome}
+                          </div>
+                          <div className="text-[11px] text-neutral-500 font-mono truncate">
+                            {w.whatsapp} {w.email ? `· ${w.email}` : ""}
+                          </div>
+                          {w.observacoes && (
+                            <div className="text-[11px] text-neutral-500 mt-0.5 line-clamp-1">
+                              {w.observacoes}
+                            </div>
+                          )}
+                        </div>
+                        <a
+                          href={waHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 shrink-0"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" /> Chamar
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 };

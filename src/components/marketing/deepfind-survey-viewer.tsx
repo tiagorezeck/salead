@@ -13,6 +13,11 @@ import { toast } from "sonner";
 import { AutomationEngine } from "@/lib/automation-engine";
 import { submitSurveyResponseToDrive, submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 import { cloudStore } from "@/services/cloudStorageService";
+import {
+  DEFAULT_LEAD_ROUTING_CONFIG,
+  resolveLeadRoutingAssignment,
+} from "@/lib/lead-rules";
+import { DEFAULT_PIPELINES } from "@/data/mock";
 
 interface DeepFindSurveyViewerProps {
   survey: Partial<Survey>;
@@ -348,7 +353,8 @@ export function DeepFindSurveyViewer({
         createdAt: new Date().toISOString(),
       };
 
-      // 2. Grava tudo em uma única transação no cloudStore com sincronização imediata
+      // 2. Grava tudo em uma única transação no cloudStore com roteamento comercial e sincronização imediata
+      let routedFullLead = fullLeadRecord;
       cloudStore.mutate(
         (draft) => {
           if (survey.id && Array.isArray(draft.surveys)) {
@@ -363,10 +369,33 @@ export function DeepFindSurveyViewer({
               l.id === leadId ? { ...l, ...(targetLead || {}), ...fullLeadRecord } : l
             );
           } else {
+            const pipes =
+              Array.isArray(draft.pipelines) && draft.pipelines.length > 0
+                ? draft.pipelines
+                : DEFAULT_PIPELINES;
+            const routingCfg = draft.leadRoutingConfig || DEFAULT_LEAD_ROUTING_CONFIG;
+            const resolved = resolveLeadRoutingAssignment({
+              config: routingCfg,
+              leadData: { temperature: minProfile.temperatura, name: fullLeadRecord.name },
+              pipelines: pipes as any,
+              users: (draft.users || []) as any,
+              existingLeads: existingLeads as any,
+            });
+            routedFullLead = {
+              ...fullLeadRecord,
+              pipelineId: resolved.targetPipelineId,
+              stage: resolved.targetStage,
+              owner: resolved.assignedOwner,
+            } as any;
             draft.leads = [
-              fullLeadRecord,
-              ...existingLeads.filter((x: any) => x.id !== fullLeadRecord.id),
+              routedFullLead,
+              ...existingLeads.filter((x: any) => x.id !== routedFullLead.id),
             ];
+            draft.leadRoutingConfig = {
+              ...routingCfg,
+              lastAssignedIndex: resolved.nextLastAssignedIndex,
+              roleCursors: resolved.nextRoleCursors,
+            };
           }
 
           draft.surveyResponses = [
@@ -378,7 +407,7 @@ export function DeepFindSurveyViewer({
       );
 
       if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
+        window.dispatchEvent(new CustomEvent("lead-submitted", { detail: routedFullLead }));
       }
 
       // 3. Dispara evento no motor de automação (AutomationEngine)

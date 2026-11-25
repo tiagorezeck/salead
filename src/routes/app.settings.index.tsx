@@ -885,17 +885,21 @@ function SettingsIndexPage() {
               const enabledRoles = getEffectiveEnabledRolesForPipeline(pipe);
               const toggleableRoles = ROLES.filter((r) => r !== "Admin Geral" && r !== "Head of Sales");
 
-              const handleToggleRole = (roleName: string) => {
+              const handleToggleRole = async (roleName: string) => {
                 const isEnabled = enabledRoles.includes(roleName);
                 const nextRoles = isEnabled
                   ? enabledRoles.filter((r) => r !== roleName)
                   : [...enabledRoles, roleName];
-                updatePipeline(pipe.id, { enabledRoles: nextRoles });
-                toast.success(
-                  isEnabled
-                    ? `Cargo "${roleName}" desabilitado em ${pipe.name}.`
-                    : `Cargo "${roleName}" habilitado em ${pipe.name}.`
-                );
+                try {
+                  await updatePipeline(pipe.id, { enabledRoles: nextRoles });
+                  toast.success(
+                    isEnabled
+                      ? `Cargo "${roleName}" desabilitado em ${pipe.name}.`
+                      : `Cargo "${roleName}" habilitado em ${pipe.name}.`
+                  );
+                } catch {
+                  toast.error("Erro ao salvar alteração de cargo na pipeline.");
+                }
               };
 
               return (
@@ -1542,11 +1546,16 @@ function PipelineManagerModal({ pipelines, onAdd, onUpdate, onDelete, onClose }:
                     <button
                       key={roleName}
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         const nextRoles = isOn
                           ? enabledList.filter((r) => r !== roleName)
                           : [...enabledList, roleName];
-                        onUpdate(active.id, { enabledRoles: nextRoles });
+                        await onUpdate(active.id, { enabledRoles: nextRoles });
+                        toast.success(
+                          isOn
+                            ? `Cargo "${roleName}" desabilitado em ${active.name}.`
+                            : `Cargo "${roleName}" habilitado em ${active.name}.`
+                        );
                       }}
                       className={cn(
                         "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer",

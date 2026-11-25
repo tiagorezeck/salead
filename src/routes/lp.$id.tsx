@@ -50,6 +50,11 @@ import {
 } from "@/services/googleDriveDatabaseService";
 import { cloudStore } from "@/services/cloudStorageService";
 import { buildPublicAgendaPath } from "@/lib/agenda-engine";
+import {
+  DEFAULT_LEAD_ROUTING_CONFIG,
+  resolveLeadRoutingAssignment,
+} from "@/lib/lead-rules";
+import { DEFAULT_PIPELINES } from "@/data/mock";
 
 const SURVEY_PRESETS: any[] = [
   {
@@ -1193,42 +1198,79 @@ function PublicLPPage() {
             console.warn("Direct database submit notice:", dbErr);
           }
 
-          // Persistência imediata no cloudStore (RAM + Push imediato Apps Script/Sheets)
+          // Persistência imediata no cloudStore (RAM + roteamento SDR/funil + Push Apps Script/Sheets)
+          let routedPipelineId = defaultPipeline?.id || "sdr";
+          let routedStage = "Leads";
+          let routedOwner = "Sem responsável";
+
           if (typeof window !== "undefined") {
             try {
-              const fullLeadRecord = {
-                id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                ...leadRecord,
-                createdAt: new Date().toISOString(),
-                activities: [
-                  {
-                    id: `act_${Date.now()}`,
-                    type: "conversion",
-                    description: `Capturado via Landing Page ${lp.name || lp.title}`,
-                    timestamp: new Date().toISOString(),
-                  }
-                ],
-              };
+              const generatedLeadId = `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+              let savedLeadRecord: any = null;
 
               cloudStore.mutate(
                 (draft) => {
+                  const pipes =
+                    Array.isArray(draft.pipelines) && draft.pipelines.length > 0
+                      ? draft.pipelines
+                      : DEFAULT_PIPELINES;
+                  const routingCfg = draft.leadRoutingConfig || DEFAULT_LEAD_ROUTING_CONFIG;
+                  const resolved = resolveLeadRoutingAssignment({
+                    config: routingCfg,
+                    leadData: { temperature: leadRecord.temperature || "Quente", name: leadRecord.name },
+                    pipelines: pipes as any,
+                    users: (draft.users || []) as any,
+                    existingLeads: (draft.leads || []) as any,
+                  });
+
+                  routedPipelineId = resolved.targetPipelineId;
+                  routedStage = resolved.targetStage;
+                  routedOwner = resolved.assignedOwner;
+
+                  const fullLeadRecord = {
+                    id: generatedLeadId,
+                    ...leadRecord,
+                    pipelineId: routedPipelineId,
+                    pipeline_id: routedPipelineId,
+                    stage: routedStage,
+                    owner: routedOwner,
+                    landingPage: lp.name || lp.title || lp.id,
+                    createdAt: new Date().toISOString(),
+                    activities: [
+                      {
+                        id: `act_${Date.now()}`,
+                        type: "conversion",
+                        description: `Capturado via Landing Page ${lp.name || lp.title} (Funil: ${routedPipelineId} · Responsável: ${routedOwner})`,
+                        timestamp: new Date().toISOString(),
+                      }
+                    ],
+                  };
+
+                  savedLeadRecord = fullLeadRecord;
                   draft.leads = [fullLeadRecord, ...(draft.leads || []).filter((x: any) => x.id !== fullLeadRecord.id)];
+                  draft.leadRoutingConfig = {
+                    ...routingCfg,
+                    lastAssignedIndex: resolved.nextLastAssignedIndex,
+                    roleCursors: resolved.nextRoleCursors,
+                  };
                   draft.landingPages = (draft.landingPages || []).map((p: any) =>
                     p && (p.id === lp.id || (lp.slug && p.slug === lp.slug))
                       ? { ...p, leads: (Number(p.leads || p.leads_count) || 0) + 1 }
                       : p
                   );
                 },
-                { skipPush: true }
+                { immediate: true }
               );
 
-              window.dispatchEvent(new CustomEvent("lead-submitted", { detail: fullLeadRecord }));
+              if (savedLeadRecord) {
+                window.dispatchEvent(new CustomEvent("lead-submitted", { detail: savedLeadRecord }));
+              }
             } catch (storageErr) {
               console.warn("Cloud persistence notice in LP submit:", storageErr);
             }
           }
 
-          // 2. Gravação atômica única no Google Apps Script / Sheets (SUBMIT_LP_LEAD) + webhook Express
+          // 2. Gravação no Google Apps Script / Sheets com os dados já roteados
           fetch(`/api/landing-pages/${encodeURIComponent(lp.id)}/conversion`, {
             method: "POST",
           }).catch(() => {});
@@ -1241,12 +1283,14 @@ function PublicLPPage() {
             whatsapp: lead.whatsapp || "",
             company: lead.company || `${lead.name || "Lead"} (LP: ${lp.name || lp.title})`,
             source: effectiveSource,
+            pipelineId: routedPipelineId,
+            stage: routedStage,
+            owner: routedOwner,
+            temperature: "Quente",
             utm,
             answers: lead.quizAnswers || {},
             isTest: lp.status === "Teste",
-          })
-            .then(() => cloudStore.pullNow(false).catch(() => {}))
-            .catch((gErr) => console.warn("Google Drive background sync notice:", gErr));
+          }).catch((gErr) => console.warn("Google Drive background sync notice:", gErr));
 
           // 5. Notifica Analytics de Conversão da LP
           try {

@@ -1956,10 +1956,11 @@ export function useData() {
   const leadRoutingConfig = leadRoutingConfigQuery.data ?? DEFAULT_LEAD_ROUTING_CONFIG;
 
   const updateLeadRoutingConfig = async (newConfig: LeadRoutingConfig) => {
-    cloudStore.mutate((draft) => {
-      draft.leadRoutingConfig = newConfig;
-    }, { immediate: true });
-    queryClient.setQueryData(['lead_routing_config'], newConfig);
+    const stamped = { ...newConfig, updatedAt: new Date().toISOString() };
+    queryClient.setQueryData(['lead_routing_config'], stamped);
+    await cloudStore.mutateAndSync((draft) => {
+      draft.leadRoutingConfig = stamped;
+    });
     queryClient.invalidateQueries({ queryKey: ['lead_routing_config'] });
   };
 
@@ -2225,6 +2226,7 @@ export function useData() {
       let resolvedPipelineId = l.pipelineId;
       let resolvedStage = l.stage;
       let resolvedOwner = l.owner;
+      let nextRoutingToSave: LeadRoutingConfig | null = null;
 
       if (leadRoutingConfig?.enabled) {
         const routingResult = resolveLeadRoutingAssignment({
@@ -2241,15 +2243,15 @@ export function useData() {
         if (!resolvedStage || resolvedStage === "Leads" || resolvedStage === "Novo Lead") {
           resolvedStage = routingResult.targetStage;
         }
-        if (!resolvedOwner || resolvedOwner === "Sem dono" || resolvedOwner === "Sem responsável") {
+        if (!resolvedOwner || resolvedOwner === "Sem dono" || resolvedOwner === "Sem responsável" || resolvedOwner === "Inbound LP") {
           resolvedOwner = routingResult.assignedOwner;
         }
 
-        updateLeadRoutingConfig({
+        nextRoutingToSave = {
           ...leadRoutingConfig,
           lastAssignedIndex: routingResult.nextLastAssignedIndex,
           roleCursors: routingResult.nextRoleCursors,
-        }).catch(() => {});
+        };
       }
 
       const initialCopilotDocs = Array.isArray(l.copilotDocuments)
@@ -2276,7 +2278,7 @@ export function useData() {
         minScore: l.minScore || "Nenhum",
         landingPage: l.landingPage,
         productId: l.productId,
-        pipelineId: resolvedPipelineId || "prospection",
+        pipelineId: resolvedPipelineId || "sdr",
         tags,
         score: Number(l.score) || 0,
         sla: l.sla || "ok",
@@ -2307,14 +2309,18 @@ export function useData() {
       };
 
       try {
-        cloudStore.mutate((draft) => {
+        await cloudStore.mutateAndSync((draft) => {
           draft.leads = [fullLead, ...(draft.leads || []).filter((x: any) => x.id !== fullLead.id)];
-        }, { immediate: true });
+          if (nextRoutingToSave) {
+            draft.leadRoutingConfig = nextRoutingToSave;
+          }
+        });
       } catch (err) {
         console.warn("Aviso ao salvar lead:", err);
       }
 
       invalidate('leads');
+      if (nextRoutingToSave) invalidate('lead_routing_config');
       return fullLead;
     },
 
@@ -2538,8 +2544,13 @@ export function useData() {
         atualizado_em: nowIso,
         criado_em: evento.criado_em || nowIso,
       };
-      cloudStore.mutate((draft) => {
-        const list = Array.isArray(draft.agendaEvents) ? draft.agendaEvents : [];
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.removeItem("salead_agenda_cleared_by_user");
+        } catch {}
+      }
+      await cloudStore.mutateAndSync((draft) => {
+        const list = Array.isArray(draft.agendaEvents) ? [...draft.agendaEvents] : [];
         const idx = list.findIndex((e: any) => e.id_evento === savedEvento.id_evento);
         if (idx >= 0) list[idx] = savedEvento;
         else list.unshift(savedEvento);
@@ -2560,7 +2571,7 @@ export function useData() {
           ...otherFields,
           ...campos.map((c) => ({ ...c, id_evento: savedEvento.id_evento })),
         ];
-      }, { immediate: true });
+      });
 
       queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
       queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
@@ -2569,12 +2580,17 @@ export function useData() {
     },
 
     deleteAgendaEvent: async (idEvento: string) => {
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaEvents = (draft.agendaEvents || []).filter((e: any) => e.id_evento !== idEvento);
         draft.agendaSchedules = (draft.agendaSchedules || []).filter((s: any) => s.id_evento !== idEvento);
         draft.agendaBlocks = (draft.agendaBlocks || []).filter((b: any) => b.id_evento !== idEvento);
         draft.agendaFormFields = (draft.agendaFormFields || []).filter((f: any) => f.id_evento !== idEvento);
-      }, { immediate: true });
+        if (draft.agendaEvents.length === 0 && typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem("salead_agenda_cleared_by_user", "1");
+          } catch {}
+        }
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
       queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
       queryClient.invalidateQueries({ queryKey: ['agenda_blocks'] });
@@ -2604,11 +2620,17 @@ export function useData() {
         .filter((f: any) => f.id_evento === idEvento)
         .map((f: any) => ({ ...f, id_campo: `FLD-${generateRandomCode(5)}`, id_evento: newId }));
 
-      cloudStore.mutate((draft) => {
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.removeItem("salead_agenda_cleared_by_user");
+        } catch {}
+      }
+
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaEvents = [cloned, ...(draft.agendaEvents || [])];
         draft.agendaSchedules = [...(draft.agendaSchedules || []), ...origSchedules];
         draft.agendaFormFields = [...(draft.agendaFormFields || []), ...origFields];
-      }, { immediate: true });
+      });
 
       queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
       queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
@@ -2618,18 +2640,18 @@ export function useData() {
     },
 
     updateAgendaEventPublicConfig: async (idEvento: string, patch: Partial<AgendaEvent>) => {
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaEvents = (draft.agendaEvents || []).map((e: any) =>
           e.id_evento === idEvento ? { ...e, ...patch, atualizado_em: new Date().toISOString() } : e
         );
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_events'] });
       toast.success("Configurações públicas do evento atualizadas!");
     },
 
     updateAgendaSchedule: async (idHorario: string, updates: Partial<AgendaSchedule>) => {
       const nowIso = new Date().toISOString();
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaSchedules = (Array.isArray(draft.agendaSchedules) ? draft.agendaSchedules : []).map((s: any) =>
           s.id_horario === idHorario
             ? {
@@ -2643,14 +2665,14 @@ export function useData() {
               }
             : s
         );
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_schedules'] });
     },
 
     toggleAgendaBlock: async (idEvento: string, data: string, horaInicio: string, motivo?: string) => {
       const actor = currentUser?.name || "Admin";
-      cloudStore.mutate((draft) => {
-        const blocks: AgendaBlock[] = Array.isArray(draft.agendaBlocks) ? draft.agendaBlocks : [];
+      await cloudStore.mutateAndSync((draft) => {
+        const blocks: AgendaBlock[] = Array.isArray(draft.agendaBlocks) ? [...draft.agendaBlocks] : [];
         const existingIdx = blocks.findIndex(
           (b) => b.id_evento === idEvento && b.data === data && b.hora_inicio === horaInicio
         );
@@ -2668,8 +2690,8 @@ export function useData() {
             criado_em: new Date().toISOString(),
           });
         }
-        draft.agendaBlocks = [...blocks];
-      }, { immediate: true });
+        draft.agendaBlocks = blocks;
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_blocks'] });
     },
 
@@ -2678,9 +2700,9 @@ export function useData() {
       novoStatus: AgendaBookingStatus,
       motivo?: string
     ) => {
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         applyBookingStatusUpdateToDraft(draft, idAgendamento, novoStatus, motivo);
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_bookings'] });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       queryClient.invalidateQueries({ queryKey: ['leads'] });
@@ -2692,9 +2714,9 @@ export function useData() {
       novaHoraInicio: string,
       novaHoraFim: string
     ) => {
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         applyBookingRescheduleToDraft(draft, idAgendamento, novaData, novaHoraInicio, novaHoraFim);
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_bookings'] });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       queryClient.invalidateQueries({ queryKey: ['leads'] });
@@ -2719,10 +2741,10 @@ export function useData() {
         criado_em: nowIso,
         atualizado_em: nowIso,
       };
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         const list = Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : [];
         draft.agendaCustomItems = [created, ...list];
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
       toast.success("Compromisso adicionado na agenda!");
       return created;
@@ -2730,30 +2752,30 @@ export function useData() {
 
     updateAgendaCustomItem: async (id: string, updates: Partial<AgendaCustomItem>) => {
       const nowIso = new Date().toISOString();
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaCustomItems = (Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : []).map((it: any) =>
           it.id === id ? { ...it, ...updates, atualizado_em: nowIso } : it
         );
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
     },
 
     toggleAgendaCustomItem: async (id: string) => {
       const nowIso = new Date().toISOString();
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaCustomItems = (Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : []).map((it: any) =>
           it.id === id ? { ...it, concluido: !it.concluido, atualizado_em: nowIso } : it
         );
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
     },
 
     deleteAgendaCustomItem: async (id: string) => {
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         draft.agendaCustomItems = (Array.isArray(draft.agendaCustomItems) ? draft.agendaCustomItems : []).filter(
           (it: any) => it.id !== id
         );
-      }, { immediate: true });
+      });
       queryClient.invalidateQueries({ queryKey: ['agenda_custom_items'] });
       toast.success("Compromisso removido.");
     },
@@ -2773,11 +2795,27 @@ export function useData() {
         goals: u.goals || [],
         operationalGoals: u.operationalGoals || [],
         allowedModules: u.allowedModules || SYSTEM_MODULES.map(m => m.id),
-        customPermissionsEnabled: Boolean(u.customPermissionsEnabled)
+        customPermissionsEnabled: Boolean(u.customPermissionsEnabled),
+        createdAt: u.createdAt || new Date().toISOString()
       };
 
       try {
-        cloudStore.mutate((draft) => {
+        await cloudStore.mutateAndSync((draft) => {
+          const existingUsers = Array.isArray(draft.users) && draft.users.length > 0
+            ? [...draft.users]
+            : getRegisteredUsers();
+          const existingIdx = existingUsers.findIndex(
+            (usr: any) =>
+              usr.id === fullUser.id ||
+              (usr.email && fullUser.email && usr.email.toLowerCase() === fullUser.email.toLowerCase())
+          );
+          if (existingIdx >= 0) {
+            existingUsers[existingIdx] = { ...existingUsers[existingIdx], ...fullUser };
+          } else {
+            existingUsers.push(fullUser as any);
+          }
+          draft.users = normalizeSingleAdmin(existingUsers as any, false);
+
           if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
             const nextMap = { ...(draft.userModulePermissions || {}) };
             const permEntry = {
@@ -2788,10 +2826,16 @@ export function useData() {
             if (u.email) nextMap[u.email.toLowerCase()] = permEntry;
             draft.userModulePermissions = nextMap;
           }
-          // Ao cadastrar usuário com cargo, habilita automaticamente o cargo na pipeline correspondente
-          draft.pipelines = enableRoleInPipelinesList(draft.pipelines || [], fullUser.role);
-        }, { immediate: true });
-        saveRegisteredUser(fullUser);
+
+          const mergedPipes: Pipeline[] = DEFAULT_PIPELINES.map((def) => {
+            const found = (draft.pipelines || []).find((p: any) => p.id === def.id);
+            return found ? { ...def, ...found } : { ...def };
+          });
+          (draft.pipelines || []).forEach((p: any) => {
+            if (p?.id && !mergedPipes.some((m) => m.id === p.id)) mergedPipes.push(p);
+          });
+          draft.pipelines = enableRoleInPipelinesList(mergedPipes, fullUser.role);
+        });
       } catch (e) {
         console.warn("Aviso ao cadastrar usuário:", e);
       }
@@ -2802,7 +2846,13 @@ export function useData() {
 
     updateUser: async (id: string, u: any) => { 
       try {
-        cloudStore.mutate((draft) => {
+        await cloudStore.mutateAndSync((draft) => {
+          const existingUsers = Array.isArray(draft.users) && draft.users.length > 0
+            ? [...draft.users]
+            : getRegisteredUsers();
+          const updatedUsers = existingUsers.map((user: any) => user.id === id ? { ...user, ...u } : user);
+          draft.users = normalizeSingleAdmin(updatedUsers as any, false);
+
           if (u.customPermissionsEnabled !== undefined || u.allowedModules !== undefined) {
             const nextMap = { ...(draft.userModulePermissions || {}) };
             const permEntry = {
@@ -2814,13 +2864,16 @@ export function useData() {
             draft.userModulePermissions = nextMap;
           }
           if (u.role) {
-            draft.pipelines = enableRoleInPipelinesList(draft.pipelines || [], u.role);
+            const mergedPipes: Pipeline[] = DEFAULT_PIPELINES.map((def) => {
+              const found = (draft.pipelines || []).find((p: any) => p.id === def.id);
+              return found ? { ...def, ...found } : { ...def };
+            });
+            (draft.pipelines || []).forEach((p: any) => {
+              if (p?.id && !mergedPipes.some((m) => m.id === p.id)) mergedPipes.push(p);
+            });
+            draft.pipelines = enableRoleInPipelinesList(mergedPipes, u.role);
           }
-        }, { immediate: true });
-
-        const localUsers = getRegisteredUsers();
-        const updated = localUsers.map(user => user.id === id ? { ...user, ...u } : user);
-        saveRegisteredUsers(updated);
+        });
       } catch (err) {
         console.warn("Erro ao atualizar usuário:", err);
       }
@@ -3555,6 +3608,7 @@ export function useData() {
         name: pipeData.name || "Novo Pipeline",
         code: pipeData.code || (pipeData.name || "NOVO").toUpperCase().replace(/[^A-Z0-9]/g, "_").substring(0, 10),
         functionRole: pipeData.functionRole || "Seller",
+        enabledRoles: Array.isArray(pipeData.enabledRoles) ? pipeData.enabledRoles : (pipeData.functionRole ? [String(pipeData.functionRole)] : undefined),
         description: pipeData.description || "",
         color: pipeData.color || "primary",
         active: pipeData.active !== undefined ? pipeData.active : true,
@@ -3564,15 +3618,32 @@ export function useData() {
         created_at: new Date().toISOString()
       };
 
+      const mergeAllPipes = (rawList: any[]): Pipeline[] => {
+        const source = Array.isArray(rawList) ? rawList : [];
+        const merged: Pipeline[] = DEFAULT_PIPELINES.map((def) => {
+          const found = source.find((p: any) =>
+            p.id === def.id ||
+            (p.code && def.code && p.code.toLowerCase() === def.code.toLowerCase()) ||
+            (p.name && def.name && p.name.trim().toUpperCase() === def.name.trim().toUpperCase())
+          );
+          return found ? { ...def, ...found, stages: Array.isArray(found.stages) && found.stages.length > 0 ? found.stages : def.stages } : { ...def };
+        });
+        source.forEach((p: any) => {
+          if (p?.id && !merged.some((m) => m.id === p.id)) {
+            merged.push(p);
+          }
+        });
+        return merged;
+      };
+
       queryClient.setQueryData(['pipelines'], (old: any) => {
-        const list = Array.isArray(old) ? old : [];
+        const list = mergeAllPipes(Array.isArray(old) ? old : []);
         return [...list, newPipe];
       });
 
-      cloudStore.mutate((draft) => {
-        const baseList = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
-        draft.pipelines = [...baseList, newPipe];
-      }, { immediate: true });
+      await cloudStore.mutateAndSync((draft) => {
+        draft.pipelines = [...mergeAllPipes(draft.pipelines || []), newPipe];
+      });
 
       toast.success(`Pipeline "${newPipe.name}" criado com sucesso!`);
       invalidate('pipelines');
@@ -3580,43 +3651,83 @@ export function useData() {
     },
 
     updatePipeline: async (id: string, u: Partial<Pipeline>) => { 
+      const mergeAllPipes = (rawList: any[]): Pipeline[] => {
+        const source = Array.isArray(rawList) ? rawList : [];
+        const merged: Pipeline[] = DEFAULT_PIPELINES.map((def) => {
+          const found = source.find((p: any) =>
+            p.id === def.id ||
+            (p.code && def.code && p.code.toLowerCase() === def.code.toLowerCase()) ||
+            (p.name && def.name && p.name.trim().toUpperCase() === def.name.trim().toUpperCase())
+          );
+          return found ? { ...def, ...found, stages: Array.isArray(found.stages) && found.stages.length > 0 ? found.stages : def.stages } : { ...def };
+        });
+        source.forEach((p: any) => {
+          if (p?.id && !merged.some((m) => m.id === p.id)) {
+            merged.push(p);
+          }
+        });
+        return merged;
+      };
+
       queryClient.setQueryData(['pipelines'], (old: any) => {
-        if (!Array.isArray(old)) return old;
-        return old.map((p: any) => p.id === id ? { ...p, ...u } : p);
+        const list = mergeAllPipes(Array.isArray(old) ? old : []);
+        return list.map((p: any) => p.id === id ? { ...p, ...u } : p);
       });
 
-      cloudStore.mutate((draft) => {
-        const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
-        const pipes = baseList.map((p: any) => p.id === id ? { ...p, ...u } : p);
+      await cloudStore.mutateAndSync((draft) => {
+        const merged = mergeAllPipes(draft.pipelines || []);
+        const pipes = merged.map((p: any) => p.id === id ? { ...p, ...u } : p);
         if (!pipes.some((p: any) => p.id === id)) {
           const defPipe = DEFAULT_PIPELINES.find(d => d.id === id);
           if (defPipe) pipes.push({ ...defPipe, ...u });
         }
         draft.pipelines = pipes;
-      }, { immediate: true });
+      });
 
-      toast.success("Pipeline atualizado com sucesso!");
       invalidate('pipelines');
     },
 
-    savePipelineStages: async (pipelineId: string, stages: PipelineStage[]) => {
+    savePipelineStages: async (pipelineId: string, stages: PipelineStage[], enabledRoles?: string[]) => {
       const updatedStages = stages.map((s, idx) => ({ ...s, order: idx + 1 }));
+      const patch: Partial<Pipeline> = {
+        stages: updatedStages,
+        ...(Array.isArray(enabledRoles) ? { enabledRoles } : {}),
+      };
+
+      const mergeAllPipes = (rawList: any[]): Pipeline[] => {
+        const source = Array.isArray(rawList) ? rawList : [];
+        const merged: Pipeline[] = DEFAULT_PIPELINES.map((def) => {
+          const found = source.find((p: any) =>
+            p.id === def.id ||
+            (p.code && def.code && p.code.toLowerCase() === def.code.toLowerCase()) ||
+            (p.name && def.name && p.name.trim().toUpperCase() === def.name.trim().toUpperCase())
+          );
+          return found ? { ...def, ...found, stages: Array.isArray(found.stages) && found.stages.length > 0 ? found.stages : def.stages } : { ...def };
+        });
+        source.forEach((p: any) => {
+          if (p?.id && !merged.some((m) => m.id === p.id)) {
+            merged.push(p);
+          }
+        });
+        return merged;
+      };
+
       queryClient.setQueryData(['pipelines'], (old: any) => {
-        if (!Array.isArray(old)) return old;
-        return old.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
+        const list = mergeAllPipes(Array.isArray(old) ? old : []);
+        return list.map((p: any) => p.id === pipelineId ? { ...p, ...patch } : p);
       });
 
-      cloudStore.mutate((draft) => {
-        const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
-        const pipes = baseList.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
+      await cloudStore.mutateAndSync((draft) => {
+        const merged = mergeAllPipes(draft.pipelines || []);
+        const pipes = merged.map((p: any) => p.id === pipelineId ? { ...p, ...patch } : p);
         if (!pipes.some((p: any) => p.id === pipelineId)) {
           const defPipe = DEFAULT_PIPELINES.find(d => d.id === pipelineId);
-          if (defPipe) pipes.push({ ...defPipe, stages: updatedStages });
+          if (defPipe) pipes.push({ ...defPipe, ...patch });
         }
         draft.pipelines = pipes;
-      }, { immediate: true });
+      });
 
-      toast.success("Etapas do pipeline atualizadas!");
+      toast.success("Configurações do pipeline salvas com sucesso!");
       invalidate('pipelines');
     },
 
@@ -3645,7 +3756,7 @@ export function useData() {
           return old.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
         });
 
-        cloudStore.mutate((draft) => {
+        await cloudStore.mutateAndSync((draft) => {
           if (fallbackStageName && fallbackStageName !== stageName) {
             draft.leads = (draft.leads || []).map((l: any) => {
               if ((l.pipelineId === pipelineId || (!l.pipelineId && pipelineId === "prospection")) && l.stage === stageName) {
@@ -3656,7 +3767,7 @@ export function useData() {
           }
           const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
           draft.pipelines = baseList.map((p: any) => p.id === pipelineId ? { ...p, stages: updatedStages } : p);
-        }, { immediate: true });
+        });
       }
 
       toast.success(`Etapa "${stageName}" excluída do pipeline.`);
@@ -3670,10 +3781,10 @@ export function useData() {
         return old.filter((p: any) => p.id !== id);
       });
 
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
         const baseList: Pipeline[] = Array.isArray(draft.pipelines) && draft.pipelines.length > 0 ? draft.pipelines : DEFAULT_PIPELINES;
         draft.pipelines = baseList.filter((p: any) => p.id !== id);
-      }, { immediate: true });
+      });
 
       toast.success("Pipeline removido com sucesso!");
       invalidate('pipelines');
@@ -3957,17 +4068,13 @@ export function useData() {
         ...(customConfig || {})
       };
 
-      if (customConfig) {
-        await updateLeadRoutingConfig(workingConfig);
-      }
-
       let leadsToProcess: Lead[] = [];
       if (targetLeadIds && targetLeadIds.length > 0) {
         leadsToProcess = leads.filter(l => targetLeadIds.includes(l.id));
       } else {
         leadsToProcess = leads.filter(l => {
           const elig = checkLeadClaimEligibility(l, currentUser, pipelines);
-          const isUnassigned = !l.owner || l.owner === "Sem dono" || l.owner === "Sem responsável";
+          const isUnassigned = !l.owner || l.owner === "Sem dono" || l.owner === "Sem responsável" || l.owner === "Inbound LP";
           const isInitialStage = l.stage === "Novo Lead" || l.stage === "Leads" || l.stage === "Sem Contato";
           return elig.canClaim && (isUnassigned || isInitialStage);
         });
@@ -4027,7 +4134,8 @@ export function useData() {
         );
       });
 
-      await updateLeadRoutingConfig(workingConfig).catch(() => {});
+      const finalConfig = { ...workingConfig, updatedAt: nowIso };
+      queryClient.setQueryData(['lead_routing_config'], finalConfig);
 
       const updatedLeadIds = new Set(leadsToProcess.map(l => l.id));
 
@@ -4070,7 +4178,7 @@ export function useData() {
             user: currentUser?.name || "Distribuição Automática",
             metadata: {
               targetRole: assignment.targetRole,
-              distributionType: workingConfig.distributionType,
+              distributionType: finalConfig.distributionType,
               assignedOwner: assignment.owner
             }
           };
@@ -4099,11 +4207,13 @@ export function useData() {
         return [...historyEntries, ...list].slice(0, 1000);
       });
 
-      cloudStore.mutate((draft) => {
+      await cloudStore.mutateAndSync((draft) => {
+        draft.leadRoutingConfig = finalConfig;
         draft.leads = applyDistribution(draft.leads || []);
         draft.historico_pipeline = [...historyEntries, ...(draft.historico_pipeline || [])].slice(0, 1000);
-      }, { immediate: true });
+      });
 
+      invalidate('lead_routing_config');
       invalidate('leads');
       invalidate('pipeline_history');
       toast.dismiss(toastId);

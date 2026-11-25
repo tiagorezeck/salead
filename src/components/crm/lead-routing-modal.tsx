@@ -98,11 +98,11 @@ export function LeadRoutingModal({ isOpen, open, onClose, onDistributed }: LeadR
         ...(leadRoutingConfig.temperatureRules || {}),
       });
     }
-  }, [isModalOpen, leadRoutingConfig, users]);
+  }, [isModalOpen]);
 
   const eligibleInitialLeads = useMemo(() => {
     return leads.filter((l) => {
-      const isUnassigned = !l.owner || l.owner === "Sem dono" || l.owner === "Sem responsável";
+      const isUnassigned = !l.owner || l.owner === "Sem dono" || l.owner === "Sem responsável" || l.owner === "Inbound LP";
       const isInitial = l.stage === "Novo Lead" || l.stage === "Leads" || l.stage === "Sem Contato";
       return isUnassigned || isInitial;
     });
@@ -222,10 +222,14 @@ export function LeadRoutingModal({ isOpen, open, onClose, onDistributed }: LeadR
     setIsDistributing(true);
     try {
       const newConfig = buildConfig();
-      await updateLeadRoutingConfig(newConfig);
 
       if (distributeLeadsByRoutingConfig) {
-        await distributeLeadsByRoutingConfig(undefined, newConfig);
+        const res = await distributeLeadsByRoutingConfig(undefined, newConfig);
+        if (!res || res.count === 0) {
+          await updateLeadRoutingConfig(newConfig);
+        }
+      } else {
+        await updateLeadRoutingConfig(newConfig);
       }
 
       if (onDistributed) onDistributed();

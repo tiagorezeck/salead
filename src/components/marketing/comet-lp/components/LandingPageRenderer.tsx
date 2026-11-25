@@ -89,6 +89,11 @@ import { DeepFindSurveyViewer } from "@/components/marketing/deepfind-survey-vie
 import { submitLpLeadToDrive } from "@/services/googleDriveDatabaseService";
 import { cloudStore } from "@/services/cloudStorageService";
 import { buildPublicAgendaPath } from "@/lib/agenda-engine";
+import {
+  DEFAULT_LEAD_ROUTING_CONFIG,
+  resolveLeadRoutingAssignment,
+} from "@/lib/lead-rules";
+import { DEFAULT_PIPELINES } from "@/data/mock";
 
 interface LandingPageRendererProps {
   page: LandingPage;
@@ -977,59 +982,107 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
         }
 
         // Persistência local imediata e sincronização com a base do CRM (Vercel SPA & Local)
+        let routedPipelineId = "sdr";
+        let routedStage = "Leads";
+        let routedOwner = "Sem responsável";
+
         if (typeof window !== "undefined") {
           try {
             const effectiveSource = utms?.utm_source || utms?.src || "Landing Page Form";
-            const newLeadObj = {
-              id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-              name: leadName || "Lead Capturado",
-              company: `${leadName || "Lead"} (LP: ${page.title || page.id || "Landing Page"})`,
-              email: leadEmail || "",
-              whatsapp: leadPhone || "",
-              value: 0,
-              stage: "Leads",
-              owner: "Inbound LP",
-              source: `LP: ${page.title || page.id || "Landing Page"} [${effectiveSource}]`,
-              classification: isTest ? "Lead Teste" : "Lead",
-              temperature: "Quente",
-              type: "Inbound",
-              strategy: "CRO Auto",
-              decisionRole: "Decisor",
-              minScore: "Aprovado",
-              landingPage: page.title || page.id,
-              tags: [effectiveSource, utms?.utm_campaign || "inbound", "comet-lp", isTest ? "leadtest" : ""].filter(Boolean),
-              score: 85,
-              sla: "ok",
-              lastInteraction: "Formulário enviado na LP",
-              createdAt: new Date().toISOString(),
-              activities: [
-                {
-                  id: `act_${Date.now()}`,
-                  type: "conversion",
-                  description: `Capturado via formulário na LP ${page.title || page.id}`,
-                  timestamp: new Date().toISOString(),
-                }
-              ],
-              completedCheckpoints: [],
-              status: "Ativo",
-              personType: "PJ",
-              role: "",
-              revenue: "",
-              capag: "",
-              lpVisits: 1,
-              isCustomer: false,
-              isRecurring: false,
-              metadata: payload,
-            };
+            const leadId = `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            let createdLeadSnapshot: any = null;
 
             cloudStore.mutate(
               (draft) => {
+                const pipes =
+                  Array.isArray(draft.pipelines) && draft.pipelines.length > 0
+                    ? draft.pipelines
+                    : DEFAULT_PIPELINES;
+                const routingCfg = draft.leadRoutingConfig || DEFAULT_LEAD_ROUTING_CONFIG;
+                const resolved = resolveLeadRoutingAssignment({
+                  config: routingCfg,
+                  leadData: { temperature: "Quente", name: leadName },
+                  pipelines: pipes as any,
+                  users: (draft.users || []) as any,
+                  existingLeads: (draft.leads || []) as any,
+                });
+
+                routedPipelineId = resolved.targetPipelineId;
+                routedStage = resolved.targetStage;
+                routedOwner = resolved.assignedOwner;
+
+                const agendaSlug = (page as any)?.agendaSlug || (page as any)?.agendaEventSlug;
+                const agendaEventId = (page as any)?.agendaEventId;
+                const agendaEventName = (page as any)?.agendaEventName;
+
+                const newLeadObj = {
+                  id: leadId,
+                  name: leadName || "Lead Capturado",
+                  company: `${leadName || "Lead"} (LP: ${page.title || page.id || "Landing Page"})`,
+                  email: leadEmail || "",
+                  whatsapp: leadPhone || "",
+                  value: 0,
+                  pipelineId: routedPipelineId,
+                  stage: routedStage,
+                  owner: routedOwner,
+                  source: `LP: ${page.title || page.id || "Landing Page"} [${effectiveSource}]`,
+                  classification: isTest ? "Lead Teste" : "Lead",
+                  temperature: "Quente",
+                  type: "Inbound",
+                  strategy: "CRO Auto",
+                  decisionRole: "Decisor",
+                  minScore: "Aprovado",
+                  landingPage: page.title || page.id,
+                  tags: [
+                    effectiveSource,
+                    utms?.utm_campaign || "inbound",
+                    "comet-lp",
+                    agendaSlug || "",
+                    isTest ? "leadtest" : "",
+                  ].filter(Boolean),
+                  score: 85,
+                  sla: "ok",
+                  lastInteraction: "Formulário enviado na LP",
+                  createdAt: new Date().toISOString(),
+                  activities: [
+                    {
+                      id: `act_${Date.now()}`,
+                      type: "conversion",
+                      description: `Capturado via formulário na LP ${page.title || page.id} (Funil: ${routedPipelineId} · Responsável: ${routedOwner})`,
+                      timestamp: new Date().toISOString(),
+                    }
+                  ],
+                  completedCheckpoints: [],
+                  status: "Ativo",
+                  personType: "PJ",
+                  role: "",
+                  revenue: "",
+                  capag: "",
+                  lpVisits: 1,
+                  isCustomer: false,
+                  isRecurring: false,
+                  metadata: {
+                    ...(payload || {}),
+                    ...(agendaEventId ? { eventId: agendaEventId } : {}),
+                    ...(agendaEventName ? { eventName: agendaEventName } : {}),
+                    ...(agendaSlug ? { eventSlug: agendaSlug } : {}),
+                  },
+                };
+
+                createdLeadSnapshot = newLeadObj;
                 draft.leads = [newLeadObj, ...(draft.leads || []).filter((x: any) => x.id !== newLeadObj.id)];
+                draft.leadRoutingConfig = {
+                  ...routingCfg,
+                  lastAssignedIndex: resolved.nextLastAssignedIndex,
+                  roleCursors: resolved.nextRoleCursors,
+                };
               },
               { immediate: true }
             );
 
-            window.dispatchEvent(new CustomEvent("lead-submitted", { detail: newLeadObj }));
+            if (createdLeadSnapshot) {
+              window.dispatchEvent(new CustomEvent("lead-submitted", { detail: createdLeadSnapshot }));
+            }
           } catch (stErr) {
             console.warn("Cloud persistence notice:", stErr);
           }
@@ -1045,6 +1098,10 @@ export const LandingPageRenderer: React.FC<LandingPageRendererProps> = ({
           pageTitle: page.title,
           landingPageId: page.id,
           landingPageTitle: page.title,
+          pipelineId: routedPipelineId,
+          stage: routedStage,
+          owner: routedOwner,
+          temperature: "Quente",
           quizAnswers: quizSummary,
           utms,
           source: utms?.utm_source || "Landing Page Form",

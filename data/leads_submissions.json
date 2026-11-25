@@ -1080,5 +1080,2244 @@
     "createdAt": "2026-09-13_02-01",
     "lastInteraction": "Importado da aba [Leads]",
     "updatedAt": "2026-11-16T17:15:17.721Z"
+  },
+  {
+    "id": "lead_1795627463069_szr99",
+    "name": "COMET Systems",
+    "company": "barão",
+    "whatsapp": "(11) 11111-1111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Novo Lead",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 100,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min",
+      "lista-espera",
+      "evento-teste",
+      "agendado",
+      "aluno-nota-10",
+      "Agenda Pública"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Compromete o crescimento da empresa",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Estamos comparando alternativas de mercado",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Compromete o crescimento da empresa",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Estamos comparando alternativas de mercado",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T17:24:23.069Z",
+    "lastInteraction": "Agendou Aluno Nota 10 (28/11/2026 09:00)",
+    "activities": [
+      {
+        "id": "act_agd_1795648084776",
+        "type": "meeting",
+        "description": "AGENDAMENTO PÚBLICO CONFIRMADO (PROT-202611-XJ9A)\nEvento: Aluno Nota 10\nData: 28/11/2026 às 09:00 - 09:30\nLocal: barão",
+        "timestamp": "2026-11-25T23:08:04.774Z",
+        "user": "Sem responsável",
+        "metadata": {
+          "calendarEvent": {
+            "googleEventId": "PROT-202611-XJ9A",
+            "title": "Aluno Nota 10 (PROT-202611-XJ9A)",
+            "description": "Local informado: barão",
+            "date": "2026-11-28",
+            "startTime": "09:00",
+            "endTime": "09:30",
+            "location": "barão",
+            "attendees": [
+              "sistemascomet@gmail.com"
+            ],
+            "calendarLink": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Aluno+Nota+10+%E2%80%94+COMET+Systems&dates=20261128T090000%2F20261128T093000&details=Protocolo%3A+PROT-202611-XJ9A%0AParticipante%3A+COMET+Systems%0AWhatsApp%3A+%2811%29+11111-1111%0A&location=bar%C3%A3o",
+            "responsibleUser": "Sem responsável",
+            "createdAt": "2026-11-25T23:08:04.774Z",
+            "status": "confirmed",
+            "protocolo": "PROT-202611-XJ9A",
+            "bookingId": "AGD-202611-U486"
+          }
+        }
+      },
+      {
+        "id": "act_wl_1795638535554",
+        "type": "note",
+        "description": "LISTA DE ESPERA (evento teste): Solicitou aviso quando abrir vaga.",
+        "timestamp": "2026-11-25T20:28:55.553Z",
+        "user": "Sem responsável"
+      },
+      {
+        "id": "act_1795627463069",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 100/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T17:24:23.069Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 100,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Compromete o crescimento da empresa",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Estamos comparando alternativas de mercado",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T17:24:23.069Z",
+      "calendarEvent": {
+        "googleEventId": "PROT-202611-XJ9A",
+        "title": "Aluno Nota 10 (PROT-202611-XJ9A)",
+        "description": "Local informado: barão",
+        "date": "2026-11-28",
+        "startTime": "09:00",
+        "endTime": "09:30",
+        "location": "barão",
+        "attendees": [
+          "sistemascomet@gmail.com"
+        ],
+        "calendarLink": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Aluno+Nota+10+%E2%80%94+COMET+Systems&dates=20261128T090000%2F20261128T093000&details=Protocolo%3A+PROT-202611-XJ9A%0AParticipante%3A+COMET+Systems%0AWhatsApp%3A+%2811%29+11111-1111%0A&location=bar%C3%A3o",
+        "responsibleUser": "Sem responsável",
+        "createdAt": "2026-11-25T23:08:04.774Z",
+        "status": "confirmed",
+        "protocolo": "PROT-202611-XJ9A",
+        "bookingId": "AGD-202611-U486"
+      },
+      "lastBookingProtocol": "PROT-202611-XJ9A"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z",
+    "owner": "Sem responsável"
+  },
+  {
+    "id": "lead_1795627454424_ui0fu",
+    "name": "COMET Systems",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(11) 11111-1111",
+    "company": "COMET Systems (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "source": "whatsapp",
+    "landing_page": "Aceleração CRO • Curso Online & Formação Profissional",
+    "product_id": null,
+    "value": 0,
+    "pipeline_id": "bdr",
+    "stage": "Leads",
+    "classification": "Lead",
+    "temperature": "Quente",
+    "type": "Recorrente",
+    "tags": [
+      "whatsapp",
+      "inbound",
+      "comet-lp",
+      "recorrência"
+    ],
+    "lpVisits": 2,
+    "isCustomer": false,
+    "isRecurring": true,
+    "isTest": false,
+    "metadata": {
+      "capturedVia": "COMET High-Conversion Engine",
+      "source": "whatsapp",
+      "utm": {
+        "utm_source": "WhatsApp",
+        "src": "whatsapp"
+      },
+      "answers": {},
+      "tracking": {
+        "src": "whatsapp",
+        "utm_source": "WhatsApp",
+        "capturedAt": "2026-11-25T17:23:58.627Z",
+        "referrer": ""
+      },
+      "pageTitle": "Aceleração CRO • Curso Online & Formação Profissional",
+      "capturedAt": "2026-11-25T17:24:14.064Z",
+      "lpVisits": 2,
+      "isCustomer": false,
+      "isRecurring": true,
+      "isTest": false
+    },
+    "createdAt": "2026-11-25T17:24:14.424Z",
+    "activities": [
+      {
+        "id": "act_1795627454424",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Aceleração CRO • Curso Online & Formação Profissional",
+        "timestamp": "2026-11-25T17:24:14.424Z"
+      }
+    ],
+    "score": 85,
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578902294_ldfok",
+    "name": "Prof. Tiago Rezeck",
+    "company": "Pessoa Física",
+    "whatsapp": "(11) 11111-1111",
+    "email": "proftiagorezeck@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min",
+      "lista-espera",
+      "evento-teste"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:55:02.294Z",
+    "lastInteraction": "Entrou na lista de espera de evento teste",
+    "activities": [
+      {
+        "id": "act_wl_1795584409122",
+        "type": "note",
+        "description": "LISTA DE ESPERA (evento teste): Solicitou aviso quando abrir vaga.",
+        "timestamp": "2026-11-25T05:26:49.120Z",
+        "user": "Sem responsável"
+      },
+      {
+        "id": "act_1795578902294",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:55:02.294Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:55:02.294Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578894873_mxvhm",
+    "name": "Prof. Tiago Rezeck",
+    "email": "proftiagorezeck@gmail.com",
+    "whatsapp": "(11) 11111-1111",
+    "company": "Prof. Tiago Rezeck (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "source": "evento",
+    "landing_page": "Aceleração CRO • Curso Online & Formação Profissional",
+    "product_id": null,
+    "value": 0,
+    "pipeline_id": "bdr",
+    "stage": "Leads",
+    "classification": "Lead",
+    "temperature": "Quente",
+    "type": "Recorrente",
+    "tags": [
+      "evento",
+      "inbound",
+      "comet-lp",
+      "recorrência"
+    ],
+    "lpVisits": 2,
+    "isCustomer": false,
+    "isRecurring": true,
+    "isTest": false,
+    "metadata": {
+      "capturedVia": "COMET High-Conversion Engine",
+      "source": "evento",
+      "utm": {
+        "utm_source": "Evento",
+        "src": "evento"
+      },
+      "answers": {},
+      "tracking": {
+        "src": "evento",
+        "utm_source": "Evento",
+        "capturedAt": "2026-11-25T03:54:31.041Z",
+        "referrer": ""
+      },
+      "pageTitle": "Aceleração CRO • Curso Online & Formação Profissional",
+      "capturedAt": "2026-11-25T03:54:54.548Z",
+      "lpVisits": 2,
+      "isCustomer": false,
+      "isRecurring": true,
+      "isTest": false
+    },
+    "createdAt": "2026-11-25T03:54:54.873Z",
+    "activities": [
+      {
+        "id": "act_1795578894873",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Aceleração CRO • Curso Online & Formação Profissional",
+        "timestamp": "2026-11-25T03:54:54.873Z"
+      }
+    ],
+    "score": 85,
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578519377_p9ehw",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "11111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Leads",
+    "classification": "Lead",
+    "temperature": "Morno",
+    "minScore": "Nenhum",
+    "minQualification": {
+      "m": 0,
+      "i": 0,
+      "n": 0,
+      "total": 0,
+      "classification": "MORNO"
+    },
+    "score": 65,
+    "value": 3500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-morno",
+      "min-nenhum",
+      "lista-espera",
+      "evento-teste"
+    ],
+    "quizAnswers": {
+      "min-q1": "Não enfrento esse problema",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, tenho interesse em conhecer",
+      "min-q5": "Sem pressa (longo prazo)",
+      "min-q6": "Depende da proposta comercial"
+    },
+    "surveyAnswers": {
+      "min-q1": "Não enfrento esse problema",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, tenho interesse em conhecer",
+      "min-q5": "Sem pressa (longo prazo)",
+      "min-q6": "Depende da proposta comercial"
+    },
+    "createdAt": "2026-11-25T03:48:39.377Z",
+    "lastInteraction": "Entrou na lista de espera de evento teste",
+    "activities": [
+      {
+        "id": "act_wl_1795582335304",
+        "type": "note",
+        "description": "LISTA DE ESPERA (evento teste): Solicitou aviso quando abrir vaga.",
+        "timestamp": "2026-11-25T04:52:15.302Z",
+        "user": "Sem responsável"
+      },
+      {
+        "id": "act_1795578519377",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 65/100, Classificação MIN: Nenhum (Morno)",
+        "timestamp": "2026-11-25T03:48:39.377Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 65,
+      "surveyTemperature": "Morno",
+      "minQualification": {
+        "m": 0,
+        "i": 0,
+        "n": 0,
+        "total": 0,
+        "classification": "MORNO"
+      },
+      "minScore": "Nenhum",
+      "answers": {
+        "min-q1": "Não enfrento esse problema",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, tenho interesse em conhecer",
+        "min-q5": "Sem pressa (longo prazo)",
+        "min-q6": "Depende da proposta comercial"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:48:39.377Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578457484_xha9c",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:37.484Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578457484",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:37.484Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:37.485Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578457287_20kf3",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:37.287Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578457287",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:37.287Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:37.287Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578457087_fxsjn",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:37.087Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578457087",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:37.087Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:37.087Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578454335_asjh5",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:34.335Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578454335",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:34.335Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:34.335Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578454089_19cmo",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:34.089Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578454089",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:34.089Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:34.089Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578452385_fe6jr",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:32.385Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578452385",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:32.385Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:32.385Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578452193_9tr31",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:32.193Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578452193",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:32.193Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:32.193Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578443443_6s7pg",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:23.443Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578443443",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:23.443Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:23.443Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578443243_bvy4v",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:23.243Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578443243",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:23.243Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:23.243Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578443057_ir1c0",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:23.057Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578443057",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:23.057Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:23.057Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578441321_t6ywo",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:21.321Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578441321",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:21.321Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:21.321Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578439069_kbhus",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:19.069Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578439069",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:19.069Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:19.069Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578438028_kuxix",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:18.028Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578438028",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:18.028Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:18.028Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578437215_joir8",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 96,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Depende da proposta comercial"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Depende da proposta comercial"
+    },
+    "createdAt": "2026-11-25T03:47:17.215Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 96/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578437215",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 96/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:17.215Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 96,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Depende da proposta comercial"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:17.215Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578436579_2tndx",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:16.579Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578436579",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:16.579Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:16.579Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795578435812_2aif2",
+    "name": "COMET Systems",
+    "company": "Pessoa Física",
+    "whatsapp": "111111111111111111",
+    "email": "sistemascomet@gmail.com",
+    "source": "Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade)",
+    "landing_page": "Landing Page",
+    "landingPage": "Landing Page",
+    "landingPageId": "",
+    "stage": "Oportunidade",
+    "classification": "Lead Qualificado",
+    "temperature": "Quente",
+    "minScore": "MIN",
+    "minQualification": {
+      "m": 1,
+      "i": 1,
+      "n": 1,
+      "total": 3,
+      "classification": "QUENTE"
+    },
+    "score": 98,
+    "value": 8500,
+    "type": "Inbound",
+    "tags": [
+      "pesquisa",
+      "inbound",
+      "comet-lp",
+      "temp-quente",
+      "min-min"
+    ],
+    "quizAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "surveyAnswers": {
+      "min-q1": "Sim, frequentemente",
+      "min-q2": "Perco dinheiro e oportunidades",
+      "min-q3": "Sim, com alta prioridade para fechar",
+      "min-q4": "Usamos outra solução e queremos trocar",
+      "min-q5": "Imediato (esta semana)",
+      "min-q6": "Sim, prontos para investir"
+    },
+    "createdAt": "2026-11-25T03:47:15.812Z",
+    "lastInteraction": "Respondeu Pesquisa: Qualificação MIN (Momento, Interesse, Necessidade) (Score: 98/100, MIN: MIN)",
+    "activities": [
+      {
+        "id": "act_1795578435812",
+        "type": "survey_completion",
+        "description": "Pesquisa \"Qualificação MIN (Momento, Interesse, Necessidade)\" concluída - Score 98/100, Classificação MIN: MIN (Quente)",
+        "timestamp": "2026-11-25T03:47:15.812Z"
+      }
+    ],
+    "metadata": {
+      "surveyId": "qualificacao-min-1min",
+      "surveyName": "Qualificação MIN (Momento, Interesse, Necessidade)",
+      "surveyScore": 98,
+      "surveyTemperature": "Quente",
+      "minQualification": {
+        "m": 1,
+        "i": 1,
+        "n": 1,
+        "total": 3,
+        "classification": "QUENTE"
+      },
+      "minScore": "MIN",
+      "answers": {
+        "min-q1": "Sim, frequentemente",
+        "min-q2": "Perco dinheiro e oportunidades",
+        "min-q3": "Sim, com alta prioridade para fechar",
+        "min-q4": "Usamos outra solução e queremos trocar",
+        "min-q5": "Imediato (esta semana)",
+        "min-q6": "Sim, prontos para investir"
+      },
+      "landingPageId": "",
+      "landingPageTitle": "",
+      "utm": {},
+      "capturedAt": "2026-11-25T03:47:15.813Z"
+    },
+    "pageTitle": "Landing Page",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795402012580_rthdz",
+    "name": "COMET Systems",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(22) 22222-2222",
+    "company": "COMET Systems (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "source": "direct",
+    "landing_page": "Aceleração CRO • Curso Online & Formação Profissional",
+    "product_id": null,
+    "value": 0,
+    "pipeline_id": "bdr",
+    "stage": "Lead/Oportunidade Recebida",
+    "classification": "Lead",
+    "temperature": "Quente",
+    "type": "Recorrente",
+    "tags": [
+      "direct",
+      "inbound",
+      "comet-lp",
+      "recorrência"
+    ],
+    "lpVisits": 2,
+    "isCustomer": false,
+    "isRecurring": true,
+    "isTest": false,
+    "metadata": {
+      "capturedVia": "COMET High-Conversion Engine",
+      "source": "direct",
+      "utm": {},
+      "answers": {},
+      "tracking": null,
+      "pageTitle": "Aceleração CRO • Curso Online & Formação Profissional",
+      "capturedAt": "2026-11-23T02:46:52.246Z",
+      "lpVisits": 2,
+      "isCustomer": false,
+      "isRecurring": true,
+      "isTest": false
+    },
+    "createdAt": "2026-11-23T02:46:52.580Z",
+    "activities": [
+      {
+        "id": "act_1795402061789_tv1h",
+        "type": "pipeline_transfer",
+        "description": "Lead puxado da base para [SDR — QUALIFICAÇÃO & AGENDAMENTO] (Lead/Oportunidade Recebida). Responsável: Tiago Rezeck. Obs: Lead puxado da base de leads por Tiago Rezeck.",
+        "timestamp": "2026-11-23T02:47:41.789Z",
+        "user": "Tiago Rezeck",
+        "metadata": {
+          "fromPipeline": "prospection",
+          "toPipeline": "sdr",
+          "fromStage": "Leads",
+          "toStage": "Lead/Oportunidade Recebida",
+          "fromOwner": "Inbound LP",
+          "toOwner": "Tiago Rezeck",
+          "action": "CLAIM_LEAD",
+          "note": "Lead puxado da base de leads por Tiago Rezeck."
+        }
+      },
+      {
+        "id": "act_1795402012580",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Aceleração CRO • Curso Online & Formação Profissional",
+        "timestamp": "2026-11-23T02:46:52.580Z"
+      },
+      {
+        "id": "act_1795401996615",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Aceleração CRO • Curso Online & Formação Profissional",
+        "timestamp": "2026-11-23T02:46:36.615Z"
+      }
+    ],
+    "pipelineId": "sdr",
+    "owner": "Tiago Rezeck",
+    "previousPipelineId": "prospection",
+    "previousStage": "Leads",
+    "previousOwner": "Inbound LP",
+    "dataMovimentacao": "2026-11-23T02:47:41.789Z",
+    "dataTransferencia": "2026-11-23T02:47:41.789Z",
+    "score": 85,
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795401996615_3s60o",
+    "name": "COMET Systems",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(22) 22222-2222",
+    "company": "COMET Systems (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "source": "direct",
+    "landing_page": "Aceleração CRO • Curso Online & Formação Profissional",
+    "product_id": null,
+    "value": 0,
+    "pipeline_id": "bdr",
+    "stage": "Leads",
+    "classification": "Lead",
+    "temperature": "Quente",
+    "type": "Inbound",
+    "tags": [
+      "direct",
+      "inbound",
+      "comet-lp"
+    ],
+    "lpVisits": 1,
+    "isCustomer": false,
+    "isRecurring": false,
+    "isTest": false,
+    "metadata": {
+      "capturedVia": "COMET High-Conversion Engine",
+      "source": "direct",
+      "utm": {},
+      "answers": {},
+      "tracking": null,
+      "pageTitle": "Aceleração CRO • Curso Online & Formação Profissional",
+      "capturedAt": "2026-11-23T02:46:36.200Z",
+      "lpVisits": 1,
+      "isCustomer": false,
+      "isRecurring": false,
+      "isTest": false
+    },
+    "createdAt": "2026-11-23T02:46:36.615Z",
+    "activities": [
+      {
+        "id": "act_1795401996615",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Aceleração CRO • Curso Online & Formação Profissional",
+        "timestamp": "2026-11-23T02:46:36.615Z"
+      }
+    ],
+    "score": 85,
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795393421685_2um7h",
+    "name": "Gisele de Oliveira Rezeck",
+    "email": "giselerezeck@gmail.com",
+    "whatsapp": "(24) 99920-2070",
+    "company": "Gisele de Oliveira Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "source": "whatsapp",
+    "landing_page": "Mentoria High-Ticket & CRO",
+    "product_id": null,
+    "value": 0,
+    "pipeline_id": "bdr",
+    "stage": "Lead/Oportunidade Recebida",
+    "classification": "Lead",
+    "temperature": "Quente",
+    "type": "Inbound",
+    "tags": [
+      "whatsapp",
+      "inbound",
+      "comet-lp"
+    ],
+    "lpVisits": 1,
+    "isCustomer": false,
+    "isRecurring": false,
+    "isTest": false,
+    "metadata": {
+      "capturedVia": "COMET High-Conversion Engine",
+      "source": "whatsapp",
+      "utm": {
+        "utm_source": "WhatsApp",
+        "src": "whatsapp"
+      },
+      "answers": {},
+      "tracking": {
+        "src": "whatsapp",
+        "utm_source": "WhatsApp",
+        "capturedAt": "2026-11-23T00:21:43.911Z",
+        "referrer": ""
+      },
+      "pageTitle": "Mentoria High-Ticket & CRO",
+      "capturedAt": "2026-11-23T00:23:41.257Z",
+      "lpVisits": 1,
+      "isCustomer": false,
+      "isRecurring": false,
+      "isTest": false
+    },
+    "createdAt": "2026-11-23T00:23:41.685Z",
+    "activities": [
+      {
+        "id": "qual-1795579541731",
+        "type": "note",
+        "description": "[COPILOTO] Sessão Finalizada: Abordagem Inicial (Cold Call)\n\n\nQUALIFICAÇÃO EXECUTIVA: Abordagem Inicial (Cold Call)\n----------------------------------------\nCHECKLIST: 0/4 concluídos.\nRESPOSTAS:\n- Você é o responsável pela área?: N/A\n- Quem toma as decisões?: N/A\n- Quantos colaboradores possui?: N/A\n- Há quanto tempo a empresa atua?: N/A\n- Qual principal atividade da empresa?: N/A\n- Vocês já utilizam algum sistema ou consultoria?: N/A\n- Existe algum projeto de melhoria atualmente?: N/A\n- Posso encaminhar algumas informações?: N/A\n- Qual o melhor canal para contato?: N/A\n- Qual o melhor horário?: N/A\n\nFLAGS DETECTADAS:\n- Green: Nenhuma\n- Red: Nenhuma\n\nNOTAS ADICIONAIS:\nSem observações.\n    ",
+        "timestamp": "25/11/2026, 01:05:41",
+        "user": "Copiloto de Vendas"
+      },
+      {
+        "id": "act_1795396509226_7x3i",
+        "type": "pipeline_transfer",
+        "description": "Lead puxado da base para [SDR — QUALIFICAÇÃO & AGENDAMENTO] (Lead/Oportunidade Recebida). Responsável: Tiago Rezeck. Obs: Lead puxado da base de leads por Tiago Rezeck.",
+        "timestamp": "2026-11-23T01:15:09.226Z",
+        "user": "Tiago Rezeck",
+        "metadata": {
+          "fromPipeline": "prospection",
+          "toPipeline": "sdr",
+          "fromStage": "Leads",
+          "toStage": "Lead/Oportunidade Recebida",
+          "fromOwner": "Inbound LP",
+          "toOwner": "Tiago Rezeck",
+          "action": "CLAIM_LEAD",
+          "note": "Lead puxado da base de leads por Tiago Rezeck."
+        }
+      },
+      {
+        "id": "act_1795393421685",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Mentoria High-Ticket & CRO",
+        "timestamp": "2026-11-23T00:23:41.685Z"
+      }
+    ],
+    "pipelineId": "Reunião Agendada",
+    "owner": "sales",
+    "previousPipelineId": "sdr",
+    "previousStage": "Lead/Oportunidade Recebida",
+    "previousOwner": "Tiago Rezeck",
+    "dataMovimentacao": "2026-11-25T23:11:28.683Z",
+    "dataTransferencia": "2026-11-25T23:11:28.683Z",
+    "score": 85,
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_1795208626342_aaiar",
+    "name": "COMET Consultoria, Mentoria e Treinamento",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "company": "COMET Consultoria, Mentoria e Treinamento (LP: Mentoria High-Ticket & CRO)",
+    "source": "direto",
+    "landing_page": "Mentoria High-Ticket & CRO",
+    "product_id": null,
+    "value": 0,
+    "pipeline_id": "bdr",
+    "stage": "Leads",
+    "classification": "Lead",
+    "temperature": "Quente",
+    "type": "Recorrente",
+    "tags": [
+      "direto",
+      "inbound",
+      "comet-lp",
+      "recorrência"
+    ],
+    "lpVisits": 2,
+    "isCustomer": false,
+    "isRecurring": true,
+    "isTest": false,
+    "metadata": {
+      "capturedVia": "COMET High-Conversion Engine",
+      "source": "direto",
+      "utm": {
+        "utm_source": "Direto",
+        "src": "direto"
+      },
+      "answers": {},
+      "tracking": {
+        "src": "direto",
+        "utm_source": "Direto",
+        "capturedAt": "2026-11-20T21:03:05.611Z",
+        "referrer": ""
+      },
+      "pageTitle": "Mentoria High-Ticket & CRO",
+      "capturedAt": "2026-11-20T21:03:45.983Z",
+      "lpVisits": 2,
+      "isCustomer": false,
+      "isRecurring": true,
+      "isTest": false
+    },
+    "createdAt": "2026-11-20T21:03:46.342Z",
+    "activities": [
+      {
+        "id": "act_1795208626342",
+        "type": "conversion",
+        "description": "Capturado via Landing Page Mentoria High-Ticket & CRO",
+        "timestamp": "2026-11-20T21:03:46.342Z"
+      }
+    ],
+    "score": 85,
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795208469044_ywmy",
+    "name": "Prof. Tiago Rezeck",
+    "company": "Prof. Tiago Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "proftiagorezeck@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direto",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "20-11-2026-18:01",
+    "lastInteraction": "Capturado via LP: Mentoria High-Ticket & CRO",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795208629151_tqgh",
+    "name": "COMET Consultoria, Mentoria e Treinamento",
+    "company": "COMET Consultoria, Mentoria e Treinamento (LP: Mentoria High-Ticket & CRO)",
+    "email": "institutocomet@gmail.com",
+    "whatsapp": "(24) 99938-2195",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direto",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "20-11-2026-18:03",
+    "lastInteraction": "Capturado via LP: Mentoria High-Ticket & CRO",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795393424794_7t62",
+    "name": "Gisele de Oliveira Rezeck",
+    "company": "Gisele de Oliveira Rezeck (LP: Mentoria High-Ticket & CRO)",
+    "email": "giselerezeck@gmail.com",
+    "whatsapp": "(24) 99920-2070",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Mentoria High-Ticket & CRO"
+    ],
+    "createdAt": "22-11-2026-21:23",
+    "lastInteraction": "Capturado via LP: Mentoria High-Ticket & CRO",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795401998398_nqtn",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(22) 22222-2222",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Aceleração CRO • Curso Online & Formação Profissional"
+    ],
+    "createdAt": "22-11-2026-23:46",
+    "lastInteraction": "Capturado via LP: Aceleração CRO • Curso Online & Formação Profissional",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795402014375_6dnt",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(22) 22222-2222",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "direct",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Aceleração CRO • Curso Online & Formação Profissional"
+    ],
+    "createdAt": "22-11-2026-23:46",
+    "lastInteraction": "Capturado via LP: Aceleração CRO • Curso Online & Formação Profissional",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795578896815_cbex",
+    "name": "Prof. Tiago Rezeck",
+    "company": "Prof. Tiago Rezeck (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "email": "proftiagorezeck@gmail.com",
+    "whatsapp": "(11) 11111-1111",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "evento",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Aceleração CRO • Curso Online & Formação Profissional"
+    ],
+    "createdAt": "25-11-2026-00:54",
+    "lastInteraction": "Capturado via LP: Aceleração CRO • Curso Online & Formação Profissional",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
+  },
+  {
+    "id": "lead_lp_1795627457829_jfmh",
+    "name": "COMET Systems",
+    "company": "COMET Systems (LP: Aceleração CRO • Curso Online & Formação Profissional)",
+    "email": "sistemascomet@gmail.com",
+    "whatsapp": "(11) 11111-1111",
+    "value": 0,
+    "stage": "Leads",
+    "owner": "",
+    "temperature": "Quente",
+    "source": "whatsapp",
+    "score": 85,
+    "tags": [
+      "LP",
+      "Aceleração CRO • Curso Online & Formação Profissional"
+    ],
+    "createdAt": "25-11-2026-14:24",
+    "lastInteraction": "Capturado via LP: Aceleração CRO • Curso Online & Formação Profissional",
+    "updatedAt": "2026-11-25T23:15:06.579Z"
   }
 ]

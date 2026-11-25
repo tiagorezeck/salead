@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { 
   X, Plus, Trash2, ArrowUp, ArrowDown, Settings2, Layers, Clock, 
   CheckCircle2, AlertTriangle, UserCheck, Shield, ChevronRight,
@@ -98,6 +98,10 @@ export function PipelineManagerModal({
   }, [pipelines, selectedPipeId]);
 
   const [localStages, setLocalStages] = useState<PipelineStage[]>([]);
+  const [localEnabledRoles, setLocalEnabledRoles] = useState<string[]>([]);
+  const [isSavingStages, setIsSavingStages] = useState(false);
+  const [togglingRoleKey, setTogglingRoleKey] = useState<string | null>(null);
+  const [confirmDeletePipeId, setConfirmDeletePipeId] = useState<string | null>(null);
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
   const [newStageType, setNewStageType] = useState<StageType>('NORMAL');
@@ -115,14 +119,50 @@ export function PipelineManagerModal({
   const [batchTargetOwner, setBatchTargetOwner] = useState<string>("");
   const [batchNote, setBatchNote] = useState<string>("");
 
-  // Sincroniza localStages quando o pipeline selecionado muda
-  useMemo(() => {
-    if (currentPipeline && currentPipeline.stages) {
-      setLocalStages([...currentPipeline.stages]);
+  // Sincroniza selectedPipeId quando activePipelineId muda externamente
+  useEffect(() => {
+    if (isOpen && activePipelineId) {
+      setSelectedPipeId(activePipelineId);
     }
-  }, [currentPipeline]);
+  }, [isOpen, activePipelineId]);
+
+  // Sincroniza localStages e localEnabledRoles apenas quando o pipeline selecionado ou abertura muda
+  useEffect(() => {
+    if (isOpen && currentPipeline) {
+      setLocalStages(Array.isArray(currentPipeline.stages) ? [...currentPipeline.stages] : []);
+      setLocalEnabledRoles(getEffectiveEnabledRolesForPipeline(currentPipeline));
+    }
+  }, [isOpen, currentPipeline?.id]);
 
   if (!isOpen) return null;
+
+  // Toggle de cargo habilitado com persistência imediata na nuvem
+  const handleToggleRoleOnPipeline = async (pipe: Pipeline, roleName: string, currentList?: string[]) => {
+    const baseList = currentList || getEffectiveEnabledRolesForPipeline(pipe);
+    const isOn = baseList.includes(roleName);
+    const nextRoles = isOn
+      ? baseList.filter((r) => r !== roleName)
+      : [...baseList, roleName];
+
+    if (pipe.id === currentPipeline?.id) {
+      setLocalEnabledRoles(nextRoles);
+    }
+
+    const toggleKey = `${pipe.id}:${roleName}`;
+    setTogglingRoleKey(toggleKey);
+    try {
+      await updatePipeline(pipe.id, { enabledRoles: nextRoles });
+      toast.success(
+        isOn
+          ? `Cargo "${roleName}" desabilitado em ${pipe.name}.`
+          : `Cargo "${roleName}" habilitado em ${pipe.name}.`
+      );
+    } catch {
+      toast.error("Não foi possível salvar os cargos habilitados na nuvem.");
+    } finally {
+      setTogglingRoleKey(null);
+    }
+  };
 
   // Reordenar etapas
   const handleMoveStage = (index: number, direction: 'up' | 'down') => {
@@ -134,15 +174,19 @@ export function PipelineManagerModal({
     setLocalStages(updated);
   };
 
-  // Salvar etapas modificadas
+  // Salvar etapas e cargos modificados
   const handleSaveStages = async () => {
     if (!currentPipeline) return;
     if (localStages.length === 0) {
       toast.error("O pipeline precisa ter pelo menos uma etapa.");
       return;
     }
-    await savePipelineStages(currentPipeline.id, localStages);
-    toast.success("Etapas e SLAs do pipeline atualizados!");
+    setIsSavingStages(true);
+    try {
+      await savePipelineStages(currentPipeline.id, localStages, localEnabledRoles);
+    } finally {
+      setIsSavingStages(false);
+    }
   };
 
   // Adicionar nova etapa
@@ -354,20 +398,16 @@ export function PipelineManagerModal({
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {AVAILABLE_ROLES.filter(r => r !== "Admin Geral" && r !== "Head of Sales").map((roleName) => {
-                      const enabledList = getEffectiveEnabledRolesForPipeline(currentPipeline);
-                      const isOn = enabledList.includes(roleName);
+                      const isOn = localEnabledRoles.includes(roleName);
+                      const isBusy = togglingRoleKey === `${currentPipeline.id}:${roleName}`;
                       return (
                         <button
                           key={roleName}
                           type="button"
-                          onClick={() => {
-                            const nextRoles = isOn
-                              ? enabledList.filter(r => r !== roleName)
-                              : [...enabledList, roleName];
-                            updatePipeline(currentPipeline.id, { enabledRoles: nextRoles });
-                          }}
+                          disabled={isBusy}
+                          onClick={() => handleToggleRoleOnPipeline(currentPipeline, roleName, localEnabledRoles)}
                           className={cn(
-                            "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer",
+                            "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer disabled:opacity-70",
                             isOn
                               ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
                               : "bg-background text-muted-foreground border-border opacity-60 hover:opacity-100"
@@ -483,9 +523,10 @@ export function PipelineManagerModal({
                 </button>
                 <button
                   onClick={handleSaveStages}
-                  className="px-5 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+                  disabled={isSavingStages}
+                  className="px-5 py-2 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
                 >
-                  Salvar Alterações de Etapas
+                  {isSavingStages ? "Salvando..." : "Salvar Alterações"}
                 </button>
               </div>
 
@@ -725,20 +766,17 @@ export function PipelineManagerModal({
                         </div>
                         <div className="flex flex-wrap gap-1">
                           {AVAILABLE_ROLES.filter(r => r !== "Admin Geral" && r !== "Head of Sales" && r !== "CX (Customer Experience)").map((roleName) => {
-                            const enabledList = getEffectiveEnabledRolesForPipeline(pipe);
+                            const enabledList = pipe.id === currentPipeline?.id ? localEnabledRoles : getEffectiveEnabledRolesForPipeline(pipe);
                             const isOn = enabledList.includes(roleName);
+                            const isBusy = togglingRoleKey === `${pipe.id}:${roleName}`;
                             return (
                               <button
                                 key={roleName}
                                 type="button"
-                                onClick={() => {
-                                  const nextRoles = isOn
-                                    ? enabledList.filter(r => r !== roleName)
-                                    : [...enabledList, roleName];
-                                  updatePipeline(pipe.id, { enabledRoles: nextRoles });
-                                }}
+                                disabled={isBusy}
+                                onClick={() => handleToggleRoleOnPipeline(pipe, roleName, enabledList)}
                                 className={cn(
-                                  "px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer",
+                                  "px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer disabled:opacity-70",
                                   isOn
                                     ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                                     : "bg-muted/30 text-muted-foreground border-border opacity-55 hover:opacity-100"
@@ -764,17 +802,36 @@ export function PipelineManagerModal({
                         </button>
 
                         {!pipe.is_default && (
-                          <button
-                            onClick={() => {
-                              if (confirm(`Deseja realmente remover o pipeline "${pipe.name}"?`)) {
-                                deletePipeline(pipe.id);
-                              }
-                            }}
-                            title="Excluir pipeline"
-                            className="p-1.5 text-muted-foreground hover:text-rose-500 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          confirmDeletePipeId === pipe.id ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await deletePipeline(pipe.id);
+                                  setConfirmDeletePipeId(null);
+                                }}
+                                className="px-2 py-1 rounded bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                              >
+                                Confirmar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeletePipeId(null)}
+                                className="px-2 py-1 rounded border border-border text-[10px] font-bold text-muted-foreground cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeletePipeId(pipe.id)}
+                              title="Excluir pipeline"
+                              className="p-1.5 text-muted-foreground hover:text-rose-500 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )
                         )}
                       </div>
                     </div>
